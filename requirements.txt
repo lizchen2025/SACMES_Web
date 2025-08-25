@@ -1,36 +1,6 @@
-bidict==0.23.1
-blinker==1.8.2
-Brotli @ file:///C:/b/abs_3d36mno480/croot/brotli-split_1714483178642/work
-certifi @ file:///C:/b/abs_1fw_exq1si/croot/certifi_1725551736618/work/certifi
-charset-normalizer @ file:///croot/charset-normalizer_1721748349566/work
-click==8.1.8
-colorama==0.4.6
-dnspython==2.6.1
-eventlet==0.39.1
-Flask==3.0.3
-Flask-SocketIO==5.5.1
-greenlet==3.1.1
-gunicorn==23.0.0
-h11==0.16.0
-idna @ file:///C:/b/abs_aad84bnnw5/croot/idna_1714398896795/work
-importlib_metadata==8.5.0
-itsdangerous==2.2.0
-Jinja2==3.1.6
-MarkupSafe==2.1.5
-numpy==1.24.4
-packaging==25.0
-PySocks @ file:///C:/ci/pysocks_1605287845585/work
-python-engineio==4.12.2
-python-socketio==5.13.0
-PyYAML @ file:///C:/b/abs_14xkfs39bx/croot/pyyaml_1728657968772/work
-requests @ file:///C:/b/abs_9frifg92q2/croot/requests_1721410901096/work
-scipy==1.10.1
-simple-websocket==1.1.0
-urllib3 @ file:///C:/b/abs_9a_f8h_bn2/croot/urllib3_1727769836930/work
-waitress==3.0.0
-watchdog @ file:///C:/b/abs_b3l_3s276z/croot/watchdog_1717166538403/work
-websocket-client==1.8.0
-Werkzeug==3.0.6
-win-inet-pton @ file:///C:/ci/win_inet_pton_1605306167264/work
-wsproto==1.2.0
-zipp==3.20.2
+Flask
+Flask-SocketIO
+eventlet
+numpy
+scipy
+gunicorn
