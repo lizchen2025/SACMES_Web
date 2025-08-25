@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SACMES Web Frontend</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            padding: 1rem;
+            box-sizing: border-box;
+            background-color: #f3f4f6; /* Light gray background */
+        }
+        .main-content-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            width: 100%;
+            max-width: 1400px;
+            margin-top: 1rem;
+            margin-bottom: 1rem;
+        }
+        .screen-card {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #welcomeScreen {
+            max-width: 600px;
+        }
+
+        .hover-highlight:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transform: translateY(-2px);
+        }
+        .file-list-container {
+            flex-grow: 1;
+            max-height: calc(100vh - 300px);
+            min-height: 250px;
+        }
+        .file-list-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .file-list-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .file-list-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        .file-list-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        .input-highlight {
+            background-color: #fffbe6;
+            transition: background-color 0.3s ease;
+        }
+        .input-highlight.filled {
+            background-color: white;
+        }
+
+        .select-highlight {
+            background-color: #f3f4f6;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%236B7280%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13.2-6.4H18.6c-5%200-9.3%201.8-13.2%206.4-3.9%204.6-5.8%2010.1-5.8%2016.3s1.9%2011.7%205.8%2016.3L132.8%20224.2c3.9%204.6%209.1%206.9%2014.2%206.9s10.3-2.3%2014.2-6.9l118-122.2c3.9-4.6%205.8-10.1%205.8-16.3s-1.9-11.7-5.8-16.3z%22%2F%3E%3C%2Fsvg%3E');
+            background-repeat: no-repeat;
+            background-position: right 0.7em top 50%, 0 0;
+            background-size: 0.65em auto, 100%;
+            padding-right: 2.5em;
+        }
+        .plotly-plot-container {
+            height: 350px;
+            min-height: 250px;
+            width: 100%;
+        }
+        .plotly-trend-plot-container {
+            height: 250px;
+            min-height: 150px;
+            width: 100%;
+        }
+        #connectionStatus {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+            z-index: 1000;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        #connectionStatus.connected {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        #connectionStatus.disconnected {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        #connectionStatus.reconnecting {
+            background-color: #fffbeb;
+            color: #92400e;
+        }
+
+        /* Styles for the Warning Modal */
+        .modal {
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            max-width: 500px;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            text-align: center;
+        }
+        .close-button {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .close-button:hover,
+        .close-button:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        
+        /* --- HT Analysis Styles --- */
+        .ht-analysis-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2rem;
+            width: 100%;
+        }
+        .plates-area-wrapper {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            position: relative;
+            padding: 40px 0;
+            gap: 20px;
+        }
+        .row-labels-container {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding-top: 34px;
+            width: 30px;
+        }
+        .plate-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+        .col-labels-container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            width: 100%;
+        }
+        .plate-container-8x3 {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            gap: 4px;
+            width: 120px;
+        }
+        .plate-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            background-color: #1f2937;
+            border-radius: 4px;
+            height: 30px;
+        }
+        .row-labels-container .plate-label {
+             flex-grow: 1;
+        }
+        .well {
+            aspect-ratio: 1 / 1;
+            border: 1px solid #d1d5db;
+            border-radius: 50%;
+            transition: transform 0.2s;
+            cursor: pointer;
+        }
+        #rowLabels .plate-label {
+            height: calc((120px - 8px) / 3);
+        }
+        .well:hover {
+            transform: scale(1.1);
+            border-color: #3b82f6;
+        }
+        .well.alpha { background-color: #fef3c7; }
+        .well.beta { background-color: #dbeafe; }
+        .well.gamma { background-color: #fee2e2; }
+        .well.delta { background-color: #d1fae5; }
+
+        .delay-input {
+            background-color: #fef9c3;
+            border: 1px solid #facc15;
+            color: #713f12;
+            text-align: center;
+            font-weight: bold;
+            border-radius: 4px;
+            padding: 4px 0;
+            position: absolute;
+            width: 60px;
+            z-index: 10;
+            top: 0;
+        }
+        .delay-input::placeholder {
+            color: #a16207;
+        }
+        #delay-beta { left: calc(30px + 20px + 120px + 10px); transform: translateX(-50%); }
+        #delay-gamma { left: calc(30px + 20px + 120px + 20px + 120px + 10px); transform: translateX(-50%); }
+        #delay-delta { left: calc(30px + 20px + 120px + 20px + 120px + 20px + 120px + 10px); transform: translateX(-50%); }
+
+        .accordion-header {
+            cursor: pointer;
+            padding: 1rem;
+            width: 100%;
+            text-align: left;
+            border: none;
+            outline: none;
+            transition: background-color 0.3s ease;
+            font-weight: bold;
+            font-size: 1.1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .accordion-header::after {
+            content: '\\25BC';
+            font-size: 0.8rem;
+            transition: transform 0.3s ease;
+        }
+        .accordion-header.active::after {
+            transform: rotate(180deg);
+        }
+        .accordion-content {
+            padding: 0 1rem;
+            background-color: white;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            border-left: 1px solid #e5e7eb;
+            border-right: 1px solid #e5e7eb;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .accordion-content-inner {
+             padding: 1.5rem;
+        }
+        .bg-alpha { background-color: #fef3c7; }
+        .bg-beta { background-color: #dbeafe; }
+        .bg-gamma { background-color: #fee2e2; }
+        .bg-delta { background-color: #d1fae5; }
+        
+        #annotationTableContainer {
+            width: 100%;
+            max-width: 800px;
+            margin-top: 1.5rem;
+        }
+        #annotationTable th, #annotationTable td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        #annotationTable th {
+            background-color: #f9fafb;
+        }
+    </style>
+    <!-- Plotly.js CDN -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <!-- Socket.IO Client CDN -->
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+</head>
+<body class="bg-gray-100">
+
+    <!-- Connection Status Indicator -->
+    <div id="connectionStatus" class="disconnected">
+        Disconnected
+    </div>
+
+    <!-- Main Content Container -->
+    <div class="main-content-container">
+
+        <!-- Welcome Screen -->
+        <div id="welcomeScreen" class="screen-card text-center mb-6">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">Welcome to SACMES</h1>
+            <p class="text-md text-gray-600 mb-8"> </p>
+
+            <div class="mb-8 flex flex-col items-center">
+                <img src="sacmes_welcome.png" alt="SACMES Welcome Image" class="rounded-lg shadow-md mb-4 max-w-full h-auto">
+                <p class="text-md text-gray-600 mb-8"> </p>
+                <div class="text-left text-lg text-gray-700">
+                    <p class="mb-2">"This is a new and continuously updated implementation of the Software for the Analysis and Continuous Monitoring of Electrochemical Systems (SACMES)"</p>
+                    <p class="mb-2">Original Creator: <strong>Samuel Curtis</strong> (Johns Hopkins Ph.D., 2025)</p>
+                    <p>Current Developer: <strong>Lizhe Chen</strong> (UNC BME Graduate Student)</p>
+                </div>
+                <p class="text-md text-gray-600 mb-8"> </p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <button id="swvBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75">
+                    SWV
+                </button>
+                <button class="bg-gray-400 text-white font-semibold py-4 px-6 rounded-lg shadow-md cursor-not-allowed transition duration-300 ease-in-out hover-highlight">
+                    CV (Coming Soon)
+                </button>
+                <button id="htBtn" class="bg-teal-600 hover:bg-teal-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-opacity-75">
+                    HT Analysis
+                </button>
+                <button class="bg-gray-400 text-white font-semibold py-4 px-6 rounded-lg shadow-md cursor-not-allowed transition duration-300 ease-in-out hover-highlight">
+                    Filter (Coming Soon)
+                </button>
+            </div>
+        </div>
+
+        <!-- SWV Analysis Screen -->
+        <div id="swvAnalysisScreen" class="hidden screen-card mb-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">SWV Analysis</h2>
+                <button id="backToWelcomeFromSWV" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg shadow-sm transition duration-300">
+                    &larr; Back to Welcome
+                </button>
+            </div>
+            
+            <!-- [MODIFIED] Agent Status Display replaces the old folder selection -->
+            <div class="mb-6 p-4 border-l-4 border-blue-500 bg-blue-50 rounded-r-lg">
+                <h4 class="text-md font-bold text-blue-800">Local Agent Status</h4>
+                <p id="agentStatus" class="text-sm text-red-700 mt-1">Waiting for local agent connection... Please run agent.py locally。</p>
+                <p id="folderStatus" class="text-sm text-gray-600 mt-2"></p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
+                <!-- Left & Middle: Analysis Parameters -->
+                <div class="lg:col-span-2 space-y-4 text-left">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-3">Analysis Parameters:</h3>
+
+                    <div>
+                        <label for="fileHandleInput" class="block text-gray-700 text-sm font-bold mb-1">File Handle (e.g., SWV_):</label>
+                        <input type="text" id="fileHandleInput" value="SWV_"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="frequencyInput" class="block text-gray-700 text-sm font-bold mb-1">Frequency (Hz, comma-separated):</label>
+                        <input type="text" id="frequencyInput" value="15,200"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <!-- [MODIFIED] Using the original single "Number of Files" input -->
+                    <div>
+                        <label for="numFilesInput" class="block text-gray-700 text-sm font-bold mb-1">Number of Files (e.g., 379):</label>
+                        <input type="number" id="numFilesInput" value="379" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="numElectrodesInput" class="block text-gray-700 text-sm font-bold mb-1">Number of Electrodes (for averaging):</label>
+                        <input type="number" id="numElectrodesInput" value="1" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div class="border-t pt-4 mt-4">
+                        <h4 class="text-md font-semibold text-gray-700 mb-2">Signal Processing:</h4>
+                         <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="sgWindowInput" class="block text-gray-700 text-sm font-bold mb-1">SG Window:</label>
+                                <input type="number" id="sgWindowInput" value="15" min="3" step="2"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div>
+                                <label for="sgDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">SG Degree:</label>
+                                <input type="number" id="sgDegreeInput" value="1" min="0"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <label for="polyfitDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">Polyfit Degree:</label>
+                            <input type="number" id="polyfitDegreeInput" value="15" min="1"
+                                   class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        </div>
+                        <div class="mt-4">
+                            <label for="cutoffFrequencyInput" class="block text-gray-700 text-sm font-bold mb-1">Cutoff Frequency (Hz):</label>
+                            <input type="number" id="cutoffFrequencyInput" value="50" min="0"
+                                   class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        </div>
+                    </div>
+
+                    <div class="border-t pt-4 mt-4">
+                        <h4 class="text-md font-semibold text-gray-700 mb-2">Trend Correction:</h4>
+                        <div>
+                            <label for="normalizationPointInput" class="block text-gray-700 text-sm font-bold mb-1">Normalization Point (File #):</label>
+                            <input type="number" id="normalizationPointInput" value="1" min="1"
+                                   class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            <div>
+                                <label for="lowFrequencyOffsetInput" class="block text-gray-700 text-sm font-bold mb-1">Low Freq. Offset:</label>
+                                <input type="number" id="lowFrequencyOffsetInput" value="0" step="any"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div>
+                                <label for="lowFrequencySlopeInput" class="block text-gray-700 text-sm font-bold mb-1">Low Freq. Slope:</label>
+                                <input type="number" id="lowFrequencySlopeInput" value="0" step="any"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <label for="injectionPointInput" class="block text-gray-700 text-sm font-bold mb-1">Injection Point (File #, optional):</label>
+                            <input type="number" id="injectionPointInput" placeholder="e.g., 50" min="1"
+                                   class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        </div>
+                    </div>
+                    
+                    <div class="flex justify-end pt-4">
+                        <button id="startAnalysisBtn"
+                                class="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75">
+                            Start Analysis & Sync
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right: Settings -->
+                <div class="lg:col-span-1 space-y-4 text-left">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-3">Settings:</h3>
+
+                    <div class="border-b pb-4">
+                        <h4 class="text-md font-semibold text-gray-700 mb-2">Data Column Settings:</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="voltageColumnInput" class="block text-gray-700 text-sm font-bold mb-1">Potential Column (1-based):</label>
+                                <input type="number" id="voltageColumnInput" value="1" min="1"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div>
+                                <label for="currentColumnInput" class="block text-gray-700 text-sm font-bold mb-1">First Current Column (1-based):</label>
+                                <input type="number" id="currentColumnInput" value="2" min="1"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div class="col-span-2">
+                                <label for="spacingIndexInput" class="block text-gray-700 text-sm font-bold mb-1">Space Between Current Columns:</label>
+                                <input type="number" id="spacingIndexInput" value="3" min="0"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <label for="delimiterInput" class="block text-gray-700 text-sm font-bold mb-1">Delimiter:</label>
+                            <select id="delimiterInput"
+                                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                <option value="1">Space</option>
+                                <option value="2">Tab</option>
+                                <option value="3">Comma</option>
+                            </select>
+                        </div>
+                        <div class="mt-4">
+                            <label for="fileExtensionInput" class="block text-gray-700 text-sm font-bold mb-1">File Extension:</label>
+                            <select id="fileExtensionInput"
+                                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                <option value=".txt">.txt</option>
+                                <option value=".csv">.csv</option>
+                                <option value=".dta">.dta</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="byteLimitInput" class="block text-gray-700 text-sm font-bold mb-1">Byte Limit for Read (bytes):</label>
+                        <input type="number" id="byteLimitInput" value="3000" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="sampleRateInput" class="block text-gray-700 text-sm font-bold mb-1">Sampling Rate (s/file):</label>
+                        <input type="number" id="sampleRateInput" value="20" min="0.1" step="0.1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="analysisIntervalInput" class="block text-gray-700 text-sm font-bold mb-1">Analysis Interval (ms):</label>
+                        <input type="number" id="analysisIntervalInput" value="10" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="resizeIntervalInput" class="block text-gray-700 text-sm font-bold mb-1">Resize Interval (files):</label>
+                        <input type="number" id="resizeIntervalInput" value="200" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="selectedOptionsInput" class="block text-gray-700 text-sm font-bold mb-1">Calculation Method:</label>
+                        <select id="selectedOptionsInput"
+                                class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                            <option value="Peak Height Extraction">Peak Height Extraction</option>
+                            <option value="Area Under the Curve">Area Under the Curve</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="xAxisOptionsInput" class="block text-gray-700 text-sm font-bold mb-1">X-axis Units:</label>
+                        <select id="xAxisOptionsInput"
+                                class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                            <option value="File Number">File Number</option>
+                            <option value="Experiment Time">Experiment Time</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- NEW: HT Analysis Screen -->
+        <div id="htAnalysisScreen" class="hidden screen-card mb-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">HT Analysis</h2>
+                <button id="backToWelcomeFromHT" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg shadow-sm transition duration-300">
+                       &larr; Back to Welcome
+                </button>
+            </div>
+
+            
+            <div class="ht-analysis-container">
+                <div class="plates-area-wrapper" id="plates-wrapper">
+                    <div class="row-labels-container" id="rowLabels"></div>
+                    
+                    <div class="plate-group">
+                        <div class="col-labels-container" id="colLabels1"></div>
+                        <div class="plate-container-8x3" id="plate-alpha"></div>
+                    </div>
+                    
+                    <div class="plate-group">
+                        <div class="col-labels-container" id="colLabels2"></div>
+                        <div class="plate-container-8x3" id="plate-beta"></div>
+                    </div>
+                    
+                    <div class="plate-group">
+                        <div class="col-labels-container" id="colLabels3"></div>
+                        <div class="plate-container-8x3" id="plate-gamma"></div>
+                    </div>
+                    
+                    <div class="plate-group">
+                        <div class="col-labels-container" id="colLabels4"></div>
+                        <div class="plate-container-8x3" id="plate-delta"></div>
+                    </div>
+
+                    <!-- Delay Inputs positioned absolutely relative to the wrapper -->
+                    <input type="text" placeholder="t_β (s)" class="delay-input" id="delay-beta">
+                    <input type="text" placeholder="t_γ (s)" class="delay-input" id="delay-gamma">
+                    <input type="text" placeholder="t_δ (s)" class="delay-input" id="delay-delta">
+                </div>
+
+                <!-- Annotation Table -->
+                <div id="annotationTableContainer" class="hidden">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">Annotations</h3>
+                    <table id="annotationTable" class="w-full text-sm text-left text-gray-500">
+                        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3">Position</th>
+                                <th scope="col" class="px-6 py-3">Annotation</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Rows will be added here by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <script>
+                    function createPlate(plateId, colorClass, rowOffset, colOffset) {
+                        const plate = document.getElementById(plateId);
+                        if (!plate) return;
+                        plate.innerHTML = ''; // Clear previous content
+                        const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+                        for (let i = 0; i < 8; i++) {
+                            for (let j = 0; j < 3; j++) {
+                                const well = document.createElement('div');
+                                well.className = `well ${colorClass}`;
+                                const position = `${rows[i]}${colOffset + j + 1}`;
+                                well.dataset.position = position;
+                                plate.appendChild(well);
+                            }
+                        }
+                    }
+
+                    function createLabels() {
+                        const rowLabelsContainer = document.getElementById('rowLabels');
+                        if (!rowLabelsContainer) return;
+                        rowLabelsContainer.innerHTML = ''; // Clear previous content
+                        const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+                        rows.forEach(r => {
+                            const label = document.createElement('div');
+                            label.className = 'plate-label';
+                            label.textContent = r;
+                            rowLabelsContainer.appendChild(label);
+                        });
+
+                        for (let i = 1; i <= 4; i++) {
+                            const colLabelsContainer = document.getElementById(`colLabels${i}`);
+                            if (!colLabelsContainer) continue;
+                            colLabelsContainer.innerHTML = ''; // Clear previous content
+                            for (let j = 0; j < 3; j++) {
+                                const label = document.createElement('div');
+                                label.className = 'plate-label';
+                                label.textContent = (i - 1) * 3 + j + 1;
+                                colLabelsContainer.appendChild(label);
+                            }
+                        }
+                    }
+                    
+                    createLabels();
+                    createPlate('plate-alpha', 'alpha', 0, 0);
+                    createPlate('plate-beta', 'beta', 0, 3);
+                    createPlate('plate-gamma', 'gamma', 0, 6);
+                    createPlate('plate-delta', 'delta', 0, 9);
+                </script>
+
+                <!-- Parameter Accordions (FIXED to 4x1 Layout) -->
+                <div class="space-y-4 w-full max-w-4xl">
+                    <!-- Alpha Section -->
+                    <div class="accordion-item">
+                        <button class="accordion-header bg-alpha rounded-t-lg">
+                            <span>α Region Parameters</span>
+                        </button>
+                        <div class="accordion-content rounded-b-lg">
+                            <div class="accordion-content-inner space-y-4">
+                               <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-1">Analysis Type:</label>
+                                    <select class="analysis-type-selector shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                        <option value="swv">SWV</option>
+                                        <option value="cv">CV</option>
+                                    </select>
+                                </div>
+                                <div class="swv-params grid grid-cols-2 gap-4">
+                                    <h4 class="font-semibold col-span-2">SWV Basic Parameters</h4>
+                                    <label class="text-sm">Potential Window (V): <input type="text" value="±0.15" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Base Step (mV): <input type="text" value="2" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Pulse Amplitude (mV): <input type="text" value="25" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Frequency (Hz): <input type="text" value="50" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                </div>
+                                <div class="cv-params hidden grid grid-cols-2 gap-4">
+                                    <h4 class="font-semibold col-span-2">CV Basic Parameters</h4>
+                                    <label class="text-sm">Start/Vertex Potential (V): <input type="text" value="-0.4, 0.2" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Scan Rate (mV/s): <input type="text" value="50" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Step Size (mV): <input type="text" value="1" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Number of Cycles: <input type="text" value="3" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Beta Section -->
+                    <div class="accordion-item">
+                        <button class="accordion-header bg-beta rounded-t-lg">
+                            <span>β Region Parameters</span>
+                        </button>
+                        <div class="accordion-content rounded-b-lg">
+                             <div class="accordion-content-inner space-y-4">
+                               <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-1">Analysis Type:</label>
+                                    <select class="analysis-type-selector shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                        <option value="swv">SWV</option>
+                                        <option value="cv">CV</option>
+                                    </select>
+                                </div>
+                                <div class="swv-params grid grid-cols-2 gap-4">
+                                    <h4 class="font-semibold col-span-2">SWV Basic Parameters</h4>
+                                    <label class="text-sm">Potential Window (V): <input type="text" value="±0.15" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Base Step (mV): <input type="text" value="2" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Pulse Amplitude (mV): <input type="text" value="25" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Frequency (Hz): <input type="text" value="50" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                </div>
+                                <div class="cv-params hidden grid grid-cols-2 gap-4">
+                                    <h4 class="font-semibold col-span-2">CV Basic Parameters</h4>
+                                    <label class="text-sm">Start/Vertex Potential (V): <input type="text" value="-0.4, 0.2" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Scan Rate (mV/s): <input type="text" value="50" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Step Size (mV): <input type="text" value="1" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Number of Cycles: <input type="text" value="3" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Gamma Section -->
+                    <div class="accordion-item">
+                        <button class="accordion-header bg-gamma rounded-t-lg">
+                            <span>γ Region Parameters</span>
+                        </button>
+                        <div class="accordion-content rounded-b-lg">
+                             <div class="accordion-content-inner space-y-4">
+                               <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-1">Analysis Type:</label>
+                                    <select class="analysis-type-selector shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                        <option value="swv">SWV</option>
+                                        <option value="cv">CV</option>
+                                    </select>
+                                </div>
+                                <div class="swv-params grid grid-cols-2 gap-4">
+                                    <h4 class="font-semibold col-span-2">SWV Basic Parameters</h4>
+                                    <label class="text-sm">Potential Window (V): <input type="text" value="±0.15" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Base Step (mV): <input type="text" value="2" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Pulse Amplitude (mV): <input type="text" value="25" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Frequency (Hz): <input type="text" value="50" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                </div>
+                                <div class="cv-params hidden grid grid-cols-2 gap-4">
+                                    <h4 class="font-semibold col-span-2">CV Basic Parameters</h4>
+                                    <label class="text-sm">Start/Vertex Potential (V): <input type="text" value="-0.4, 0.2" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Scan Rate (mV/s): <input type="text" value="50" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Step Size (mV): <input type="text" value="1" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Number of Cycles: <input type="text" value="3" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Delta Section -->
+                    <div class="accordion-item">
+                        <button class="accordion-header bg-delta rounded-t-lg">
+                            <span>δ Region Parameters</span>
+                        </button>
+                        <div class="accordion-content rounded-b-lg">
+                             <div class="accordion-content-inner space-y-4">
+                               <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-1">Analysis Type:</label>
+                                    <select class="analysis-type-selector shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                        <option value="swv">SWV</option>
+                                        <option value="cv">CV</option>
+                                    </select>
+                                </div>
+                                <div class="swv-params grid grid-cols-2 gap-4">
+                                    <h4 class="font-semibold col-span-2">SWV Basic Parameters</h4>
+                                    <label class="text-sm">Potential Window (V): <input type="text" value="±0.15" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Base Step (mV): <input type="text" value="2" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Pulse Amplitude (mV): <input type="text" value="25" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Frequency (Hz): <input type="text" value="50" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                </div>
+                                <div class="cv-params hidden grid grid-cols-2 gap-4">
+                                    <h4 class="font-semibold col-span-2">CV Basic Parameters</h4>
+                                    <label class="text-sm">Start/Vertex Potential (V): <input type="text" value="-0.4, 0.2" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Scan Rate (mV/s): <input type="text" value="50" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Step Size (mV): <input type="text" value="1" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                    <label class="text-sm">Number of Cycles: <input type="text" value="3" class="shadow-sm border rounded w-full py-1 px-2"></label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-center mt-8">
+                    <button id="startHTAnalysisBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition duration-300 ease-in-out hover-highlight text-lg">
+                        Start HT Analysis
+                    </button>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Data Visualization Area (Initially hidden, will be shown after analysis) -->
+        <div id="visualizationArea" class="hidden screen-card text-center mt-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">Data Visualization</h2>
+            <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <!-- Left Column: Individual Frequency Plots (col-span-1) -->
+                <div id="individualPlotsContainer" class="lg:col-span-1 flex flex-col gap-6">
+                    <!-- Individual plots for each frequency will be dynamically added here -->
+                </div>
+
+                <!-- Right Column: Trend Plots (col-span-3) -->
+                <div id="trendPlotsContainer" class="lg:col-span-3 flex flex-col gap-6">
+                    <!-- Peak Current Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Peak Current Trend</h4>
+                        <div id="peakCurrentTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+
+                    <!-- Normalized Peak Current Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Normalized Peak Current Trend</h4>
+                        <div id="normalizedPeakTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+
+                    <!-- KDM Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">KDM Trend</h4>
+                        <div id="kdmTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trend Adjustment Controls -->
+            <div id="adjustmentControls" class="screen-card text-center mt-6 hidden">
+                <h3 class="text-xl font-bold text-gray-800 mb-4">Trend Adjustments</h3>
+                <div class="flex flex-wrap items-end justify-center gap-4">
+                    <!-- Re-normalize -->
+                    <div>
+                        <label for="postProcessNormalizationPointInput" class="block text-gray-700 text-sm font-bold mb-1">Re-normalize to File #:</label>
+                        <input type="number" id="postProcessNormalizationPointInput" value="1" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                    <!-- Offset -->
+                    <div>
+                        <label for="postProcessLowFrequencyOffsetInput" class="block text-gray-700 text-sm font-bold mb-1">Low Freq. Offset:</label>
+                        <input type="number" id="postProcessLowFrequencyOffsetInput" value="0" step="any"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                    <!-- Slope -->
+                    <div>
+                        <label for="postProcessLowFrequencySlopeInput" class="block text-gray-700 text-sm font-bold mb-1">Low Freq. Slope:</label>
+                        <input type="number" id="postProcessLowFrequencySlopeInput" value="0" step="any"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                    <!-- Injection Point -->
+                    <div class="flex items-end gap-2">
+                        <div>
+                            <label for="postProcessInjectionPointInput" class="block text-gray-700 text-sm font-bold mb-1">Injection Point (File #):</label>
+                            <input type="number" id="postProcessInjectionPointInput" placeholder="e.g., 50" min="1"
+                                   class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        </div>
+                        <button id="updateInjectionPointBtn" class="bg-teal-500 hover:bg-teal-600 text-white font-semibold py-2 px-3 rounded-lg shadow-md transition duration-300 ease-in-out h-10">Update Plot</button>
+                    </div>
+                    <!-- Main Apply Button -->
+                    <button id="applyPostProcessNormalizationBtn"
+                            class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight">
+                        Apply & Recalculate All
+                    </button>
+                </div>
+                <p id="postProcessStatus" class="text-sm text-gray-500 mt-2 text-left"></p>
+            </div>
+
+            <div class="flex justify-center gap-4 mt-6">
+                <button id="exportDataBtn"
+                        class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-75 hidden">
+                    Export Analysis Data
+                </button>
+                <button id="backToSWVBtn"
+                        class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight">
+                    Back to SWV Settings
+                </button>
+            </div>
+            <p id="exportStatus" class="text-sm text-gray-500 mt-2 text-left"></p>
+
+        </div>
+    </div>
+
+    <!-- New: Warning Modal -->
+    <div id="warningModal" class="modal hidden">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h3 class="text-xl font-bold text-red-600 mb-4">Analysis Warning</h3>
+            <p id="warningMessage" class="mb-6 text-gray-700">An experimental issue might have occurred. No clear derivative-based peak was found for the current file.</p>
+            <div class="flex justify-center gap-4">
+                <button id="overrideWarningBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300">
+                    Override and Continue
+                </button>
+                <button id="cancelWarningBtn" class="bg-gray-400 hover:bg-gray-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300">
+                    Cancel Batch
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New: Annotation Modal -->
+    <div id="annotationModal" class="modal hidden">
+        <div class="modal-content">
+            <span id="closeAnnotationModal" class="close-button">&times;</span>
+            <h3 class="text-xl font-bold text-gray-800 mb-4">Add/Edit Annotation for <span id="annotationWellPosition"></span></h3>
+            <textarea id="annotationInput" class="w-full p-2 border border-gray-300 rounded-md" rows="4" placeholder="Enter your annotation..."></textarea>
+            <div class="flex justify-end gap-4 mt-4">
+                <button id="cancelAnnotationBtn" class="bg-gray-400 hover:bg-gray-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300">
+                    Cancel
+                </button>
+                <button id="saveAnnotationBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300">
+                    Save
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New: Citation Section -->
+    <div class="w-full max-w-4xl mx-auto mt-12 mb-8 p-6 bg-white rounded-lg shadow-lg text-center">
+        <p class="text-gray-700 text-lg mb-4">
+            Everybody is welcome to use SACMES. In exchange, we kindly request all users to cite the original paper：
+        </p>
+        <div class="relative mb-4">
+            <textarea id="citationText" readonly
+                      class="w-full p-4 border border-gray-300 rounded-lg bg-gray-50 text-gray-800 text-sm leading-relaxed resize-none overflow-auto"
+                      rows="4"
+                      onclick="this.select()"
+                      title="Click to Copy">Curtis, S. D.; Ploense, K. L.; Kurnik, M.; Ortega, G.; Parolo, C.; Kippin, T. E.; Plaxco, K. W.; Arroyo-Currás, N. Open source software for the Real-Time control, processing, and visualization of High-Volume Electrochemical data. Analytical Chemistry 2019, 91 (19), 12321–12328. https://doi.org/10.1021/acs.analchem.9b02553.</textarea>
+            <button id="copyCitationBtn"
+                    class="absolute top-2 right-2 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold py-1 px-2 rounded-md transition duration-300">
+                Copy
+            </button>
+        </div>
+        <p class="text-gray-700 text-md mb-2">Original Paper Link:</p>
+        <a href="https://pubs.acs.org/doi/10.1021/acs.analchem.9b02553" target="_blank"
+           class="text-blue-600 hover:text-blue-800 underline text-md font-medium transition duration-300">
+            https://pubs.acs.org/doi/10.1021/acs.analchem.9b02553
+        </a>
+        <p class="text-gray-700 text-md mt-4">If you need an offline version, please contact <a href="mailto:narroyo@unc.edu" class="text-blue-600 hover:text-blue-800 underline">Professor Netz Arroyo</a></p>
+    </div>
+    
+    <script type="module" src="js/main.js"></script>
+    <script>
+        // JavaScript for copying citation text
+        document.getElementById('copyCitationBtn').addEventListener('click', function() {
+            const citationTextarea = document.getElementById('citationText');
+            citationTextarea.select();
+            document.execCommand('copy');
+            // Optional: Provide visual feedback
+            const originalText = this.textContent;
+            this.textContent = 'Copied!';
+            setTimeout(() => {
+                this.textContent = originalText;
+            }, 2000);
+        });
+
+        // JavaScript for HT Analysis Parameter Toggling
+        document.querySelectorAll('.analysis-type-selector').forEach(selector => {
+            selector.addEventListener('change', (event) => {
+                const selectedType = event.target.value;
+                const parentAccordion = selector.closest('.accordion-content-inner');
+                const swvParams = parentAccordion.querySelector('.swv-params');
+                const cvParams = parentAccordion.querySelector('.cv-params');
+
+                if (selectedType === 'swv') {
+                    swvParams.classList.remove('hidden');
+                    cvParams.classList.add('hidden');
+                } else {
+                    swvParams.classList.add('hidden');
+                    cvParams.classList.remove('hidden');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
