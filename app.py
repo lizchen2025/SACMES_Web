@@ -10,7 +10,6 @@ import logging
 from flask import Flask, send_from_directory, request
 from flask_socketio import SocketIO, emit
 from werkzeug.utils import secure_filename
-import numpy as np
 
 from data_processing.swv_analyzer import analyze_swv_data
 
@@ -159,59 +158,59 @@ def handle_start_analysis_session(data):
 def handle_instrument_data(data):
     if request.sid != agent_sid: return
 
-    content = data.get('content')
-    original_filename = data.get('filename', 'unknown_file.txt')
-    filename = secure_filename(original_filename)
-
-    if not content or not live_analysis_params: return
-
-    params_for_this_file = live_analysis_params.copy()
-
-    try:
-        match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE)
-        if not match: return
-
-        parsed_frequency = int(match.group(1))
-        parsed_filenum = int(match.group(2))
-        params_for_this_file['frequency'] = parsed_frequency
-
-    except Exception as e:
-        logger.error(f"Error parsing filename '{original_filename}': {e}")
-        return
-
-    required_keys = ['low_xstart', 'low_xend', 'high_xstart', 'high_xend']
-    for key in required_keys:
-        if key not in params_for_this_file:
-            params_for_this_file[key] = None
-
-    temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    try:
-        with open(temp_filepath, 'w', encoding='utf-8') as f:
-            f.write(content)
-
-        analysis_result = analyze_swv_data(temp_filepath, params_for_this_file)
-
-        if analysis_result and analysis_result.get('status') in ['success', 'warning']:
-            peak = analysis_result.get('peak_value')
-            freq_str = str(parsed_frequency)
-            filenum_str = str(parsed_filenum)
-            if freq_str in live_trend_data['raw_peaks']:
-                live_trend_data['raw_peaks'][freq_str][filenum_str] = peak
-
-        full_trends = calculate_trends(live_trend_data['raw_peaks'], live_analysis_params)
-
-        if web_viewer_sids:
-            emit('live_analysis_update', {
-                "filename": original_filename,
-                "individual_analysis": analysis_result,
-                "trend_data": full_trends
-            }, to=list(web_viewer_sids), broadcast=True)
-
-    except Exception as e:
-        logger.error(f"Error processing streamed file {filename}: {e}", exc_info=True)
-    finally:
-        if os.path.exists(temp_filepath):
-            os.remove(temp_filepath)
+    # content = data.get('content')
+    # original_filename = data.get('filename', 'unknown_file.txt')
+    # filename = secure_filename(original_filename)
+    #
+    # if not content or not live_analysis_params: return
+    #
+    # params_for_this_file = live_analysis_params.copy()
+    #
+    # try:
+    #     match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE)
+    #     if not match: return
+    #
+    #     parsed_frequency = int(match.group(1))
+    #     parsed_filenum = int(match.group(2))
+    #     params_for_this_file['frequency'] = parsed_frequency
+    #
+    # except Exception as e:
+    #     logger.error(f"Error parsing filename '{original_filename}': {e}")
+    #     return
+    #
+    # required_keys = ['low_xstart', 'low_xend', 'high_xstart', 'high_xend']
+    # for key in required_keys:
+    #     if key not in params_for_this_file:
+    #         params_for_this_file[key] = None
+    #
+    # temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    # try:
+    #     with open(temp_filepath, 'w', encoding='utf-8') as f:
+    #         f.write(content)
+    #
+    #     analysis_result = analyze_swv_data(temp_filepath, params_for_this_file)
+    #
+    #     if analysis_result and analysis_result.get('status') in ['success', 'warning']:
+    #         peak = analysis_result.get('peak_value')
+    #         freq_str = str(parsed_frequency)
+    #         filenum_str = str(parsed_filenum)
+    #         if freq_str in live_trend_data['raw_peaks']:
+    #             live_trend_data['raw_peaks'][freq_str][filenum_str] = peak
+    #
+    #     full_trends = calculate_trends(live_trend_data['raw_peaks'], live_analysis_params)
+    #
+    #     if web_viewer_sids:
+    #         emit('live_analysis_update', {
+    #             "filename": original_filename,
+    #             "individual_analysis": analysis_result,
+    #             "trend_data": full_trends
+    #         }, to=list(web_viewer_sids), broadcast=True)
+    #
+    # except Exception as e:
+    #     logger.error(f"Error processing streamed file {filename}: {e}", exc_info=True)
+    # finally:
+    #     if os.path.exists(temp_filepath):
+    #         os.remove(temp_filepath)
 
 
 # --- HTTP Routes ---
