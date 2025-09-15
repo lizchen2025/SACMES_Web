@@ -1,282 +1,239 @@
-# new_agent.py (Version 2 - With Throttling)
-# A lightweight local agent script with controlled file sending rate.
-# Core Dependency:
-# pip install "python-socketio[client]"
+# app.py (Modified to be more robust with background tasks)
+
+import eventlet
+
+eventlet.monkey_patch()
 
 import os
 import re
-import time
-import socketio
-import threading
-from collections import defaultdict
+import logging
+from flask import Flask, send_from_directory, request
+from flask_socketio import SocketIO, emit
+from werkzeug.utils import secure_filename
 
-# --- GUI (using Python's built-in library) ---
-import tkinter as tk
-from tkinter import filedialog, scrolledtext, messagebox
+from data_processing.swv_analyzer import analyze_swv_data
 
-# --- Configuration ---
-SERVER_URL = "https://sacmes-web-narroyo.apps.cloudapps.unc.edu"  # Updated URL from your log
-AUTH_TOKEN = "your_super_secret_token_here"
-POLLING_INTERVAL_SECONDS = 2
-# NEW: Delay between sending each file to be gentler on the server
-SEND_DELAY_SECONDS = 0.05  # 50 milliseconds delay between each file
+# --- Basic Setup ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# --- Agent's Internal State ---
-current_filters = {}
-processed_files = set()
-is_monitoring_active = False
-agent_thread = None
+app = Flask(__name__, static_folder='static', static_url_path='')
+app.config['SECRET_KEY'] = 'your_secret_key_here'
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# --- Socket.IO Client Setup ---
-sio = socketio.Client(reconnection_attempts=5, reconnection_delay=5)
+# --- Configuration & State Management ---
+UPLOAD_FOLDER = 'temp_uploads'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+AGENT_AUTH_TOKEN = os.environ.get('AGENT_AUTH_TOKEN', "your_super_secret_token_here")
 
-# --- Core Agent Logic ---
-
-def file_matches_filters(filename):
-    """Checks if a file matches the current filter rules received from the server."""
-    required_keys = ['handle', 'frequencies', 'range_start', 'range_end', 'file_extension']
-    if not all(k in current_filters for k in required_keys):
-        return False
-
-    if not filename.endswith(current_filters['file_extension']):
-        return False
-    if not filename.startswith(current_filters['handle']):
-        return False
-
-    try:
-        match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
-        if not match: return False
-        freq, num = int(match.group(1)), int(match.group(2))
-    except (ValueError, IndexError):
-        return False
-
-    if freq not in current_filters['frequencies']:
-        return False
-    if not (current_filters['range_start'] <= num <= current_filters['range_end']):
-        return False
-
-    return True
+agent_sid = None
+web_viewer_sids = set()
+live_analysis_params = {}
+# This data structure will be modified by multiple background tasks.
+# With one gunicorn worker, it's generally safe, but a lock is best practice for scalability.
+live_trend_data = {}
 
 
-def send_file_to_server(file_path):
-    """Reads a file's content and sends it to the server via WebSocket."""
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
+# --- Helper Functions ---
+def calculate_trends(raw_peaks, params):
+    """
+    Calculates full trend data including normalization and KDM.
+    """
+    num_files = params.get('num_files', 1)
+    frequencies = params.get('frequencies', [])
+    normalization_point = params.get('normalizationPoint', 1)
 
-        filename = os.path.basename(file_path)
-        if sio.connected:
-            app.log(f"--> Sending '{filename}'...")
-            sio.emit('stream_instrument_data', {'filename': filename, 'content': content})
+    if not frequencies:
+        return {}
+    frequencies.sort()
+    low_freq_str = str(frequencies[0])
+    high_freq_str = str(frequencies[-1])
+
+    x_axis_values = list(range(1, num_files + 1))
+
+    peak_current_trends = {str(f): [None] * num_files for f in frequencies}
+    normalized_peak_trends = {str(f): [None] * num_files for f in frequencies}
+    kdm_trend = [None] * num_files
+
+    for i, file_num in enumerate(x_axis_values):
+        for freq_str in peak_current_trends:
+            peak = raw_peaks.get(freq_str, {}).get(str(file_num))
+            if peak is not None:
+                peak_current_trends[freq_str][i] = peak
+
+    norm_factors = {}
+    for freq_str in peak_current_trends:
+        norm_idx = normalization_point - 1
+        if 0 <= norm_idx < len(peak_current_trends[freq_str]):
+            norm_value = peak_current_trends[freq_str][norm_idx]
+            norm_factors[freq_str] = norm_value if norm_value and norm_value != 0 else 1.0
         else:
-            app.log(f"[Warning] Cannot send '{filename}', not connected.")
-            # If disconnected during a batch, stop trying to send more.
-            global is_monitoring_active
-            is_monitoring_active = False
+            norm_factors[freq_str] = 1.0
+
+    for i in range(num_files):
+        for freq_str in peak_current_trends:
+            peak = peak_current_trends[freq_str][i]
+            if peak is not None and norm_factors.get(freq_str):
+                normalized_peak_trends[freq_str][i] = peak / norm_factors[freq_str]
+
+        low_freq_peak = peak_current_trends.get(low_freq_str, [])[i]
+        high_freq_peak = peak_current_trends.get(high_freq_str, [])[i]
+
+        if low_freq_peak is not None and high_freq_peak is not None and high_freq_peak != 0:
+            kdm_trend[i] = low_freq_peak / high_freq_peak
+
+    return {
+        "x_axis_values": x_axis_values,
+        "peak_current_trends": peak_current_trends,
+        "normalized_peak_trends": normalized_peak_trends,
+        "kdm_trend": kdm_trend
+    }
+
+
+def process_file_in_background(original_filename, content, params_for_this_file):
+    """
+    This function runs in a background task, performing the heavy analysis
+    without blocking the server's main thread.
+    """
+    filename = secure_filename(original_filename)
+    temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+    try:
+        with open(temp_filepath, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        analysis_result = analyze_swv_data(temp_filepath, params_for_this_file)
+
+        # Update shared state
+        if analysis_result and analysis_result.get('status') in ['success', 'warning']:
+            match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE)
+            if match:
+                parsed_frequency = int(match.group(1))
+                parsed_filenum = int(match.group(2))
+                peak = analysis_result.get('peak_value')
+                freq_str = str(parsed_frequency)
+                filenum_str = str(parsed_filenum)
+                if freq_str in live_trend_data['raw_peaks']:
+                    live_trend_data['raw_peaks'][freq_str][filenum_str] = peak
+
+        full_trends = calculate_trends(live_trend_data['raw_peaks'], live_analysis_params)
+
+        # When done, emit the results back to the web viewers
+        if web_viewer_sids:
+            socketio.emit('live_analysis_update', {
+                "filename": original_filename,
+                "individual_analysis": analysis_result,
+                "trend_data": full_trends
+            }, to=list(web_viewer_sids), broadcast=True)
+
     except Exception as e:
-        app.log(f"[Error] Could not read or send file {file_path}: {e}")
+        logger.error(f"Error processing file {original_filename} in background: {e}", exc_info=True)
+    finally:
+        if os.path.exists(temp_filepath):
+            os.remove(temp_filepath)
 
 
-def monitor_directory_loop(directory):
+# --- Socket.IO Event Handlers ---
+@socketio.on('connect')
+def handle_connect():
+    global agent_sid
+    auth_header = request.headers.get('Authorization')
+    token_in_header = auth_header.split(' ')[1] if auth_header and auth_header.startswith('Bearer ') else None
+
+    if token_in_header and token_in_header == AGENT_AUTH_TOKEN:
+        agent_sid = request.sid
+        logger.info(f"Agent connected with SID: {agent_sid}")
+        emit('agent_status', {'status': 'connected'}, to=list(web_viewer_sids), broadcast=True)
+    else:
+        web_viewer_sids.add(request.sid)
+        logger.info(f"Web client connected: {request.sid}")
+
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    global agent_sid
+    if request.sid == agent_sid:
+        agent_sid = None
+        logger.warning("Agent has disconnected.")
+        emit('agent_status', {'status': 'disconnected'}, to=list(web_viewer_sids), broadcast=True)
+    elif request.sid in web_viewer_sids:
+        web_viewer_sids.remove(request.sid)
+        logger.info(f"Web client disconnected: {request.sid}")
+
+
+@socketio.on('request_agent_status')
+def handle_request_agent_status(data):
+    if request.sid in web_viewer_sids:
+        current_status = 'connected' if agent_sid else 'disconnected'
+        emit('agent_status', {'status': current_status})
+
+
+@socketio.on('start_analysis_session')
+def handle_start_analysis_session(data):
+    global live_analysis_params, live_trend_data
+    if 'analysisParams' in data:
+        live_analysis_params = data['analysisParams']
+        live_trend_data = {
+            "raw_peaks": {str(f): {} for f in live_analysis_params.get('frequencies', [])}
+        }
+        logger.info("Analysis session started. Params set and trend data reset.")
+
+    if 'filters' in data and agent_sid:
+        filters = data['filters']
+        filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
+        emit('set_filters', filters, to=agent_sid)
+        emit('ack_start_session', {'status': 'success', 'message': 'Instructions sent to local agent.'})
+    elif not agent_sid:
+        emit('ack_start_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
+
+
+@socketio.on('stream_instrument_data')
+def handle_instrument_data(data):
     """
-    Continuously polls the target directory, finds new matching files,
-    and processes them in the correct order with a delay.
+    This handler now only receives data, prepares it, and starts a
+    non-blocking background task for analysis.
     """
-    global processed_files
-    app.log(f"--- Started monitoring folder: '{directory}' ---")
-    app.log(f"--- Polling interval: {POLLING_INTERVAL_SECONDS} seconds ---")
+    if request.sid != agent_sid: return
 
-    while is_monitoring_active:
-        try:
-            all_files_in_dir = os.listdir(directory)
+    content = data.get('content')
+    original_filename = data.get('filename', 'unknown_file.txt')
 
-            new_matching_files = [
-                f for f in all_files_in_dir
-                if file_matches_filters(f) and f not in processed_files
-            ]
+    if not content or not live_analysis_params: return
 
-            if new_matching_files:
-                files_by_number = defaultdict(list)
-                for filename in new_matching_files:
-                    match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
-                    if match:
-                        file_num = int(match.group(2))
-                        files_by_number[file_num].append(filename)
+    params_for_this_file = live_analysis_params.copy()
 
-                app.log(f"Found {len(new_matching_files)} new file(s) to process...")
-                sorted_file_numbers = sorted(files_by_number.keys())
-                for num in sorted_file_numbers:
-                    for filename in sorted(files_by_number[num]):
-                        if not is_monitoring_active:
-                            app.log("Monitoring stopped, aborting file sending.")
-                            return
-                        full_path = os.path.join(directory, filename)
-                        send_file_to_server(full_path)
-                        processed_files.add(filename)
-                        # --- KEY ADDITION ---
-                        time.sleep(SEND_DELAY_SECONDS)  # Wait before sending the next file
+    try:
+        match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE)
+        if not match: return
+        params_for_this_file['frequency'] = int(match.group(1))
+    except Exception as e:
+        logger.error(f"Error parsing filename '{original_filename}': {e}")
+        return
 
-            time.sleep(POLLING_INTERVAL_SECONDS)
+    required_keys = ['low_xstart', 'low_xend', 'high_xstart', 'high_xend']
+    for key in required_keys:
+        if key not in params_for_this_file:
+            params_for_this_file[key] = None
 
-        except FileNotFoundError:
-            app.log(f"[FATAL] Monitored directory '{directory}' no longer exists. Stopping.")
-            app.stop_monitoring_logic()
-            break
-        except Exception as e:
-            app.log(f"[Error] An unexpected error occurred in the monitoring loop: {e}")
-            time.sleep(POLLING_INTERVAL_SECONDS * 2)
+    # Start the analysis in the background so this handler can return immediately
+    socketio.start_background_task(
+        target=process_file_in_background,
+        original_filename=original_filename,
+        content=content,
+        params_for_this_file=params_for_this_file
+    )
 
 
-# --- Socket.IO Event Handlers (No changes here) ---
-@sio.event
-def connect():
-    app.update_status("Connected", "green")
-    app.log(f"Successfully connected to server: {SERVER_URL}")
+# --- HTTP Routes ---
+@app.route('/')
+def index():
+    return send_from_directory(app.static_folder, 'index.html')
 
 
-@sio.event
-def connect_error(data):
-    app.update_status("Connection Failed", "red")
-    app.log(f"Connection failed! Please check if the server is running at {SERVER_URL}.")
-
-
-@sio.event
-def disconnect():
-    app.update_status("Disconnected", "red")
-    app.log("Disconnected from server.")
-
-
-@sio.on('set_filters')
-def on_set_filters(data):
-    global current_filters, processed_files, agent_thread, is_monitoring_active
-    app.log(f"<-- Received new filter instructions from server: {data}")
-
-    current_filters.clear()
-    current_filters.update(data)
-    processed_files = set()
-
-    if agent_thread and agent_thread.is_alive():
-        is_monitoring_active = False
-        agent_thread.join()
-
-    is_monitoring_active = True
-    directory = app.watch_directory.get()
-    agent_thread = threading.Thread(target=monitor_directory_loop, args=(directory,), daemon=True)
-    agent_thread.start()
-
-
-# --- GUI Application Class (No changes here) ---
-class AgentApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("SACMES Lightweight Local Agent")
-        self.root.geometry("600x450")
-        self.root.minsize(500, 350)
-        self.watch_directory = tk.StringVar(value="No folder selected")
-        main_frame = tk.Frame(root, padx=10, pady=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        top_frame = tk.Frame(main_frame)
-        top_frame.pack(fill=tk.X)
-        tk.Label(top_frame, text="Monitoring Folder:", anchor="w").pack(side=tk.LEFT, padx=(0, 5))
-        self.folder_display = tk.Label(top_frame, textvariable=self.watch_directory, fg="blue", anchor="w",
-                                       wraplength=350)
-        self.folder_display.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.select_button = tk.Button(top_frame, text="Select Folder", command=self.select_folder)
-        self.select_button.pack(side=tk.RIGHT, padx=5)
-        control_frame = tk.Frame(main_frame, pady=10)
-        control_frame.pack(fill=tk.X)
-        self.start_button = tk.Button(control_frame, text="Connect & Start", command=self.start_monitoring,
-                                      state=tk.DISABLED, bg="#D4EDDA")
-        self.start_button.pack(side=tk.LEFT)
-        self.stop_button = tk.Button(control_frame, text="Stop", command=self.stop_monitoring, state=tk.DISABLED,
-                                     bg="#F8D7DA")
-        self.stop_button.pack(side=tk.LEFT, padx=5)
-        tk.Label(control_frame, text="Server Status:", anchor="e").pack(side=tk.LEFT, padx=(20, 5))
-        self.status_display = tk.Label(control_frame, text="Not Connected", fg="red", font=("Helvetica", 10, "bold"))
-        self.status_display.pack(side=tk.LEFT)
-        log_frame = tk.Frame(main_frame)
-        log_frame.pack(fill=tk.BOTH, expand=True)
-        tk.Label(log_frame, text="Agent Log:").pack(anchor="w")
-        self.log_text = scrolledtext.ScrolledText(log_frame, state='disabled', wrap=tk.WORD, font=("Courier New", 9))
-        self.log_text.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-    def select_folder(self):
-        directory = filedialog.askdirectory()
-        if directory:
-            self.watch_directory.set(directory)
-            self.start_button.config(state=tk.NORMAL)
-            self.log(f"Folder selected: {directory}")
-
-    def start_monitoring(self):
-        if self.watch_directory.get() == "No folder selected":
-            messagebox.showerror("Error", "Please select a folder to monitor first.")
-            return
-        self.start_button.config(state=tk.DISABLED)
-        self.stop_button.config(state=tk.NORMAL)
-        self.select_button.config(state=tk.DISABLED)
-        connection_thread = threading.Thread(target=self.run_connection_logic, daemon=True)
-        connection_thread.start()
-
-    def run_connection_logic(self):
-        try:
-            if sio.connected:
-                self.log("Already connected. Waiting for filter instructions...")
-                return
-            self.log("--- SACMES Local Agent ---")
-            self.update_status("Connecting...", "orange")
-            self.log(f"Attempting to connect to server at {SERVER_URL}...")
-            headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
-            sio.connect(SERVER_URL, headers=headers, socketio_path='socket.io')
-            self.log("Agent is now running and waiting for analysis instructions from the server...")
-        except socketio.exceptions.ConnectionError as e:
-            self.log(f"[FATAL] Could not connect to the server. Is it running? Details: {e}")
-            self.update_status("Connection Failed", "red")
-            self.stop_monitoring_logic()
-        except Exception as e:
-            self.log(f"[FATAL] An unexpected error occurred: {e}")
-            self.update_status("Error", "red")
-            self.stop_monitoring_logic()
-
-    def stop_monitoring(self):
-        self.log("Stopping process...")
-        self.stop_monitoring_logic()
-        if sio.connected:
-            sio.disconnect()
-
-    def stop_monitoring_logic(self):
-        global is_monitoring_active, agent_thread
-        is_monitoring_active = False
-        if agent_thread and agent_thread.is_alive():
-            agent_thread.join(timeout=POLLING_INTERVAL_SECONDS + 1)
-        self.start_button.config(state=tk.NORMAL)
-        self.stop_button.config(state=tk.DISABLED)
-        self.select_button.config(state=tk.NORMAL)
-        self.log("Monitoring has been stopped.")
-
-    def log(self, message):
-        self.root.after(0, self._log_message, message)
-
-    def _log_message(self, message):
-        self.log_text.config(state='normal')
-        self.log_text.insert(tk.END, f"{time.strftime('%H:%M:%S')} - {message}\n")
-        self.log_text.config(state='disabled')
-        self.log_text.see(tk.END)
-
-    def update_status(self, text, color):
-        self.root.after(0, self._update_status, text, color)
-
-    def _update_status(self, text, color):
-        self.status_display.config(text=text, fg=color)
-
-    def on_closing(self):
-        if messagebox.askokcancel("Quit", "Are you sure you want to close the agent?"):
-            self.stop_monitoring()
-            self.root.destroy()
-
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = AgentApp(root)
-    root.mainloop()
+# --- Main Execution ---
+if __name__ == '__main__':
+    logger.info("Starting SACMES server...")
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000, use_reloader=False)
