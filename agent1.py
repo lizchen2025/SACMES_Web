@@ -1,7 +1,6 @@
-# new_agent.py (Version 2 - With Throttling)
-# A lightweight local agent script with controlled file sending rate.
-# Core Dependency:
-# pip install "python-socketio[client]"
+# agent1.py (Final Version - Forcing HTTP Long-Polling)
+# This version forces the connection to use HTTP long-polling instead of WebSockets,
+# making it much more robust against aggressive network proxies in cloud environments.
 
 import os
 import re
@@ -15,11 +14,10 @@ import tkinter as tk
 from tkinter import filedialog, scrolledtext, messagebox
 
 # --- Configuration ---
-SERVER_URL = "https://sacmes-web-narroyo.apps.cloudapps.unc.edu"  # Updated URL from your log
+SERVER_URL = "https://sacmes-web-narroyo.apps.cloudapps.unc.edu"
 AUTH_TOKEN = "your_super_secret_token_here"
 POLLING_INTERVAL_SECONDS = 2
-# NEW: Delay between sending each file to be gentler on the server
-SEND_DELAY_SECONDS = 0.05  # 50 milliseconds delay between each file
+SEND_DELAY_SECONDS = 0.05  # Keep this delay to be gentle on the server
 
 # --- Agent's Internal State ---
 current_filters = {}
@@ -28,34 +26,31 @@ is_monitoring_active = False
 agent_thread = None
 
 # --- Socket.IO Client Setup ---
-sio = socketio.Client(reconnection_attempts=5, reconnection_delay=5)
+# The KEY CHANGE is forcing transports=['polling']
+sio = socketio.Client(reconnection_attempts=5, reconnection_delay=5, logger=True, engineio_logger=True)
 
 
-# --- Core Agent Logic ---
+# --- Core Agent Logic (Unchanged)---
 
 def file_matches_filters(filename):
     """Checks if a file matches the current filter rules received from the server."""
     required_keys = ['handle', 'frequencies', 'range_start', 'range_end', 'file_extension']
     if not all(k in current_filters for k in required_keys):
         return False
-
     if not filename.endswith(current_filters['file_extension']):
         return False
     if not filename.startswith(current_filters['handle']):
         return False
-
     try:
         match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
         if not match: return False
         freq, num = int(match.group(1)), int(match.group(2))
     except (ValueError, IndexError):
         return False
-
     if freq not in current_filters['frequencies']:
         return False
     if not (current_filters['range_start'] <= num <= current_filters['range_end']):
         return False
-
     return True
 
 
@@ -64,14 +59,12 @@ def send_file_to_server(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
-
         filename = os.path.basename(file_path)
         if sio.connected:
             app.log(f"--> Sending '{filename}'...")
             sio.emit('stream_instrument_data', {'filename': filename, 'content': content})
         else:
             app.log(f"[Warning] Cannot send '{filename}', not connected.")
-            # If disconnected during a batch, stop trying to send more.
             global is_monitoring_active
             is_monitoring_active = False
     except Exception as e:
@@ -86,39 +79,25 @@ def monitor_directory_loop(directory):
     global processed_files
     app.log(f"--- Started monitoring folder: '{directory}' ---")
     app.log(f"--- Polling interval: {POLLING_INTERVAL_SECONDS} seconds ---")
-
     while is_monitoring_active:
         try:
-            all_files_in_dir = os.listdir(directory)
-
-            new_matching_files = [
-                f for f in all_files_in_dir
-                if file_matches_filters(f) and f not in processed_files
-            ]
-
+            new_matching_files = [f for f in os.listdir(directory) if file_matches_filters(f) and f not in processed_files]
             if new_matching_files:
                 files_by_number = defaultdict(list)
                 for filename in new_matching_files:
                     match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
                     if match:
-                        file_num = int(match.group(2))
-                        files_by_number[file_num].append(filename)
-
+                        files_by_number[int(match.group(2))].append(filename)
                 app.log(f"Found {len(new_matching_files)} new file(s) to process...")
-                sorted_file_numbers = sorted(files_by_number.keys())
-                for num in sorted_file_numbers:
+                for num in sorted(files_by_number.keys()):
                     for filename in sorted(files_by_number[num]):
                         if not is_monitoring_active:
                             app.log("Monitoring stopped, aborting file sending.")
                             return
-                        full_path = os.path.join(directory, filename)
-                        send_file_to_server(full_path)
+                        send_file_to_server(os.path.join(directory, filename))
                         processed_files.add(filename)
-                        # --- KEY ADDITION ---
-                        time.sleep(SEND_DELAY_SECONDS)  # Wait before sending the next file
-
+                        time.sleep(SEND_DELAY_SECONDS)
             time.sleep(POLLING_INTERVAL_SECONDS)
-
         except FileNotFoundError:
             app.log(f"[FATAL] Monitored directory '{directory}' no longer exists. Stopping.")
             app.stop_monitoring_logic()
@@ -128,45 +107,39 @@ def monitor_directory_loop(directory):
             time.sleep(POLLING_INTERVAL_SECONDS * 2)
 
 
-# --- Socket.IO Event Handlers (No changes here) ---
+# --- Socket.IO Event Handlers (Unchanged) ---
 @sio.event
 def connect():
     app.update_status("Connected", "green")
     app.log(f"Successfully connected to server: {SERVER_URL}")
-
 
 @sio.event
 def connect_error(data):
     app.update_status("Connection Failed", "red")
     app.log(f"Connection failed! Please check if the server is running at {SERVER_URL}.")
 
-
 @sio.event
 def disconnect():
     app.update_status("Disconnected", "red")
     app.log("Disconnected from server.")
 
-
 @sio.on('set_filters')
 def on_set_filters(data):
     global current_filters, processed_files, agent_thread, is_monitoring_active
     app.log(f"<-- Received new filter instructions from server: {data}")
-
     current_filters.clear()
     current_filters.update(data)
     processed_files = set()
-
     if agent_thread and agent_thread.is_alive():
         is_monitoring_active = False
         agent_thread.join()
-
     is_monitoring_active = True
     directory = app.watch_directory.get()
     agent_thread = threading.Thread(target=monitor_directory_loop, args=(directory,), daemon=True)
     agent_thread.start()
 
 
-# --- GUI Application Class (No changes here) ---
+# --- GUI Application Class ---
 class AgentApp:
     def __init__(self, root):
         self.root = root
@@ -179,18 +152,15 @@ class AgentApp:
         top_frame = tk.Frame(main_frame)
         top_frame.pack(fill=tk.X)
         tk.Label(top_frame, text="Monitoring Folder:", anchor="w").pack(side=tk.LEFT, padx=(0, 5))
-        self.folder_display = tk.Label(top_frame, textvariable=self.watch_directory, fg="blue", anchor="w",
-                                       wraplength=350)
+        self.folder_display = tk.Label(top_frame, textvariable=self.watch_directory, fg="blue", anchor="w", wraplength=350)
         self.folder_display.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.select_button = tk.Button(top_frame, text="Select Folder", command=self.select_folder)
         self.select_button.pack(side=tk.RIGHT, padx=5)
         control_frame = tk.Frame(main_frame, pady=10)
         control_frame.pack(fill=tk.X)
-        self.start_button = tk.Button(control_frame, text="Connect & Start", command=self.start_monitoring,
-                                      state=tk.DISABLED, bg="#D4EDDA")
+        self.start_button = tk.Button(control_frame, text="Connect & Start", command=self.start_monitoring, state=tk.DISABLED, bg="#D4EDDA")
         self.start_button.pack(side=tk.LEFT)
-        self.stop_button = tk.Button(control_frame, text="Stop", command=self.stop_monitoring, state=tk.DISABLED,
-                                     bg="#F8D7DA")
+        self.stop_button = tk.Button(control_frame, text="Stop", command=self.stop_monitoring, state=tk.DISABLED, bg="#F8D7DA")
         self.stop_button.pack(side=tk.LEFT, padx=5)
         tk.Label(control_frame, text="Server Status:", anchor="e").pack(side=tk.LEFT, padx=(20, 5))
         self.status_display = tk.Label(control_frame, text="Not Connected", fg="red", font=("Helvetica", 10, "bold"))
@@ -228,7 +198,11 @@ class AgentApp:
             self.update_status("Connecting...", "orange")
             self.log(f"Attempting to connect to server at {SERVER_URL}...")
             headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
-            sio.connect(SERVER_URL, headers=headers, socketio_path='socket.io')
+
+            # --- THE ONLY CRITICAL CHANGE IS HERE ---
+            # We explicitly tell the client to ONLY use 'polling' and not attempt 'websocket'.
+            sio.connect(SERVER_URL, headers=headers, socketio_path='socket.io', transports=['polling'])
+
             self.log("Agent is now running and waiting for analysis instructions from the server...")
         except socketio.exceptions.ConnectionError as e:
             self.log(f"[FATAL] Could not connect to the server. Is it running? Details: {e}")
