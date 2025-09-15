@@ -1,4 +1,4 @@
-// static/js/swv_module.js (Final version with all features working)
+// static/js/swv_module.js (Final version with persistent client-side state)
 
 import { PlotlyPlotter } from './plot_utils.js';
 
@@ -64,7 +64,8 @@ export class SWVModule {
             currentXAxisOptions: "File Number",
             currentKdmHighFreq: null,
             currentKdmLowFreq: null,
-            rawTrendData: null
+            rawTrendData: null, // Holds the raw peak currents from the server
+            lastCalculatedData: null // Holds the last fully calculated trend object
         };
 
         this._setupEventListeners();
@@ -75,6 +76,7 @@ export class SWVModule {
         this.dom.swvBtn.addEventListener('click', () => this.uiManager.showScreen('swvAnalysisScreen'));
         this.dom.startAnalysisBtn.addEventListener('click', this._handleStartAnalysis.bind(this));
         this.dom.backToWelcomeBtn.addEventListener('click', () => this.uiManager.showScreen('welcomeScreen'));
+        
         this.dom.visualization.backToSWVBtn.addEventListener('click', () => {
             this.dom.visualization.adjustmentControls.classList.add('hidden');
             this.dom.visualization.exportDataBtn.classList.add('hidden');
@@ -83,6 +85,7 @@ export class SWVModule {
             this.dom.startAnalysisBtn.textContent = 'Start Analysis & Sync';
             this.dom.startAnalysisBtn.disabled = false;
         });
+        
         this.dom.visualization.exportDataBtn.addEventListener('click', () => {
             const defaultFilename = `SACMES_Analysis_${new Date().toISOString().slice(0, 10)}.csv`;
             const filename = prompt("Please enter a filename for the CSV export:", defaultFilename);
@@ -92,17 +95,20 @@ export class SWVModule {
                 this.socketManager.emit('request_export_data', {});
             }
         });
-        // Attach event listeners for both adjustment buttons
-        this.dom.visualization.updateInjectionPointBtn.addEventListener('click', () => this._handlePostProcessUpdate(false));
-        this.dom.visualization.applyPostProcessNormalizationBtn.addEventListener('click', () => this._handlePostProcessUpdate(true));
-    }
 
+        // Use a single handler for all adjustment updates
+        this.dom.visualization.updateInjectionPointBtn.addEventListener('click', () => this._handlePostProcessUpdate());
+        this.dom.visualization.applyPostProcessNormalizationBtn.addEventListener('click', () => this._handlePostProcessUpdate());
+    }
+    
     _setupSocketHandlers() {
         this.socketManager.on('connect', () => this.socketManager.emit('request_agent_status', {}));
+
         this.socketManager.on('agent_status', (data) => {
             this.dom.agentStatus.className = data.status === 'connected' ? 'text-sm text-green-700 mt-1' : 'text-sm text-red-700 mt-1';
             this.dom.agentStatus.textContent = data.status === 'connected' ? 'Local agent connected. Ready to sync.' : 'Error: Local agent is disconnected.';
         });
+
         this.socketManager.on('ack_start_session', (data) => {
             if (data.status === 'success') {
                 this.dom.folderStatus.textContent = 'Instructions sent. Agent is now scanning...';
@@ -113,16 +119,25 @@ export class SWVModule {
                 this.dom.startAnalysisBtn.textContent = 'Start Analysis & Sync';
             }
         });
+
         this.socketManager.on('live_analysis_update', (data) => {
-            if (this.state.isAnalysisRunning) {
-                // Store the raw peak currents specifically for client-side recalculation
+            if (!this.state.isAnalysisRunning) return;
+
+            // 1. Update the source of truth for raw data
+            if (data.trend_data) {
                 this.state.rawTrendData = {
                     peak_current_trends: data.trend_data.peak_current_trends,
                     x_axis_values: data.trend_data.x_axis_values
                 };
-                this.handleLiveUpdate(data);
             }
+
+            // 2. Update the small individual plots from the server's analysis
+            this._updateIndividualPlotsUI(data.filename, data.individual_analysis);
+            
+            // 3. Always recalculate and render the trend plots based on the UI controls
+            this._handlePostProcessUpdate();
         });
+
         this.socketManager.on('export_data_response', (data) => {
             if (data.status === 'success') {
                 const filename = this.dom.visualization.exportDataBtn.dataset.filename || 'export.csv';
@@ -163,7 +178,7 @@ export class SWVModule {
 
         const recalculated = {
             x_axis_values: Array.from({ length: num_files }, (_, i) => i + 1),
-            peak_current_trends: rawPeaks, // Raw peaks do not change
+            peak_current_trends: rawPeaks,
             normalized_peak_trends: {},
             kdm_trend: Array(num_files).fill(null)
         };
@@ -191,12 +206,11 @@ export class SWVModule {
         return recalculated;
     }
 
-    _handlePostProcessUpdate(recalculate = true) {
-        if (!this.state.rawTrendData) return;
-        // If recalculate is true, use newly calculated data. Otherwise, use existing raw data (for injection point only).
-        const dataToRender = recalculate ? this._recalculateTrends() : this.state.rawTrendData;
-        if (dataToRender) {
-            this._renderTrendPlots(dataToRender);
+    _handlePostProcessUpdate() {
+        const recalculatedData = this._recalculateTrends();
+        if (recalculatedData) {
+            this.state.lastCalculatedData = recalculatedData;
+            this._renderTrendPlots(recalculatedData);
         }
     }
 
@@ -210,7 +224,7 @@ export class SWVModule {
             isAnalysisRunning: true, currentFrequencies: frequencies, currentNumFiles: numFiles,
             currentXAxisOptions: this.dom.settings.xAxisOptionsInput.value,
             currentKdmHighFreq: Math.max(...frequencies), currentKdmLowFreq: Math.min(...frequencies),
-            rawTrendData: null
+            rawTrendData: null, lastCalculatedData: null
         };
         
         this.dom.visualization.postProcessNormalizationPointInput.value = this.dom.params.normalizationPointInput.value;
@@ -242,26 +256,23 @@ export class SWVModule {
         this.socketManager.emit('start_analysis_session', { filters, analysisParams });
     }
     
-    handleLiveUpdate(data) {
-        const { filename, individual_analysis, trend_data } = data;
-        if (individual_analysis && individual_analysis.status !== 'error') {
-            const match = filename.match(/_(\d+)Hz_?_?(\d+)\./);
-            if (match) {
-                const [_, freq, fileNum] = match;
-                const plotDivId = `plotArea-${freq}`;
-                const fileNumEl = document.getElementById(`fileNumDisplay-${freq}`);
-                const peakHeightEl = document.getElementById(`peakHeightDisplay-${freq}`);
-                if (document.getElementById(plotDivId) && fileNumEl && peakHeightEl) {
-                    PlotlyPlotter.plotIndividualData(plotDivId, individual_analysis.potentials, individual_analysis.raw_currents, individual_analysis.smoothed_currents,
-                                                    individual_analysis.regression_line, individual_analysis.adjusted_potentials, individual_analysis.auc_vertices, this.dom.settings.selectedOptionsInput.value);
-                    fileNumEl.textContent = fileNum;
-                    peakHeightEl.textContent = individual_analysis.peak_value !== null ? individual_analysis.peak_value.toFixed(4) : "N/A";
-                }
+    _updateIndividualPlotsUI(filename, individual_analysis) {
+        if (!filename || !individual_analysis || individual_analysis.status === 'error') return;
+        const match = filename.match(/_(\d+)Hz_?_?(\d+)\./);
+        if (match) {
+            const [_, freq, fileNum] = match;
+            const plotDivId = `plotArea-${freq}`;
+            const fileNumEl = document.getElementById(`fileNumDisplay-${freq}`);
+            const peakHeightEl = document.getElementById(`peakHeightDisplay-${freq}`);
+            if (document.getElementById(plotDivId) && fileNumEl && peakHeightEl) {
+                PlotlyPlotter.plotIndividualData(plotDivId, individual_analysis.potentials, individual_analysis.raw_currents, individual_analysis.smoothed_currents,
+                                                individual_analysis.regression_line, individual_analysis.adjusted_potentials, individual_analysis.auc_vertices, this.dom.settings.selectedOptionsInput.value);
+                fileNumEl.textContent = fileNum;
+                peakHeightEl.textContent = individual_analysis.peak_value !== null ? individual_analysis.peak_value.toFixed(4) : "N/A";
             }
         }
-        if (trend_data) this._renderTrendPlots(trend_data);
     }
-
+    
     _renderTrendPlots(trendData) {
         const injectionPoint = parseInt(this.dom.visualization.postProcessInjectionPointInput.value) || null;
         const resizeInterval = parseInt(this.dom.settings.resizeIntervalInput.value);
