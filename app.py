@@ -213,22 +213,20 @@ def handle_instrument_data(data):
 
 # --- *** NEW *** SOCKET.IO EVENT HANDLER FOR EXPORTING DATA ---
 @socketio.on('request_export_data')
-def handle_export_request():
+def handle_export_request(data): # <-- 添加了 'data' 参数
     """
     Handles a request from the client to export data to CSV.
     """
-    logger.info(f"Received 'request_export_data' from {request.sid}")
+    logger.info(f"Received 'request_export_data' from {request.sid} with data: {data}")
     try:
         csv_data = generate_csv_data()
         if csv_data:
             emit('export_data_response', {'status': 'success', 'data': csv_data})
-            logger.info(f"Sent CSV data back to client {request.sid}")
         else:
             emit('export_data_response', {'status': 'error', 'message': 'No data available to export.'})
-            logger.warning("Export requested, but no data was available.")
     except Exception as e:
         logger.error(f"Failed to generate CSV for export: {e}", exc_info=True)
-        emit('export_data_response', {'status': 'error', 'message': f'Server error during CSV generation: {e}'})
+
 
 
 # --- HTTP Routes (Unchanged) ---
