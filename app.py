@@ -1,4 +1,4 @@
-# app.py (Modified to be more robust with background tasks)
+# app.py (Final Version with Robust Logging and Background Tasks)
 
 import eventlet
 
@@ -11,59 +11,67 @@ from flask import Flask, send_from_directory, request
 from flask_socketio import SocketIO, emit
 from werkzeug.utils import secure_filename
 
-from data_processing.swv_analyzer import analyze_swv_data
-
-# --- Basic Setup ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# --- 1. DETAILED LOGGING SETUP ---
+# This setup helps ensure logs are captured even if the app crashes.
+log_handler = logging.StreamHandler()
+log_handler.setLevel(logging.INFO)
+log_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+))
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(log_handler)
+logger.propagate = False  # Prevents duplicate logs in some environments
 
+# --- Import data processing module AFTER setting up logger ---
+try:
+    from data_processing.swv_analyzer import analyze_swv_data
+
+    logger.info("Successfully imported swv_analyzer.")
+except ImportError as e:
+    logger.critical(f"Failed to import swv_analyzer: {e}")
+    # If this fails, the app shouldn't run.
+    analyze_swv_data = None
+
+# --- Basic Flask and SocketIO Setup ---
 app = Flask(__name__, static_folder='static', static_url_path='')
-app.config['SECRET_KEY'] = 'your_secret_key_here'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+app.config['SECRET_KEY'] = 'a_very_secret_key_that_should_be_changed'
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', logger=True, engineio_logger=True)
 
 # --- Configuration & State Management ---
 UPLOAD_FOLDER = 'temp_uploads'
 if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+    try:
+        os.makedirs(UPLOAD_FOLDER)
+        logger.info(f"Created upload folder at: {UPLOAD_FOLDER}")
+    except OSError as e:
+        logger.error(f"Could not create upload folder {UPLOAD_FOLDER}: {e}")
 
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 AGENT_AUTH_TOKEN = os.environ.get('AGENT_AUTH_TOKEN', "your_super_secret_token_here")
 
 agent_sid = None
 web_viewer_sids = set()
 live_analysis_params = {}
-# This data structure will be modified by multiple background tasks.
-# With one gunicorn worker, it's generally safe, but a lock is best practice for scalability.
 live_trend_data = {}
 
 
-# --- Helper Functions ---
+# --- Helper function (calculate_trends) is unchanged ---
 def calculate_trends(raw_peaks, params):
-    """
-    Calculates full trend data including normalization and KDM.
-    """
     num_files = params.get('num_files', 1)
     frequencies = params.get('frequencies', [])
     normalization_point = params.get('normalizationPoint', 1)
-
-    if not frequencies:
-        return {}
+    if not frequencies: return {}
     frequencies.sort()
-    low_freq_str = str(frequencies[0])
-    high_freq_str = str(frequencies[-1])
-
+    low_freq_str, high_freq_str = str(frequencies[0]), str(frequencies[-1])
     x_axis_values = list(range(1, num_files + 1))
-
     peak_current_trends = {str(f): [None] * num_files for f in frequencies}
     normalized_peak_trends = {str(f): [None] * num_files for f in frequencies}
     kdm_trend = [None] * num_files
-
     for i, file_num in enumerate(x_axis_values):
         for freq_str in peak_current_trends:
             peak = raw_peaks.get(freq_str, {}).get(str(file_num))
-            if peak is not None:
-                peak_current_trends[freq_str][i] = peak
-
+            if peak is not None: peak_current_trends[freq_str][i] = peak
     norm_factors = {}
     for freq_str in peak_current_trends:
         norm_idx = normalization_point - 1
@@ -72,56 +80,52 @@ def calculate_trends(raw_peaks, params):
             norm_factors[freq_str] = norm_value if norm_value and norm_value != 0 else 1.0
         else:
             norm_factors[freq_str] = 1.0
-
     for i in range(num_files):
         for freq_str in peak_current_trends:
             peak = peak_current_trends[freq_str][i]
             if peak is not None and norm_factors.get(freq_str):
                 normalized_peak_trends[freq_str][i] = peak / norm_factors[freq_str]
-
-        low_freq_peak = peak_current_trends.get(low_freq_str, [])[i]
-        high_freq_peak = peak_current_trends.get(high_freq_str, [])[i]
-
-        if low_freq_peak is not None and high_freq_peak is not None and high_freq_peak != 0:
-            kdm_trend[i] = low_freq_peak / high_freq_peak
-
-    return {
-        "x_axis_values": x_axis_values,
-        "peak_current_trends": peak_current_trends,
-        "normalized_peak_trends": normalized_peak_trends,
-        "kdm_trend": kdm_trend
-    }
+        low_peak = peak_current_trends.get(low_freq_str, [])[i]
+        high_peak = peak_current_trends.get(high_freq_str, [])[i]
+        if low_peak is not None and high_peak is not None and high_peak != 0:
+            kdm_trend[i] = low_peak / high_peak
+    return {"x_axis_values": x_axis_values, "peak_current_trends": peak_current_trends,
+            "normalized_peak_trends": normalized_peak_trends, "kdm_trend": kdm_trend}
 
 
 def process_file_in_background(original_filename, content, params_for_this_file):
     """
-    This function runs in a background task, performing the heavy analysis
-    without blocking the server's main thread.
+    This function runs in a background task to perform heavy analysis.
     """
+    logger.info(f"BACKGROUND_TASK: Started processing for '{original_filename}'.")
     filename = secure_filename(original_filename)
     temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
     try:
         with open(temp_filepath, 'w', encoding='utf-8') as f:
             f.write(content)
+        logger.info(f"BACKGROUND_TASK: Successfully wrote temp file to '{temp_filepath}'.")
+
+        # Check if analyzer was imported correctly before using it
+        if not analyze_swv_data:
+            logger.error("BACKGROUND_TASK: swv_analyzer is not available. Aborting analysis.")
+            return
 
         analysis_result = analyze_swv_data(temp_filepath, params_for_this_file)
+        logger.info(
+            f"BACKGROUND_TASK: Analysis for '{original_filename}' completed with status: {analysis_result.get('status')}.")
 
-        # Update shared state
         if analysis_result and analysis_result.get('status') in ['success', 'warning']:
             match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE)
             if match:
                 parsed_frequency = int(match.group(1))
                 parsed_filenum = int(match.group(2))
                 peak = analysis_result.get('peak_value')
-                freq_str = str(parsed_frequency)
-                filenum_str = str(parsed_filenum)
-                if freq_str in live_trend_data['raw_peaks']:
-                    live_trend_data['raw_peaks'][freq_str][filenum_str] = peak
+                live_trend_data['raw_peaks'][str(parsed_frequency)][str(parsed_filenum)] = peak
 
         full_trends = calculate_trends(live_trend_data['raw_peaks'], live_analysis_params)
+        logger.info(f"BACKGROUND_TASK: Trend calculation complete. Emitting update to web clients.")
 
-        # When done, emit the results back to the web viewers
         if web_viewer_sids:
             socketio.emit('live_analysis_update', {
                 "filename": original_filename,
@@ -130,101 +134,94 @@ def process_file_in_background(original_filename, content, params_for_this_file)
             }, to=list(web_viewer_sids), broadcast=True)
 
     except Exception as e:
-        logger.error(f"Error processing file {original_filename} in background: {e}", exc_info=True)
+        logger.error(f"BACKGROUND_TASK: CRITICAL ERROR while processing '{original_filename}': {e}", exc_info=True)
     finally:
         if os.path.exists(temp_filepath):
             os.remove(temp_filepath)
+        logger.info(f"BACKGROUND_TASK: Finished job for '{original_filename}'.")
 
 
 # --- Socket.IO Event Handlers ---
 @socketio.on('connect')
 def handle_connect():
     global agent_sid
+    logger.info(f"Client connected with SID: {request.sid}")
+    # ... (rest of the connect logic is unchanged)
     auth_header = request.headers.get('Authorization')
-    token_in_header = auth_header.split(' ')[1] if auth_header and auth_header.startswith('Bearer ') else None
-
-    if token_in_header and token_in_header == AGENT_AUTH_TOKEN:
+    token = auth_header.split(' ')[1] if auth_header and auth_header.startswith('Bearer ') else None
+    if token and token == AGENT_AUTH_TOKEN:
         agent_sid = request.sid
-        logger.info(f"Agent connected with SID: {agent_sid}")
+        logger.info(f"Authenticated client is an AGENT. SID: {agent_sid}")
         emit('agent_status', {'status': 'connected'}, to=list(web_viewer_sids), broadcast=True)
     else:
         web_viewer_sids.add(request.sid)
-        logger.info(f"Web client connected: {request.sid}")
+        logger.info(f"Client is a WEB VIEWER. Total viewers: {len(web_viewer_sids)}")
 
 
 @socketio.on('disconnect')
 def handle_disconnect():
     global agent_sid
+    logger.info(f"Client disconnected: {request.sid}")
+    # ... (rest of the disconnect logic is unchanged)
     if request.sid == agent_sid:
         agent_sid = None
         logger.warning("Agent has disconnected.")
         emit('agent_status', {'status': 'disconnected'}, to=list(web_viewer_sids), broadcast=True)
     elif request.sid in web_viewer_sids:
         web_viewer_sids.remove(request.sid)
-        logger.info(f"Web client disconnected: {request.sid}")
-
-
-@socketio.on('request_agent_status')
-def handle_request_agent_status(data):
-    if request.sid in web_viewer_sids:
-        current_status = 'connected' if agent_sid else 'disconnected'
-        emit('agent_status', {'status': current_status})
+        logger.info(f"Web viewer disconnected. Total viewers: {len(web_viewer_sids)}")
 
 
 @socketio.on('start_analysis_session')
 def handle_start_analysis_session(data):
     global live_analysis_params, live_trend_data
+    logger.info(f"Received 'start_analysis_session' from {request.sid}")
+    # ... (rest of the logic is unchanged)
     if 'analysisParams' in data:
         live_analysis_params = data['analysisParams']
-        live_trend_data = {
-            "raw_peaks": {str(f): {} for f in live_analysis_params.get('frequencies', [])}
-        }
+        live_trend_data = {"raw_peaks": {str(f): {} for f in live_analysis_params.get('frequencies', [])}}
         logger.info("Analysis session started. Params set and trend data reset.")
-
     if 'filters' in data and agent_sid:
         filters = data['filters']
         filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
         emit('set_filters', filters, to=agent_sid)
-        emit('ack_start_session', {'status': 'success', 'message': 'Instructions sent to local agent.'})
+        logger.info(f"Sent 'set_filters' instruction to agent {agent_sid}.")
+        emit('ack_start_session', {'status': 'success', 'message': 'Instructions sent.'})
     elif not agent_sid:
+        logger.warning("'start_analysis_session' received, but no agent is connected.")
         emit('ack_start_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
 
 
 @socketio.on('stream_instrument_data')
 def handle_instrument_data(data):
     """
-    This handler now only receives data, prepares it, and starts a
-    non-blocking background task for analysis.
+    Receives file data and immediately starts a non-blocking background task.
     """
     if request.sid != agent_sid: return
 
-    content = data.get('content')
     original_filename = data.get('filename', 'unknown_file.txt')
+    logger.info(f"Received 'stream_instrument_data' for file '{original_filename}' from agent.")
 
-    if not content or not live_analysis_params: return
-
-    params_for_this_file = live_analysis_params.copy()
-
-    try:
-        match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE)
-        if not match: return
-        params_for_this_file['frequency'] = int(match.group(1))
-    except Exception as e:
-        logger.error(f"Error parsing filename '{original_filename}': {e}")
+    if not live_analysis_params:
+        logger.warning("Received instrument data, but analysis params are not set. Ignoring.")
         return
 
-    required_keys = ['low_xstart', 'low_xend', 'high_xstart', 'high_xend']
-    for key in required_keys:
-        if key not in params_for_this_file:
-            params_for_this_file[key] = None
+    params_for_this_file = live_analysis_params.copy()
+    match = re.search(r'_(\d+)Hz', original_filename, re.IGNORECASE)
+    if match:
+        params_for_this_file['frequency'] = int(match.group(1))
+    else:
+        logger.warning(f"Could not parse frequency from filename: '{original_filename}'.")
+        return
 
-    # Start the analysis in the background so this handler can return immediately
+    # Start the background task
     socketio.start_background_task(
         target=process_file_in_background,
         original_filename=original_filename,
-        content=content,
+        content=data.get('content', ''),
         params_for_this_file=params_for_this_file
     )
+    logger.info(f"Queued background processing for '{original_filename}'. Handler is now free.")
 
 
 # --- HTTP Routes ---
@@ -235,5 +232,5 @@ def index():
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    logger.info("Starting SACMES server...")
+    logger.info("Starting SACMES server in development mode...")
     socketio.run(app, debug=True, host='0.0.0.0', port=5000, use_reloader=False)
