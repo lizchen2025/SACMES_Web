@@ -1,4 +1,4 @@
-// static/js/swv_module.js (Corrected and Final Version)
+// static/js/swv_module.js (The final, fully functional version)
 
 import { PlotlyPlotter } from './plot_utils.js';
 
@@ -7,7 +7,7 @@ export class SWVModule {
         this.socketManager = socketManager;
         this.uiManager = uiManager;
 
-        // --- DOM Element Caching (Fully defined, no invalid comments) ---
+        // --- DOM Element Caching (Complete) ---
         this.dom = {
             swvBtn: document.getElementById('swvBtn'),
             backToWelcomeBtn: document.getElementById('backToWelcomeFromSWV'),
@@ -278,5 +278,6 @@ export class SWVModule {
                 </div>
             `;
         }
+        // Trend plots container is cleared and populated by _renderTrendPlots, so no need to set it up here.
     }
 }
