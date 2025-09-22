@@ -43,7 +43,7 @@ agent_sid, web_viewer_sids, live_analysis_params, live_trend_data = None, set(),
 
 
 # --- Helper function calculate_trends (Unchanged) ---
-def calculate_trends(raw_peaks, params):
+def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
     num_files = params.get('num_files', 1)
     frequencies = params.get('frequencies', [])
     normalization_point = params.get('normalizationPoint', 1)
@@ -54,9 +54,13 @@ def calculate_trends(raw_peaks, params):
     peak_current_trends = {str(f): [None] * num_files for f in frequencies}
     normalized_peak_trends = {str(f): [None] * num_files for f in frequencies}
     kdm_trend = [None] * num_files
+
+    # Get electrode-specific data
+    electrode_data = raw_peaks.get(selected_electrode_key, {})
+
     for i, file_num in enumerate(x_axis_values):
         for freq_str in peak_current_trends:
-            peak = raw_peaks.get(freq_str, {}).get(str(file_num))
+            peak = electrode_data.get(freq_str, {}).get(str(file_num))
             if peak is not None: peak_current_trends[freq_str][i] = peak
     norm_factors = {}
     for freq_str in peak_current_trends:
@@ -88,18 +92,43 @@ def process_file_in_background(original_filename, content, params_for_this_file)
         with open(temp_filepath, 'w', encoding='utf-8') as f:
             f.write(content)
         if not analyze_swv_data: return
-        analysis_result = analyze_swv_data(temp_filepath, params_for_this_file)
+        # Get selected electrode from params (if any)
+        selected_electrode = params_for_this_file.get('selected_electrode')
+        analysis_result = analyze_swv_data(temp_filepath, params_for_this_file, selected_electrode)
         if analysis_result and analysis_result.get('status') in ['success', 'warning']:
-            match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE)
+            # Extract from original filename (without electrode suffix)
+            base_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename
+            match = re.search(r'_(\d+)Hz_?_?(\d+)\.', base_filename, re.IGNORECASE)
             if match:
                 parsed_frequency, parsed_filenum = int(match.group(1)), int(match.group(2))
                 peak = analysis_result.get('peak_value')
-                live_trend_data['raw_peaks'][str(parsed_frequency)][str(parsed_filenum)] = peak
-        full_trends = calculate_trends(live_trend_data['raw_peaks'], live_analysis_params)
+                # Store data per electrode
+                electrode_key = str(selected_electrode) if selected_electrode is not None else 'averaged'
+                freq_key = str(parsed_frequency)
+                file_key = str(parsed_filenum)
+
+                # Initialize nested structure if needed
+                if 'raw_peaks' not in live_trend_data:
+                    live_trend_data['raw_peaks'] = {}
+                if electrode_key not in live_trend_data['raw_peaks']:
+                    live_trend_data['raw_peaks'][electrode_key] = {}
+                if freq_key not in live_trend_data['raw_peaks'][electrode_key]:
+                    live_trend_data['raw_peaks'][electrode_key][freq_key] = {}
+
+                live_trend_data['raw_peaks'][electrode_key][freq_key][file_key] = peak
+        # Get current electrode selection from params
+        current_electrode = live_analysis_params.get('selected_electrode')
+        electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
+        full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key)
         if web_viewer_sids:
-            socketio.emit('live_analysis_update',
-                          {"filename": original_filename, "individual_analysis": analysis_result,
-                           "trend_data": full_trends}, to=list(web_viewer_sids))
+            # Send update with electrode-specific information
+            response_data = {
+                "filename": base_filename,  # Use base filename for frontend processing
+                "individual_analysis": analysis_result,
+                "trend_data": full_trends,
+                "electrode_index": selected_electrode
+            }
+            socketio.emit('live_analysis_update', response_data, to=list(web_viewer_sids))
     except Exception as e:
         logger.error(f"BACKGROUND_TASK: CRITICAL ERROR while processing '{original_filename}': {e}", exc_info=True)
     finally:
@@ -108,9 +137,12 @@ def process_file_in_background(original_filename, content, params_for_this_file)
 
 
 # --- *** NEW *** HELPER FUNCTION TO GENERATE CSV DATA ---
-def generate_csv_data():
+def generate_csv_data(current_electrode=None):
     """
     Generates a CSV formatted string from the current trend data.
+
+    Args:
+        current_electrode: The electrode index to export data for (None for averaged data).
     """
     if not live_trend_data or not live_analysis_params:
         return ""
@@ -131,7 +163,9 @@ def generate_csv_data():
     writer.writerow(header)
 
     # Recalculate full trends to ensure data is consistent
-    full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params)
+    # Use the electrode specified in the export request
+    electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
+    full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key)
 
     # Write data rows
     for i in range(num_files):
@@ -181,7 +215,7 @@ def handle_start_analysis_session(data):
     logger.info(f"Received 'start_analysis_session' from {request.sid}")
     if 'analysisParams' in data:
         live_analysis_params = data['analysisParams']
-        live_trend_data = {"raw_peaks": {str(f): {} for f in live_analysis_params.get('frequencies', [])}}
+        live_trend_data = {"raw_peaks": {}}
         logger.info("Analysis session started. Params set and trend data reset.")
     if 'filters' in data and agent_sid:
         filters = data['filters']
@@ -197,35 +231,61 @@ def handle_instrument_data(data):
     if request.sid != agent_sid: return
     original_filename = data.get('filename', 'unknown_file.txt')
     if not live_analysis_params: return
-    params_for_this_file = live_analysis_params.copy()
+
     match = re.search(r'_(\d+)Hz', original_filename, re.IGNORECASE)
-    if match:
-        params_for_this_file['frequency'] = int(match.group(1))
+    if not match: return
+
+    # Get selected electrodes from analysis params
+    selected_electrodes = live_analysis_params.get('selected_electrodes', [])
+
+    if selected_electrodes:
+        # Process each selected electrode
+        for electrode_idx in selected_electrodes:
+            params_for_this_file = live_analysis_params.copy()
+            params_for_this_file['frequency'] = int(match.group(1))
+            params_for_this_file['selected_electrode'] = electrode_idx
+            params_for_this_file.setdefault('low_xstart', None)
+            params_for_this_file.setdefault('low_xend', None)
+            params_for_this_file.setdefault('high_xstart', None)
+            params_for_this_file.setdefault('high_xend', None)
+
+            socketio.start_background_task(target=process_file_in_background,
+                                         original_filename=f"{original_filename}_electrode_{electrode_idx}",
+                                         content=data.get('content', ''),
+                                         params_for_this_file=params_for_this_file)
     else:
-        return
-    params_for_this_file.setdefault('low_xstart', None)
-    params_for_this_file.setdefault('low_xend', None)
-    params_for_this_file.setdefault('high_xstart', None)
-    params_for_this_file.setdefault('high_xend', None)
-    socketio.start_background_task(target=process_file_in_background, original_filename=original_filename,
-                                   content=data.get('content', ''), params_for_this_file=params_for_this_file)
+        # Original averaging behavior
+        params_for_this_file = live_analysis_params.copy()
+        params_for_this_file['frequency'] = int(match.group(1))
+        params_for_this_file.setdefault('low_xstart', None)
+        params_for_this_file.setdefault('low_xend', None)
+        params_for_this_file.setdefault('high_xstart', None)
+        params_for_this_file.setdefault('high_xend', None)
+
+        socketio.start_background_task(target=process_file_in_background,
+                                     original_filename=original_filename,
+                                     content=data.get('content', ''),
+                                     params_for_this_file=params_for_this_file)
 
 
 # --- *** NEW *** SOCKET.IO EVENT HANDLER FOR EXPORTING DATA ---
 @socketio.on('request_export_data')
-def handle_export_request(data): # <-- 添加了 'data' 参数
+def handle_export_request(data):
     """
     Handles a request from the client to export data to CSV.
     """
     logger.info(f"Received 'request_export_data' from {request.sid} with data: {data}")
     try:
-        csv_data = generate_csv_data()
+        # Get current electrode from request data
+        current_electrode = data.get('current_electrode') if data else None
+        csv_data = generate_csv_data(current_electrode)
         if csv_data:
             emit('export_data_response', {'status': 'success', 'data': csv_data})
         else:
             emit('export_data_response', {'status': 'error', 'message': 'No data available to export.'})
     except Exception as e:
         logger.error(f"Failed to generate CSV for export: {e}", exc_info=True)
+        emit('export_data_response', {'status': 'error', 'message': f'Export failed: {str(e)}'})
 
 
 

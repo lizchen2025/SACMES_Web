@@ -12,23 +12,49 @@ logger = logging.getLogger(__name__)
 
 # --- Main analysis function ---
 
-def analyze_swv_data(file_path, analysis_params):
+def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
     """
     Analyzes a single SWV data file based on provided parameters.
     Implements a robust tangent-based baseline correction using a convex hull approach.
+
+    Args:
+        selected_electrode: Index of specific electrode to analyze (0-based).
+                          If None, uses original averaging behavior.
     """
     delimiter_map = {1: " ", 2: "\t", 3: ","}
     delimiter_char = delimiter_map.get(analysis_params.get('delimiter', 1), " ")
 
-    potentials, currents, _ = ReadData(
-        myfile=file_path,
-        voltage_column_index=analysis_params['voltage_column'] - 1,
-        current_column_start_index=analysis_params['current_column'] - 1,
-        spacing_index=analysis_params['spacing_index'],
-        num_electrodes=analysis_params['num_electrodes'],
-        delimiter_char=delimiter_char,
-        file_extension=analysis_params.get('file_extension', '.txt')
-    )
+    # Handle single electrode analysis or original averaging
+    if selected_electrode is not None:
+        # Single electrode analysis
+        electrodes_data = ReadData(
+            myfile=file_path,
+            voltage_column_index=analysis_params['voltage_column'] - 1,
+            current_column_start_index=analysis_params['current_column'] - 1,
+            spacing_index=analysis_params['spacing_index'],
+            num_electrodes=analysis_params['num_electrodes'],
+            delimiter_char=delimiter_char,
+            file_extension=analysis_params.get('file_extension', '.txt'),
+            selected_electrodes=[selected_electrode]
+        )
+
+        if selected_electrode in electrodes_data:
+            electrode_data = electrodes_data[selected_electrode]
+            potentials = electrode_data['potentials']
+            currents = electrode_data['currents']
+        else:
+            potentials, currents = [], []
+    else:
+        # Original averaging behavior
+        potentials, currents, _ = ReadData(
+            myfile=file_path,
+            voltage_column_index=analysis_params['voltage_column'] - 1,
+            current_column_start_index=analysis_params['current_column'] - 1,
+            spacing_index=analysis_params['spacing_index'],
+            num_electrodes=analysis_params['num_electrodes'],
+            delimiter_char=delimiter_char,
+            file_extension=analysis_params.get('file_extension', '.txt')
+        )
 
     if not potentials or not currents:
         return {"status": "warning", "message": "No valid data found.", "warning_type": "no_data", "potentials": [],

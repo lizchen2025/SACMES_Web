@@ -393,8 +393,14 @@
                     </div>
 
                     <div>
-                        <label for="numElectrodesInput" class="block text-gray-700 text-sm font-bold mb-1">Number of Electrodes (for averaging):</label>
+                        <label for="numElectrodesInput" class="block text-gray-700 text-sm font-bold mb-1">Number of Electrodes:</label>
                         <input type="number" id="numElectrodesInput" value="1" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="selectedElectrodesInput" class="block text-gray-700 text-sm font-bold mb-1">Selected Electrodes (comma-separated, e.g., "0,1,2" or leave empty for averaging):</label>
+                        <input type="text" id="selectedElectrodesInput" placeholder="e.g., 0,1,2 or leave empty"
                                class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
                     </div>
 
@@ -791,6 +797,13 @@
         <!-- Data Visualization Area (Initially hidden, will be shown after analysis) -->
         <div id="visualizationArea" class="hidden screen-card text-center mt-6">
             <h2 class="text-2xl font-bold text-gray-800 mb-4">Data Visualization</h2>
+
+            <!-- Electrode Selection Controls -->
+            <div id="electrodeControls" class="mb-6 flex flex-wrap justify-center gap-2">
+                <span class="text-sm font-medium text-gray-700 self-center mr-2">View Electrode:</span>
+                <!-- Electrode buttons will be dynamically added here -->
+            </div>
+
             <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 <!-- Left Column: Individual Frequency Plots (col-span-1) -->
                 <div id="individualPlotsContainer" class="lg:col-span-1 flex flex-col gap-6">

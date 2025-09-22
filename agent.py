@@ -1,68 +1,52 @@
-# agent.py
-# This is the local agent script that runs on the user's machine.
-# REQUIRED DEPENDENCIES:
-# pip install "python-socketio[client]" watchdog websocket-client
+# agent1.py (Final Version with Configurable Server URL)
+# This version allows the user to input the server URL directly in the GUI.
 
-import time
 import os
 import re
+import time
 import socketio
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 import threading
 from collections import defaultdict
 
-# --- GUI Imports ---
+# --- GUI (using Python's built-in library) ---
 import tkinter as tk
 from tkinter import filedialog, scrolledtext, messagebox
 
 # --- Configuration ---
-SERVER_URL = "http://127.0.0.1:5000"
+# REMOVED: SERVER_URL is now a GUI variable
 AUTH_TOKEN = "your_super_secret_token_here"
+POLLING_INTERVAL_SECONDS = 2
+SEND_DELAY_SECONDS = 0.05
 
 # --- Agent's Internal State ---
-current_filters = {
-    'handle': '',
-    'frequencies': [],
-    'range_start': -1,
-    'range_end': -1,
-    'file_extension': '.txt'
-}
+current_filters = {}
+processed_files = set()
+is_monitoring_active = False
+agent_thread = None
 
 # --- Socket.IO Client Setup ---
-sio = socketio.Client(reconnection_attempts=5, reconnection_delay=5)
-agent_logic_thread = None
-observer = None
+sio = socketio.Client(reconnection_attempts=5, reconnection_delay=5, logger=True, engineio_logger=True)
 
 
-# --- Core Agent Logic ---
-
+# --- Core Agent Logic (Unchanged) ---
 def file_matches_filters(filename):
-    """Checks if a file should be sent based on the current filters."""
-    if not filename.endswith(current_filters.get('file_extension', '.txt')):
-        return False
-    if not current_filters.get('handle') or not current_filters.get('frequencies'):
-        return False
-    if not filename.startswith(current_filters['handle']):
-        return False
+    required_keys = ['handle', 'frequencies', 'range_start', 'range_end', 'file_extension']
+    if not all(k in current_filters for k in required_keys): return False
+    if not filename.endswith(current_filters['file_extension']): return False
+    if not filename.startswith(current_filters['handle']): return False
     try:
         match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
         if not match: return False
         freq, num = int(match.group(1)), int(match.group(2))
     except (ValueError, IndexError):
         return False
-    if freq not in current_filters['frequencies']:
-        return False
-    if not (current_filters['range_start'] <= num <= current_filters['range_end']):
-        return False
-    # No log here to prevent clutter, logging is done when sending
+    if freq not in current_filters['frequencies']: return False
+    if not (current_filters['range_start'] <= num <= current_filters['range_end']): return False
     return True
 
 
 def send_file_to_server(file_path):
-    """Reads a file and sends its content to the server via WebSocket."""
     try:
-        time.sleep(0.1)  # Reduced sleep time for faster batch processing
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
         filename = os.path.basename(file_path)
@@ -71,55 +55,54 @@ def send_file_to_server(file_path):
             sio.emit('stream_instrument_data', {'filename': filename, 'content': content})
         else:
             app.log(f"[Warning] Cannot send '{filename}', not connected.")
+            global is_monitoring_active
+            is_monitoring_active = False
     except Exception as e:
         app.log(f"[Error] Could not read or send file {file_path}: {e}")
 
 
-def process_existing_files_with_filters(directory):
-    """
-    [FIXED] Scans, groups, and sends files in the correct, interleaved order.
-    """
-    app.log("\n--- Scanning for existing files with current filters... ---")
-    try:
-        all_files = os.listdir(directory)
-
-        # Group files by their number
-        files_by_number = defaultdict(list)
-        for filename in all_files:
-            if os.path.isfile(os.path.join(directory, filename)) and file_matches_filters(filename):
-                match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
-                if match:
-                    file_num = int(match.group(2))
-                    files_by_number[file_num].append(filename)
-
-        # Process in numerical order
-        sorted_file_numbers = sorted(files_by_number.keys())
-        app.log(f"Found {len(sorted_file_numbers)} file number groups to process.")
-
-        for num in sorted_file_numbers:
-            # Sort files within the group by frequency to be consistent
-            files_by_number[num].sort()
-            for filename in files_by_number[num]:
-                full_path = os.path.join(directory, filename)
-                send_file_to_server(full_path)
-
-    except Exception as e:
-        app.log(f"[Error] Failed during initial scan: {e}")
-    finally:
-        app.log("--- Finished scanning existing files. Now monitoring for new files. ---\n")
+def monitor_directory_loop(directory):
+    global processed_files
+    app.log(f"--- Started monitoring folder: '{directory}' ---")
+    while is_monitoring_active:
+        try:
+            new_matching_files = [f for f in os.listdir(directory) if
+                                  file_matches_filters(f) and f not in processed_files]
+            if new_matching_files:
+                files_by_number = defaultdict(list)
+                for filename in new_matching_files:
+                    match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
+                    if match: files_by_number[int(match.group(2))].append(filename)
+                app.log(f"Found {len(new_matching_files)} new file(s) to process...")
+                for num in sorted(files_by_number.keys()):
+                    for filename in sorted(files_by_number[num]):
+                        if not is_monitoring_active:
+                            app.log("Monitoring stopped, aborting file sending.")
+                            return
+                        send_file_to_server(os.path.join(directory, filename))
+                        processed_files.add(filename)
+                        time.sleep(SEND_DELAY_SECONDS)
+            time.sleep(POLLING_INTERVAL_SECONDS)
+        except FileNotFoundError:
+            app.log(f"[FATAL] Monitored directory '{directory}' no longer exists. Stopping.")
+            app.stop_monitoring_logic()
+            break
+        except Exception as e:
+            app.log(f"[Error] An unexpected error occurred in the monitoring loop: {e}")
+            time.sleep(POLLING_INTERVAL_SECONDS * 2)
 
 
 # --- Socket.IO Event Handlers ---
 @sio.event
 def connect():
     app.update_status("Connected", "green")
-    app.log(f"Successfully connected to server: {SERVER_URL}")
+    app.log(f"Successfully connected to server: {app.server_url.get()}")
 
 
 @sio.event
 def connect_error(data):
     app.update_status("Connection Failed", "red")
-    app.log(f"Connection failed! Please check if the server is running at {SERVER_URL}.")
+    app.log(f"Connection failed! Please check if the server is running at {app.server_url.get()}.")
 
 
 @sio.event
@@ -130,72 +113,69 @@ def disconnect():
 
 @sio.on('set_filters')
 def on_set_filters(data):
-    """Called when the SERVER sends new filter instructions."""
-    global current_filters
+    global current_filters, processed_files, agent_thread, is_monitoring_active
     app.log(f"<-- Received new filter instructions from server: {data}")
+    current_filters.clear()
     current_filters.update(data)
-    # Use a thread to avoid blocking the UI while scanning
-    scan_thread = threading.Thread(target=process_existing_files_with_filters, args=(app.watch_directory.get(),),
-                                   daemon=True)
-    scan_thread.start()
-
-
-# --- Real-time File System Event Handler ---
-class InstrumentDataHandler(FileSystemEventHandler):
-    def on_created(self, event):
-        if not event.is_directory:
-            filename = os.path.basename(event.src_path)
-            app.log(f"New file detected: '{filename}'")
-            if file_matches_filters(filename):
-                send_file_to_server(event.src_path)
+    processed_files = set()
+    if agent_thread and agent_thread.is_alive():
+        is_monitoring_active = False
+        agent_thread.join()
+    is_monitoring_active = True
+    directory = app.watch_directory.get()
+    agent_thread = threading.Thread(target=monitor_directory_loop, args=(directory,), daemon=True)
+    agent_thread.start()
 
 
 # --- GUI Application Class ---
 class AgentApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("SACMES Local Agent")
-        self.root.geometry("600x450")
-        self.root.minsize(500, 350)
+        self.root.title("SACMES Lightweight Local Agent")
+        self.root.geometry("600x500")  # Increased height for the new input field
+        self.root.minsize(500, 400)
 
-        self.watch_directory = tk.StringVar()
-        self.watch_directory.set("No folder selected")
+        # --- NEW: GUI variables ---
+        self.watch_directory = tk.StringVar(value="No folder selected")
+        self.server_url = tk.StringVar(value="https://sacmes-web-narroyo.apps.cloudapps.unc.edu")
 
         main_frame = tk.Frame(root, padx=10, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        top_frame = tk.Frame(main_frame)
-        top_frame.pack(fill=tk.X)
+        # --- NEW: Server URL Frame ---
+        server_frame = tk.Frame(main_frame, pady=5)
+        server_frame.pack(fill=tk.X)
+        tk.Label(server_frame, text="Server URL:", anchor="w").pack(side=tk.LEFT, padx=(0, 5))
+        self.url_entry = tk.Entry(server_frame, textvariable=self.server_url, font=("Helvetica", 9))
+        self.url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        folder_label = tk.Label(top_frame, text="Monitoring Folder:", anchor="w")
-        folder_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        self.folder_display = tk.Label(top_frame, textvariable=self.watch_directory, fg="blue", anchor="w",
+        # Folder Selection Frame
+        folder_frame = tk.Frame(main_frame)
+        folder_frame.pack(fill=tk.X)
+        tk.Label(folder_frame, text="Monitoring Folder:", anchor="w").pack(side=tk.LEFT, padx=(0, 5))
+        self.folder_display = tk.Label(folder_frame, textvariable=self.watch_directory, fg="blue", anchor="w",
                                        wraplength=350)
         self.folder_display.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        self.select_button = tk.Button(top_frame, text="Select Folder", command=self.select_folder)
+        self.select_button = tk.Button(folder_frame, text="Select Folder", command=self.select_folder)
         self.select_button.pack(side=tk.RIGHT, padx=5)
 
+        # Control Frame
         control_frame = tk.Frame(main_frame, pady=10)
         control_frame.pack(fill=tk.X)
-
-        self.start_button = tk.Button(control_frame, text="Start Monitoring", command=self.start_monitoring,
+        self.start_button = tk.Button(control_frame, text="Connect & Start", command=self.start_monitoring,
                                       state=tk.DISABLED, bg="#D4EDDA")
         self.start_button.pack(side=tk.LEFT)
-
-        status_label = tk.Label(control_frame, text="Server Status:", anchor="e")
-        status_label.pack(side=tk.LEFT, padx=(20, 5))
-
+        self.stop_button = tk.Button(control_frame, text="Stop", command=self.stop_monitoring, state=tk.DISABLED,
+                                     bg="#F8D7DA")
+        self.stop_button.pack(side=tk.LEFT, padx=5)
+        tk.Label(control_frame, text="Server Status:", anchor="e").pack(side=tk.LEFT, padx=(20, 5))
         self.status_display = tk.Label(control_frame, text="Not Connected", fg="red", font=("Helvetica", 10, "bold"))
         self.status_display.pack(side=tk.LEFT)
 
+        # Log Frame
         log_frame = tk.Frame(main_frame)
         log_frame.pack(fill=tk.BOTH, expand=True)
-
-        log_label = tk.Label(log_frame, text="Agent Log:")
-        log_label.pack(anchor="w")
-
+        tk.Label(log_frame, text="Agent Log:").pack(anchor="w")
         self.log_text = scrolledtext.ScrolledText(log_frame, state='disabled', wrap=tk.WORD, font=("Courier New", 9))
         self.log_text.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
 
@@ -205,52 +185,73 @@ class AgentApp:
         directory = filedialog.askdirectory()
         if directory:
             self.watch_directory.set(directory)
-            self.start_button.config(state=tk.NORMAL)
+            if self.server_url.get():  # Enable start button only if URL is also present
+                self.start_button.config(state=tk.NORMAL)
             self.log(f"Folder selected: {directory}")
 
     def start_monitoring(self):
+        if not self.server_url.get().strip():
+            messagebox.showerror("Error", "Please enter a valid server URL.")
+            return
         if self.watch_directory.get() == "No folder selected":
             messagebox.showerror("Error", "Please select a folder to monitor first.")
             return
 
-        self.start_button.config(state=tk.DISABLED, text="Running...")
+        self.start_button.config(state=tk.DISABLED)
+        self.stop_button.config(state=tk.NORMAL)
         self.select_button.config(state=tk.DISABLED)
+        self.url_entry.config(state=tk.DISABLED)  # Disable URL entry while running
 
-        global agent_logic_thread
-        agent_logic_thread = threading.Thread(target=self.run_agent_logic, daemon=True)
-        agent_logic_thread.start()
+        connection_thread = threading.Thread(target=self.run_connection_logic, daemon=True)
+        connection_thread.start()
 
-    def run_agent_logic(self):
-        global observer
+    def run_connection_logic(self):
         try:
+            if sio.connected:
+                self.log("Already connected. Waiting for filter instructions...")
+                return
+
+            server_url_to_connect = self.server_url.get()
             self.log("--- SACMES Local Agent ---")
             self.update_status("Connecting...", "orange")
-            self.log(f"Attempting to connect to server at {SERVER_URL}...")
-
+            self.log(f"Attempting to connect to server at {server_url_to_connect}...")
             headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
-            sio.connect(SERVER_URL, headers=headers, socketio_path='socket.io')
 
-            event_handler = InstrumentDataHandler()
-            observer = Observer()
-            observer.schedule(event_handler, self.watch_directory.get(), recursive=False)
-            observer.start()
+            sio.connect(server_url_to_connect, headers=headers, socketio_path='socket.io', transports=['polling'])
 
-            self.log(f"Successfully started monitoring directory: '{os.path.abspath(self.watch_directory.get())}'")
-            self.log("Agent is now running and waiting for filter instructions from the server...")
-
+            self.log("Agent is now running and waiting for analysis instructions from the server...")
         except socketio.exceptions.ConnectionError as e:
-            self.log(f"[Fatal Error] Could not connect to the server. Is it running? Details: {e}")
+            self.log(f"[FATAL] Could not connect to the server. Is it running? Details: {e}")
             self.update_status("Connection Failed", "red")
+            self.stop_monitoring_logic()
         except Exception as e:
-            self.log(f"[Fatal Error] An unexpected error occurred: {e}")
+            self.log(f"[FATAL] An unexpected error occurred: {e}")
             self.update_status("Error", "red")
+            self.stop_monitoring_logic()
+
+    def stop_monitoring(self):
+        self.log("Stopping process...")
+        self.stop_monitoring_logic()
+        if sio.connected:
+            sio.disconnect()
+
+    def stop_monitoring_logic(self):
+        global is_monitoring_active, agent_thread
+        is_monitoring_active = False
+        if agent_thread and agent_thread.is_alive():
+            agent_thread.join(timeout=POLLING_INTERVAL_SECONDS + 1)
+        self.start_button.config(state=tk.NORMAL)
+        self.stop_button.config(state=tk.DISABLED)
+        self.select_button.config(state=tk.NORMAL)
+        self.url_entry.config(state=tk.NORMAL)  # Re-enable URL entry
+        self.log("Monitoring has been stopped.")
 
     def log(self, message):
         self.root.after(0, self._log_message, message)
 
     def _log_message(self, message):
         self.log_text.config(state='normal')
-        self.log_text.insert(tk.END, f"{message}\n")
+        self.log_text.insert(tk.END, f"{time.strftime('%H:%M:%S')} - {message}\n")
         self.log_text.config(state='disabled')
         self.log_text.see(tk.END)
 
@@ -261,17 +262,11 @@ class AgentApp:
         self.status_display.config(text=text, fg=color)
 
     def on_closing(self):
-        if messagebox.askokcancel("Exit", "Are you sure you want to close the agent?"):
-            global observer
-            if observer and observer.is_alive():
-                observer.stop()
-                observer.join()
-            if sio.connected:
-                sio.disconnect()
+        if messagebox.askokcancel("Quit", "Are you sure you want to close the agent?"):
+            self.stop_monitoring()
             self.root.destroy()
 
 
-# --- Main Execution ---
 if __name__ == "__main__":
     root = tk.Tk()
     app = AgentApp(root)

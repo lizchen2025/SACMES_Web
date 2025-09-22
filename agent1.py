@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import filedialog, scrolledtext, messagebox
 
 # --- Configuration ---
-SERVER_URL = "https://bbb-narroyo.apps.cloudapps.unc.edu/"
+SERVER_URL = "https://ccc-narroyo.apps.cloudapps.unc.edu"
 AUTH_TOKEN = "your_super_secret_token_here"
 POLLING_INTERVAL_SECONDS = 2
 SEND_DELAY_SECONDS = 0.05  # Keep this delay to be gentle on the server

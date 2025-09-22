@@ -18,6 +18,7 @@ export class SWVModule {
                 frequencyInput: document.getElementById('frequencyInput'),
                 numFilesInput: document.getElementById('numFilesInput'),
                 numElectrodesInput: document.getElementById('numElectrodesInput'),
+                selectedElectrodesInput: document.getElementById('selectedElectrodesInput'),
                 sgWindowInput: document.getElementById('sgWindowInput'),
                 sgDegreeInput: document.getElementById('sgDegreeInput'),
                 polyfitDegreeInput: document.getElementById('polyfitDegreeInput'),
@@ -42,6 +43,7 @@ export class SWVModule {
             },
             visualization: {
                 visualizationArea: document.getElementById('visualizationArea'),
+                electrodeControls: document.getElementById('electrodeControls'),
                 individualPlotsContainer: document.getElementById('individualPlotsContainer'),
                 trendPlotsContainer: document.getElementById('trendPlotsContainer'),
                 adjustmentControls: document.getElementById('adjustmentControls'),
@@ -65,7 +67,10 @@ export class SWVModule {
             currentKdmHighFreq: null,
             currentKdmLowFreq: null,
             rawTrendData: null, // Holds the raw peak currents from the server
-            lastCalculatedData: null // Holds the last fully calculated trend object
+            lastCalculatedData: null, // Holds the last fully calculated trend object
+            selectedElectrodes: [], // List of selected electrodes
+            currentElectrode: null, // Currently displayed electrode (null for averaged)
+            electrodeData: {} // Raw data for each electrode
         };
 
         this._setupEventListeners();
@@ -87,12 +92,16 @@ export class SWVModule {
         });
         
         this.dom.visualization.exportDataBtn.addEventListener('click', () => {
-            const defaultFilename = `SACMES_Analysis_${new Date().toISOString().slice(0, 10)}.csv`;
+            const electrodeInfo = this.state.currentElectrode !== null ? `_Electrode_${this.state.currentElectrode}` : '_Averaged';
+            const defaultFilename = `SACMES_Analysis${electrodeInfo}_${new Date().toISOString().slice(0, 10)}.csv`;
             const filename = prompt("Please enter a filename for the CSV export:", defaultFilename);
             if (filename) {
                 this.dom.visualization.exportDataBtn.dataset.filename = filename;
                 this.dom.visualization.exportStatus.textContent = 'Generating export file...';
-                this.socketManager.emit('request_export_data', {});
+                // Send current electrode info to server for correct data export
+                this.socketManager.emit('request_export_data', {
+                    current_electrode: this.state.currentElectrode
+                });
             }
         });
 
@@ -123,19 +132,39 @@ export class SWVModule {
         this.socketManager.on('live_analysis_update', (data) => {
             if (!this.state.isAnalysisRunning) return;
 
-            // 1. Update the source of truth for raw data
-            if (data.trend_data) {
+            // 1. Store electrode-specific data
+            if (data.individual_analysis && data.filename && data.electrode_index !== undefined) {
+                const match = data.filename.match(/_(\d+)Hz_?_?(\d+)\./);
+                if (match) {
+                    const [_, freq, fileNum] = match;
+                    const electrodeKey = data.electrode_index !== null ? data.electrode_index.toString() : 'averaged';
+
+                    // Store analysis result for this electrode
+                    if (!this.state.electrodeData[electrodeKey]) {
+                        this.state.electrodeData[electrodeKey] = {};
+                    }
+                    if (!this.state.electrodeData[electrodeKey][freq]) {
+                        this.state.electrodeData[electrodeKey][freq] = {};
+                    }
+                    this.state.electrodeData[electrodeKey][freq][fileNum] = data.individual_analysis;
+
+                    // 3. Update individual plots only if this is the currently displayed electrode
+                    if (data.electrode_index === this.state.currentElectrode) {
+                        this._updateIndividualPlotsUI(data.filename, data.individual_analysis);
+                    }
+                }
+            }
+
+            // 2. Update the source of truth for raw trend data (only for current electrode)
+            if (data.trend_data && data.electrode_index === this.state.currentElectrode) {
                 this.state.rawTrendData = {
                     peak_current_trends: data.trend_data.peak_current_trends,
                     x_axis_values: data.trend_data.x_axis_values
                 };
-            }
 
-            // 2. Update the small individual plots from the server's analysis
-            this._updateIndividualPlotsUI(data.filename, data.individual_analysis);
-            
-            // 3. Always recalculate and render the trend plots based on the UI controls
-            this._handlePostProcessUpdate();
+                // 4. Always recalculate and render the trend plots based on the UI controls
+                this._handlePostProcessUpdate();
+            }
         });
 
         this.socketManager.on('export_data_response', (data) => {
@@ -162,15 +191,27 @@ export class SWVModule {
     }
 
     _recalculateTrends() {
-        if (!this.state.rawTrendData || !this.state.rawTrendData.peak_current_trends) return null;
-        
+        // Use current electrode to get the right data
+        const currentElectrode = this.state.currentElectrode;
+        const electrodeKey = currentElectrode !== null ? currentElectrode.toString() : 'averaged';
+
+        // If we have rawTrendData (from server), use it; otherwise, reconstruct from stored electrode data
+        let rawPeaks = null;
+        if (this.state.rawTrendData && this.state.rawTrendData.peak_current_trends) {
+            rawPeaks = this.state.rawTrendData.peak_current_trends;
+        } else {
+            // Reconstruct trend data from stored electrode data
+            rawPeaks = this._reconstructTrendDataFromElectrodeData(electrodeKey);
+        }
+
+        if (!rawPeaks) return null;
+
         const newParams = {
             num_files: this.state.currentNumFiles,
             frequencies: this.state.currentFrequencies,
             normalizationPoint: parseInt(this.dom.visualization.postProcessNormalizationPointInput.value)
         };
-        
-        const rawPeaks = this.state.rawTrendData.peak_current_trends;
+
         const { num_files, frequencies } = newParams;
         const freqStrings = frequencies.map(String).sort((a, b) => parseInt(a) - parseInt(b));
         const lowFreqStr = freqStrings[0];
@@ -190,7 +231,7 @@ export class SWVModule {
             normFactors[freq] = (normValue && normValue !== 0) ? normValue : 1.0;
             recalculated.normalized_peak_trends[freq] = Array(num_files).fill(null);
         }
-        
+
         for (let i = 0; i < num_files; i++) {
             for (const freq of freqStrings) {
                 if (rawPeaks[freq] && rawPeaks[freq][i] !== null) {
@@ -206,6 +247,36 @@ export class SWVModule {
         return recalculated;
     }
 
+    _reconstructTrendDataFromElectrodeData(electrodeKey) {
+        const electrodeData = this.state.electrodeData[electrodeKey];
+        if (!electrodeData) return null;
+
+        const rawPeaks = {};
+
+        // Reconstruct peak data for each frequency
+        for (const freq of this.state.currentFrequencies) {
+            const freqStr = freq.toString();
+            const freqData = electrodeData[freqStr];
+
+            if (!freqData) continue;
+
+            rawPeaks[freqStr] = Array(this.state.currentNumFiles).fill(null);
+
+            // Fill in available data
+            for (const fileNum in freqData) {
+                const fileIndex = parseInt(fileNum) - 1;
+                if (fileIndex >= 0 && fileIndex < this.state.currentNumFiles) {
+                    const analysisResult = freqData[fileNum];
+                    if (analysisResult && analysisResult.peak_value !== null) {
+                        rawPeaks[freqStr][fileIndex] = analysisResult.peak_value;
+                    }
+                }
+            }
+        }
+
+        return rawPeaks;
+    }
+
     _handlePostProcessUpdate() {
         const recalculatedData = this._recalculateTrends();
         if (recalculatedData) {
@@ -219,12 +290,28 @@ export class SWVModule {
         if (isNaN(numFiles) || numFiles < 1) { alert("Please enter a valid number of files."); return; }
         const frequencies = this.dom.params.frequencyInput.value.split(',').map(f => parseInt(f.trim())).filter(f => !isNaN(f));
         if (frequencies.length < 2) { alert("Please enter at least two valid frequencies."); return; }
+
+        // Parse selected electrodes
+        const selectedElectrodesStr = this.dom.params.selectedElectrodesInput.value.trim();
+        let selectedElectrodes = [];
+        if (selectedElectrodesStr) {
+            selectedElectrodes = selectedElectrodesStr.split(',')
+                .map(e => parseInt(e.trim()))
+                .filter(e => !isNaN(e) && e >= 0);
+            if (selectedElectrodes.length === 0) {
+                alert("Please enter valid electrode indices (0-based) or leave empty for averaging.");
+                return;
+            }
+        }
         
         this.state = {
             isAnalysisRunning: true, currentFrequencies: frequencies, currentNumFiles: numFiles,
             currentXAxisOptions: this.dom.settings.xAxisOptionsInput.value,
             currentKdmHighFreq: Math.max(...frequencies), currentKdmLowFreq: Math.min(...frequencies),
-            rawTrendData: null, lastCalculatedData: null
+            rawTrendData: null, lastCalculatedData: null,
+            selectedElectrodes: selectedElectrodes,
+            currentElectrode: selectedElectrodes.length > 0 ? selectedElectrodes[0] : null,
+            electrodeData: {}
         };
         
         this.dom.visualization.postProcessNormalizationPointInput.value = this.dom.params.normalizationPointInput.value;
@@ -242,6 +329,8 @@ export class SWVModule {
             spacing_index: parseInt(this.dom.settings.spacingIndexInput.value), delimiter: parseInt(this.dom.settings.delimiterInput.value),
             file_extension: this.dom.settings.fileExtensionInput.value, SelectedOptions: this.dom.settings.selectedOptionsInput.value,
             XaxisOptions: this.state.currentXAxisOptions,
+            selected_electrode: this.state.currentElectrode, // Add current electrode to params
+            selected_electrodes: this.state.selectedElectrodes // Add all selected electrodes
         };
         const filters = { handle: this.dom.params.fileHandleInput.value.trim(), frequencies: this.state.currentFrequencies, range_start: 1, range_end: numFiles };
         
@@ -249,6 +338,7 @@ export class SWVModule {
         this.dom.startAnalysisBtn.disabled = true;
         this.dom.folderStatus.textContent = "Sending instructions to server...";
         this._setupVisualizationLayout();
+        this._setupElectrodeControls();
         this.uiManager.showScreen('visualizationArea');
         this.dom.visualization.adjustmentControls.classList.remove('hidden');
         this.dom.visualization.exportDataBtn.classList.remove('hidden');
@@ -261,9 +351,13 @@ export class SWVModule {
         const match = filename.match(/_(\d+)Hz_?_?(\d+)\./);
         if (match) {
             const [_, freq, fileNum] = match;
+
+            // Only update plots if this data is for the currently selected electrode
+            const currentElectrode = this.state.currentElectrode;
             const plotDivId = `plotArea-${freq}`;
             const fileNumEl = document.getElementById(`fileNumDisplay-${freq}`);
             const peakHeightEl = document.getElementById(`peakHeightDisplay-${freq}`);
+
             if (document.getElementById(plotDivId) && fileNumEl && peakHeightEl) {
                 PlotlyPlotter.plotIndividualData(plotDivId, individual_analysis.potentials, individual_analysis.raw_currents, individual_analysis.smoothed_currents,
                                                 individual_analysis.regression_line, individual_analysis.adjusted_potentials, individual_analysis.auc_vertices, this.dom.settings.selectedOptionsInput.value);
@@ -271,6 +365,38 @@ export class SWVModule {
                 peakHeightEl.textContent = individual_analysis.peak_value !== null ? individual_analysis.peak_value.toFixed(4) : "N/A";
             }
         }
+    }
+
+    _updateIndividualPlotsForElectrode(electrode) {
+        // Update individual plots when switching electrodes
+        const electrodeKey = electrode !== null ? electrode.toString() : 'averaged';
+        const electrodeData = this.state.electrodeData[electrodeKey];
+
+        if (!electrodeData) return;
+
+        // Update both frequency plots
+        [this.state.currentKdmHighFreq, this.state.currentKdmLowFreq].forEach(freq => {
+            const freqData = electrodeData[freq];
+            if (!freqData) return;
+
+            // Get the latest file data for this frequency
+            const fileNumbers = Object.keys(freqData).map(Number).sort((a, b) => b - a);
+            if (fileNumbers.length === 0) return;
+
+            const latestFileNum = fileNumbers[0];
+            const latestData = freqData[latestFileNum];
+
+            const plotDivId = `plotArea-${freq}`;
+            const fileNumEl = document.getElementById(`fileNumDisplay-${freq}`);
+            const peakHeightEl = document.getElementById(`peakHeightDisplay-${freq}`);
+
+            if (document.getElementById(plotDivId) && fileNumEl && peakHeightEl && latestData) {
+                PlotlyPlotter.plotIndividualData(plotDivId, latestData.potentials, latestData.raw_currents, latestData.smoothed_currents,
+                                                latestData.regression_line, latestData.adjusted_potentials, latestData.auc_vertices, this.dom.settings.selectedOptionsInput.value);
+                fileNumEl.textContent = latestFileNum;
+                peakHeightEl.textContent = latestData.peak_value !== null ? latestData.peak_value.toFixed(4) : "N/A";
+            }
+        });
     }
     
     _renderTrendPlots(trendData) {
@@ -283,6 +409,46 @@ export class SWVModule {
         PlotlyPlotter.renderFullTrendPlot('kdmTrendPlot', trendData, freqStrs, xAxisTitle, 'KDM Value', this.state.currentNumFiles, '', 'kdm', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
     }
     
+    _setupElectrodeControls() {
+        const { electrodeControls } = this.dom.visualization;
+        if (!electrodeControls) return;
+
+        // Clear existing buttons
+        const existingButtons = electrodeControls.querySelectorAll('.electrode-btn');
+        existingButtons.forEach(btn => btn.remove());
+
+        // Add "Averaged" button if no specific electrodes selected
+        if (this.state.selectedElectrodes.length === 0) {
+            const avgBtn = document.createElement('button');
+            avgBtn.className = 'electrode-btn px-4 py-2 text-sm font-medium rounded-lg border bg-blue-500 text-white';
+            avgBtn.textContent = 'Averaged';
+            avgBtn.disabled = true; // Current selection
+            electrodeControls.appendChild(avgBtn);
+        } else {
+            // Add buttons for each selected electrode
+            this.state.selectedElectrodes.forEach(electrodeIdx => {
+                const btn = document.createElement('button');
+                btn.className = `electrode-btn px-4 py-2 text-sm font-medium rounded-lg border ${
+                    electrodeIdx === this.state.currentElectrode
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`;
+                btn.textContent = `Electrode ${electrodeIdx}`;
+                btn.onclick = () => this._switchElectrode(electrodeIdx);
+                electrodeControls.appendChild(btn);
+            });
+        }
+    }
+
+    _switchElectrode(electrodeIdx) {
+        if (this.state.currentElectrode === electrodeIdx) return;
+
+        this.state.currentElectrode = electrodeIdx;
+        this._setupElectrodeControls(); // Update button states
+        this._updateIndividualPlotsForElectrode(electrodeIdx); // Update individual plots
+        this._handlePostProcessUpdate(); // Refresh trend plots with new electrode data
+    }
+
     _setupVisualizationLayout() {
         const { individualPlotsContainer } = this.dom.visualization;
         const { currentKdmHighFreq, currentKdmLowFreq } = this.state;

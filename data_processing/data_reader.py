@@ -1,7 +1,13 @@
 import numpy as np
 
-def ReadData(myfile, voltage_column_index, current_column_start_index, spacing_index, num_electrodes, delimiter_char, file_extension=".txt"):
-    """Enhanced ReadData to support Gamry .DTA files by skipping header lines."""
+def ReadData(myfile, voltage_column_index, current_column_start_index, spacing_index, num_electrodes, delimiter_char, file_extension=".txt", selected_electrodes=None):
+    """Enhanced ReadData to support Gamry .DTA files by skipping header lines.
+
+    Args:
+        selected_electrodes: List of electrode indices (0-based) to include in analysis.
+                           If None, all electrodes will be averaged (original behavior).
+                           If list provided, returns data for each selected electrode separately.
+    """
     potentials = []
     currents_raw_per_electrode = [[] for _ in range(num_electrodes)]
     data_dict = {}
@@ -96,9 +102,8 @@ def ReadData(myfile, voltage_column_index, current_column_start_index, spacing_i
                 # logger.error(f"Error parsing data line: {line.strip()} - {e}")
                 pass
 
-    # --- Average currents ---
-    averaged_currents = []
-    # Ensure all electrode lists have the same length before transposing
+    # --- Process currents based on selected_electrodes ---
+    # Ensure all electrode lists have the same length before processing
     min_len = len(potentials)
     if currents_raw_per_electrode:
         for sublist in currents_raw_per_electrode:
@@ -111,18 +116,33 @@ def ReadData(myfile, voltage_column_index, current_column_start_index, spacing_i
         for i in range(len(currents_raw_per_electrode)):
             currents_raw_per_electrode[i] = currents_raw_per_electrode[i][:min_len]
 
-
-    if num_electrodes > 0 and currents_raw_per_electrode and all(len(sublist) == min_len for sublist in currents_raw_per_electrode):
-        if min_len > 0:
-            currents_transposed = np.array(currents_raw_per_electrode).T
-            averaged_currents = np.mean(currents_transposed, axis=1).tolist()
-
-            # Ensure data_dict is populated correctly with averaged currents
-            for i in range(len(potentials)):
-                data_dict.setdefault(potentials[i], []).append(averaged_currents[i])
+    # Process based on selected_electrodes parameter
+    if selected_electrodes is not None:
+        # Return individual electrode data
+        electrodes_data = {}
+        for electrode_idx in selected_electrodes:
+            if 0 <= electrode_idx < len(currents_raw_per_electrode):
+                electrode_currents = currents_raw_per_electrode[electrode_idx][:min_len] if len(currents_raw_per_electrode[electrode_idx]) >= min_len else []
+                electrodes_data[electrode_idx] = {
+                    'potentials': potentials.copy(),
+                    'currents': electrode_currents,
+                    'data_dict': {potentials[i]: [electrode_currents[i]] for i in range(len(potentials))} if electrode_currents else {}
+                }
+        return electrodes_data
     else:
-        # Handle case where no valid currents could be read or lengths mismatch after trimming
+        # Original averaging behavior
         averaged_currents = []
-        potentials = [] # Clear potentials if no valid averaged currents can be formed.
+        if num_electrodes > 0 and currents_raw_per_electrode and all(len(sublist) == min_len for sublist in currents_raw_per_electrode):
+            if min_len > 0:
+                currents_transposed = np.array(currents_raw_per_electrode).T
+                averaged_currents = np.mean(currents_transposed, axis=1).tolist()
 
-    return potentials, averaged_currents, data_dict
+                # Ensure data_dict is populated correctly with averaged currents
+                for i in range(len(potentials)):
+                    data_dict.setdefault(potentials[i], []).append(averaged_currents[i])
+        else:
+            # Handle case where no valid currents could be read or lengths mismatch after trimming
+            averaged_currents = []
+            potentials = [] # Clear potentials if no valid averaged currents can be formed.
+
+        return potentials, averaged_currents, data_dict
