@@ -123,12 +123,18 @@ export class CVModule {
         });
 
         this.socketManager.on('electrode_validation_error', (data) => {
-            alert(data.message);
-            // Reset analysis state
-            this.state.isAnalysisRunning = false;
-            this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
-            this.dom.startAnalysisBtn.disabled = false;
-            this.dom.segmentStatus.textContent = 'Please correct electrode selection and try again.';
+            // Only show alert if analysis is still running (prevent duplicate alerts)
+            if (this.state.isAnalysisRunning) {
+                alert(data.message);
+                // Reset analysis state
+                this.state.isAnalysisRunning = false;
+                this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
+                this.dom.startAnalysisBtn.disabled = false;
+                this.dom.segmentStatus.textContent = 'Please correct electrode selection and try again.';
+
+                // Notify server to stop the analysis session
+                this.socketManager.emit('stop_cv_analysis_session', { reason: 'electrode_validation_failed' });
+            }
         });
 
         this.socketManager.on('live_cv_update', (data) => {

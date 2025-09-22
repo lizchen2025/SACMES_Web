@@ -167,12 +167,18 @@ export class SWVModule {
         });
 
         this.socketManager.on('electrode_validation_error', (data) => {
-            alert(data.message);
-            // Reset analysis state
-            this.state.isAnalysisRunning = false;
-            this.dom.startAnalysisBtn.textContent = 'Start Analysis & Sync';
-            this.dom.startAnalysisBtn.disabled = false;
-            this.dom.folderStatus.textContent = 'Please correct electrode selection and try again.';
+            // Only show alert if analysis is still running (prevent duplicate alerts)
+            if (this.state.isAnalysisRunning) {
+                alert(data.message);
+                // Reset analysis state
+                this.state.isAnalysisRunning = false;
+                this.dom.startAnalysisBtn.textContent = 'Start Analysis & Sync';
+                this.dom.startAnalysisBtn.disabled = false;
+                this.dom.folderStatus.textContent = 'Please correct electrode selection and try again.';
+
+                // Notify server to stop the analysis session
+                this.socketManager.emit('stop_analysis_session', { reason: 'electrode_validation_failed' });
+            }
         });
 
         this.socketManager.on('export_data_response', (data) => {

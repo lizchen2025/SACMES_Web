@@ -43,6 +43,8 @@ if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 AGENT_AUTH_TOKEN = os.environ.get('AGENT_AUTH_TOKEN', "your_super_secret_token_here")
 agent_sid, web_viewer_sids, live_analysis_params, live_trend_data = None, set(), {}, {}
+# Add flag to track validation errors and prevent duplicate alerts
+validation_error_sent = False
 
 
 # --- Helper function calculate_trends (Unchanged) ---
@@ -110,6 +112,19 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
         selected_electrode = params_for_this_file.get('selected_electrode')
         analysis_result = analyze_cv_data(temp_filepath, params_for_this_file, selected_electrode)
 
+        # Handle electrode validation errors for CV
+        if analysis_result and analysis_result.get('status') == 'error' and 'detected_electrodes' in analysis_result:
+            global validation_error_sent
+            if not validation_error_sent:
+                validation_error_sent = True
+                logger.error(f"CV Electrode validation error: {analysis_result.get('message')}")
+                socketio.emit('electrode_validation_error', {
+                    'message': analysis_result.get('message'),
+                    'detected_electrodes': analysis_result.get('detected_electrodes'),
+                    'requested_electrode': analysis_result.get('requested_electrode')
+                }, room=list(web_viewer_sids))
+            return
+
         if analysis_result and analysis_result.get('status') == 'success':
             # Store CV results differently - not in trend data but as individual results
             match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE) or re.search(r'_(\d+)\.', original_filename, re.IGNORECASE)
@@ -159,12 +174,15 @@ def process_file_in_background(original_filename, content, params_for_this_file)
 
         # Handle electrode validation errors
         if analysis_result and analysis_result.get('status') == 'error' and 'detected_electrodes' in analysis_result:
-            logger.error(f"Electrode validation error: {analysis_result.get('message')}")
-            socketio.emit('electrode_validation_error', {
-                'message': analysis_result.get('message'),
-                'detected_electrodes': analysis_result.get('detected_electrodes'),
-                'requested_electrode': analysis_result.get('requested_electrode')
-            }, room=list(web_viewer_sids))
+            global validation_error_sent
+            if not validation_error_sent:
+                validation_error_sent = True
+                logger.error(f"Electrode validation error: {analysis_result.get('message')}")
+                socketio.emit('electrode_validation_error', {
+                    'message': analysis_result.get('message'),
+                    'detected_electrodes': analysis_result.get('detected_electrodes'),
+                    'requested_electrode': analysis_result.get('requested_electrode')
+                }, room=list(web_viewer_sids))
             return
 
         if analysis_result and analysis_result.get('status') in ['success', 'warning']:
@@ -271,7 +289,7 @@ def handle_connect():
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    global agent_sid
+    global agent_sid, validation_error_sent
     logger.info(f"Client disconnected: {request.sid}. Reason: {request.args.get('reason', 'N/A')}")
     if request.sid == agent_sid:
         agent_sid = None
@@ -279,15 +297,19 @@ def handle_disconnect():
         emit('agent_status', {'status': 'disconnected'}, to=list(web_viewer_sids))
     elif request.sid in web_viewer_sids:
         web_viewer_sids.remove(request.sid)
+        # Reset validation error flag when a web viewer disconnects
+        validation_error_sent = False
+        logger.info("Web viewer disconnected, validation error flag reset.")
 
 
 @socketio.on('start_analysis_session')
 def handle_start_analysis_session(data):
-    global live_analysis_params, live_trend_data
+    global live_analysis_params, live_trend_data, validation_error_sent
     logger.info(f"Received 'start_analysis_session' from {request.sid}")
     if 'analysisParams' in data:
         live_analysis_params = data['analysisParams']
         live_trend_data = {"raw_peaks": {}}
+        validation_error_sent = False  # Reset validation error flag
         logger.info("Analysis session started. Params set and trend data reset.")
     if 'filters' in data and agent_sid:
         filters = data['filters']
@@ -300,11 +322,12 @@ def handle_start_analysis_session(data):
 
 @socketio.on('start_cv_analysis_session')
 def handle_start_cv_analysis_session(data):
-    global live_analysis_params, live_trend_data
+    global live_analysis_params, live_trend_data, validation_error_sent
     logger.info(f"Received 'start_cv_analysis_session' from {request.sid}")
     if 'analysisParams' in data:
         live_analysis_params = data['analysisParams']
         live_trend_data = {"cv_results": {}}
+        validation_error_sent = False  # Reset validation error flag
         logger.info("CV Analysis session started. Params set and CV data reset.")
     if 'filters' in data and agent_sid:
         filters = data['filters']
@@ -313,6 +336,40 @@ def handle_start_cv_analysis_session(data):
         emit('ack_start_cv_session', {'status': 'success', 'message': 'CV Instructions sent.'})
     elif not agent_sid:
         emit('ack_start_cv_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
+
+
+@socketio.on('stop_analysis_session')
+def handle_stop_analysis_session(data):
+    global live_analysis_params, live_trend_data, validation_error_sent
+    logger.info(f"Received 'stop_analysis_session' from {request.sid}")
+
+    # Reset all analysis states
+    live_analysis_params = {}
+    live_trend_data = {}
+    validation_error_sent = False
+
+    # Notify agent to stop if connected
+    if agent_sid:
+        emit('stop_data_stream', {}, to=agent_sid)
+
+    logger.info("Analysis session stopped and states reset.")
+
+
+@socketio.on('stop_cv_analysis_session')
+def handle_stop_cv_analysis_session(data):
+    global live_analysis_params, live_trend_data, validation_error_sent
+    logger.info(f"Received 'stop_cv_analysis_session' from {request.sid}")
+
+    # Reset all analysis states
+    live_analysis_params = {}
+    live_trend_data = {}
+    validation_error_sent = False
+
+    # Notify agent to stop if connected
+    if agent_sid:
+        emit('stop_cv_data_stream', {}, to=agent_sid)
+
+    logger.info("CV Analysis session stopped and states reset.")
 
 
 @socketio.on('stream_instrument_data')
