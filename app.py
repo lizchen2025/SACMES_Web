@@ -25,11 +25,14 @@ logger.propagate = False
 
 try:
     from data_processing.swv_analyzer import analyze_swv_data
+    from data_processing.cv_analyzer import analyze_cv_data, get_cv_segments
 
-    logger.info("Successfully imported swv_analyzer.")
+    logger.info("Successfully imported swv_analyzer and cv_analyzer.")
 except ImportError as e:
-    logger.critical(f"FATAL: Failed to import swv_analyzer: {e}")
+    logger.critical(f"FATAL: Failed to import analyzers: {e}")
     analyze_swv_data = None
+    analyze_cv_data = None
+    get_cv_segments = None
 
 # --- App Setup (Unchanged) ---
 app = Flask(__name__, static_folder='static', static_url_path='')
@@ -83,7 +86,55 @@ def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
             "normalized_peak_trends": normalized_peak_trends, "kdm_trend": kdm_trend}
 
 
-# --- Background Task (Unchanged) ---
+# --- Background Task ---
+def process_cv_file_in_background(original_filename, content, params_for_this_file):
+    logger.info(f"CV_BACKGROUND_TASK: Started processing for '{original_filename}'.")
+    filename = secure_filename(original_filename)
+    temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    try:
+        with open(temp_filepath, 'w', encoding='utf-8') as f:
+            f.write(content)
+        if not analyze_cv_data: return
+
+        # Get selected electrode from params (if any)
+        selected_electrode = params_for_this_file.get('selected_electrode')
+        analysis_result = analyze_cv_data(temp_filepath, params_for_this_file, selected_electrode)
+
+        if analysis_result and analysis_result.get('status') == 'success':
+            # Store CV results differently - not in trend data but as individual results
+            match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE) or re.search(r'_(\d+)\.', original_filename, re.IGNORECASE)
+            if match:
+                if len(match.groups()) == 2:
+                    parsed_frequency, parsed_filenum = int(match.group(1)), int(match.group(2))
+                else:
+                    parsed_frequency, parsed_filenum = 0, int(match.group(1))  # No frequency in filename
+
+                electrode_key = str(selected_electrode) if selected_electrode is not None else 'averaged'
+
+                # Initialize CV results structure if needed
+                if 'cv_results' not in live_trend_data:
+                    live_trend_data['cv_results'] = {}
+                if electrode_key not in live_trend_data['cv_results']:
+                    live_trend_data['cv_results'][electrode_key] = {}
+
+                live_trend_data['cv_results'][electrode_key][str(parsed_filenum)] = analysis_result
+
+        if web_viewer_sids:
+            # Send CV update
+            response_data = {
+                "filename": original_filename,
+                "cv_analysis": analysis_result,
+                "electrode_index": selected_electrode
+            }
+            socketio.emit('live_cv_update', response_data, to=list(web_viewer_sids))
+
+    except Exception as e:
+        logger.error(f"CV_BACKGROUND_TASK: CRITICAL ERROR while processing '{original_filename}': {e}", exc_info=True)
+    finally:
+        if os.path.exists(temp_filepath): os.remove(temp_filepath)
+        logger.info(f"CV_BACKGROUND_TASK: Finished job for '{original_filename}'.")
+
+
 def process_file_in_background(original_filename, content, params_for_this_file):
     logger.info(f"BACKGROUND_TASK: Started processing for '{original_filename}'.")
     filename = secure_filename(original_filename)
@@ -226,6 +277,23 @@ def handle_start_analysis_session(data):
         emit('ack_start_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
 
 
+@socketio.on('start_cv_analysis_session')
+def handle_start_cv_analysis_session(data):
+    global live_analysis_params, live_trend_data
+    logger.info(f"Received 'start_cv_analysis_session' from {request.sid}")
+    if 'analysisParams' in data:
+        live_analysis_params = data['analysisParams']
+        live_trend_data = {"cv_results": {}}
+        logger.info("CV Analysis session started. Params set and CV data reset.")
+    if 'filters' in data and agent_sid:
+        filters = data['filters']
+        filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
+        emit('set_filters', filters, to=agent_sid)
+        emit('ack_start_cv_session', {'status': 'success', 'message': 'CV Instructions sent.'})
+    elif not agent_sid:
+        emit('ack_start_cv_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
+
+
 @socketio.on('stream_instrument_data')
 def handle_instrument_data(data):
     if request.sid != agent_sid: return
@@ -266,6 +334,67 @@ def handle_instrument_data(data):
                                      original_filename=original_filename,
                                      content=data.get('content', ''),
                                      params_for_this_file=params_for_this_file)
+
+
+@socketio.on('stream_cv_data')
+def handle_cv_instrument_data(data):
+    if request.sid != agent_sid: return
+    original_filename = data.get('filename', 'unknown_file.txt')
+    if not live_analysis_params: return
+
+    # Get selected electrodes from analysis params
+    selected_electrodes = live_analysis_params.get('selected_electrodes', [])
+
+    if selected_electrodes:
+        # Process each selected electrode for CV
+        for electrode_idx in selected_electrodes:
+            params_for_this_file = live_analysis_params.copy()
+            params_for_this_file['selected_electrode'] = electrode_idx
+
+            socketio.start_background_task(target=process_cv_file_in_background,
+                                         original_filename=f"{original_filename}_electrode_{electrode_idx}",
+                                         content=data.get('content', ''),
+                                         params_for_this_file=params_for_this_file)
+    else:
+        # Original averaging behavior for CV
+        params_for_this_file = live_analysis_params.copy()
+        socketio.start_background_task(target=process_cv_file_in_background,
+                                     original_filename=original_filename,
+                                     content=data.get('content', ''),
+                                     params_for_this_file=params_for_this_file)
+
+
+@socketio.on('get_cv_segments')
+def handle_get_cv_segments(data):
+    """Get available CV segments from uploaded file"""
+    try:
+        if not get_cv_segments:
+            emit('cv_segments_response', {'status': 'error', 'message': 'CV analyzer not available'})
+            return
+
+        file_content = data.get('content', '')
+        analysis_params = data.get('params', {})
+        selected_electrode = analysis_params.get('selected_electrode')
+
+        # Create temporary file
+        filename = secure_filename(data.get('filename', 'temp_cv.txt'))
+        temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+        with open(temp_filepath, 'w', encoding='utf-8') as f:
+            f.write(file_content)
+
+        # Get segments
+        segments_result = get_cv_segments(temp_filepath, analysis_params, selected_electrode)
+
+        # Clean up
+        if os.path.exists(temp_filepath):
+            os.remove(temp_filepath)
+
+        emit('cv_segments_response', segments_result)
+
+    except Exception as e:
+        logger.error(f"Error getting CV segments: {e}", exc_info=True)
+        emit('cv_segments_response', {'status': 'error', 'message': str(e)})
 
 
 # --- *** NEW *** SOCKET.IO EVENT HANDLER FOR EXPORTING DATA ---

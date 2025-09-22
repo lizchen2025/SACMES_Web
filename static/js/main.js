@@ -4,6 +4,7 @@
 import { SocketManager } from './socket_manager.js';
 import { UIManager } from './ui_manager.js';
 import { SWVModule } from './swv_module.js';
+import { CVModule } from './cv_module.js';
 // The HTModule import is kept for completeness of your original file structure.
 import { HTModule } from './ht_module.js';
 
@@ -16,7 +17,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize SWV Module, passing dependencies
     const swvModule = new SWVModule(socketManager, uiManager);
-    
+
+    // Initialize CV Module, passing dependencies
+    const cvModule = new CVModule(socketManager, uiManager);
+
     // Initialize HT Module
     const htModule = new HTModule(uiManager);
 

@@ -340,8 +340,8 @@
                 <button id="swvBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75">
                     SWV
                 </button>
-                <button class="bg-gray-400 text-white font-semibold py-4 px-6 rounded-lg shadow-md cursor-not-allowed transition duration-300 ease-in-out hover-highlight">
-                    CV (Coming Soon)
+                <button id="cvBtn" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75">
+                    CV
                 </button>
                 <button id="htBtn" class="bg-teal-600 hover:bg-teal-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-opacity-75">
                     HT Analysis
@@ -790,6 +790,172 @@
                         Start HT Analysis
                     </button>
                 </div>
+            </div>
+        </div>
+
+        <!-- CV Analysis Screen -->
+        <div id="cvAnalysisScreen" class="hidden screen-card mb-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">CV Analysis</h2>
+                <button id="backToWelcomeFromCV" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg shadow-sm transition duration-300">
+                    &larr; Back to Welcome
+                </button>
+            </div>
+
+            <!-- Agent Status Display -->
+            <div class="mb-6 p-4 border-l-4 border-green-500 bg-green-50 rounded-r-lg">
+                <h4 class="text-md font-bold text-green-800">Local Agent Status</h4>
+                <p id="cvAgentStatus" class="text-sm text-red-700 mt-1">Error: Local agent is disconnected.</p>
+            </div>
+
+            <!-- File Selection and Processing -->
+            <div class="mb-6 p-4 border-l-4 border-yellow-500 bg-yellow-50 rounded-r-lg">
+                <h4 class="text-md font-bold text-yellow-800">File Upload & Segment Detection</h4>
+                <div class="mt-3 flex items-center space-x-4">
+                    <input type="file" id="cvFileUpload" accept=".txt,.csv,.dta" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"/>
+                    <button id="detectCVSegmentsBtn" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg shadow-sm transition duration-300 disabled:opacity-50" disabled>
+                        Detect Segments
+                    </button>
+                </div>
+                <p id="cvSegmentStatus" class="text-sm text-gray-600 mt-2">Upload a CV file to detect scan segments</p>
+            </div>
+
+            <!-- CV Analysis Parameters -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Basic Parameters -->
+                <div class="space-y-4">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Basic Parameters</h3>
+
+                    <div>
+                        <label for="cvFileHandleInput" class="block text-gray-700 text-sm font-bold mb-1">File Handle Pattern (e.g., "CV_"):</label>
+                        <input type="text" id="cvFileHandleInput" value="CV_"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="cvNumFilesInput" class="block text-gray-700 text-sm font-bold mb-1">Number of Files:</label>
+                        <input type="number" id="cvNumFilesInput" value="50" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="cvNumElectrodesInput" class="block text-gray-700 text-sm font-bold mb-1">Number of Electrodes:</label>
+                        <input type="number" id="cvNumElectrodesInput" value="1" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="cvSelectedElectrodesInput" class="block text-gray-700 text-sm font-bold mb-1">Selected Electrodes (comma-separated, e.g., "1,2,3" or leave empty for averaging):</label>
+                        <input type="text" id="cvSelectedElectrodesInput" placeholder="e.g., 1,2,3 or leave empty"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="cvScanRateInput" class="block text-gray-700 text-sm font-bold mb-1">Scan Rate (V/s):</label>
+                        <input type="number" id="cvScanRateInput" value="0.1" step="0.01" min="0.001"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                </div>
+
+                <!-- CV-Specific Parameters -->
+                <div class="space-y-4">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">CV Analysis Parameters</h3>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="cvForwardSegmentInput" class="block text-gray-700 text-sm font-bold mb-1">Forward Segment:</label>
+                            <select id="cvForwardSegmentInput" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                                <option value="">Auto-detect</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="cvReverseSegmentInput" class="block text-gray-700 text-sm font-bold mb-1">Reverse Segment:</label>
+                            <select id="cvReverseSegmentInput" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                                <option value="">Auto-detect</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="cvLowVoltageInput" class="block text-gray-700 text-sm font-bold mb-1">Low Voltage (V):</label>
+                            <input type="number" id="cvLowVoltageInput" value="-0.5" step="0.01"
+                                   class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        </div>
+                        <div>
+                            <label for="cvHighVoltageInput" class="block text-gray-700 text-sm font-bold mb-1">High Voltage (V):</label>
+                            <input type="number" id="cvHighVoltageInput" value="0.5" step="0.01"
+                                   class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="cvMassTransportInput" class="block text-gray-700 text-sm font-bold mb-1">Mass Transport:</label>
+                        <select id="cvMassTransportInput" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                            <option value="surface">Surface-bound</option>
+                            <option value="solution">Solution-phase</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="cvAnalysisOptionsInput" class="block text-gray-700 text-sm font-bold mb-1">Analysis Type:</label>
+                        <select id="cvAnalysisOptionsInput" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                            <option value="Peak Height Extraction">Peak Height Extraction</option>
+                            <option value="Area Under the Curve">Area Under the Curve</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- File Settings (collapsed by default) -->
+            <div class="mt-6">
+                <details class="border border-gray-300 rounded-lg">
+                    <summary class="bg-gray-100 px-4 py-3 cursor-pointer font-semibold text-gray-700">
+                        📁 File Settings
+                    </summary>
+                    <div class="p-4 space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="cvVoltageColumnInput" class="block text-gray-700 text-sm font-bold mb-1">Voltage Column:</label>
+                                <input type="number" id="cvVoltageColumnInput" value="1" min="1"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div>
+                                <label for="cvCurrentColumnInput" class="block text-gray-700 text-sm font-bold mb-1">Current Column:</label>
+                                <input type="number" id="cvCurrentColumnInput" value="2" min="1"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-4">
+                            <div>
+                                <label for="cvSpacingIndexInput" class="block text-gray-700 text-sm font-bold mb-1">Column Spacing:</label>
+                                <input type="number" id="cvSpacingIndexInput" value="1" min="1"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div>
+                                <label for="cvDelimiterInput" class="block text-gray-700 text-sm font-bold mb-1">Delimiter:</label>
+                                <select id="cvDelimiterInput" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                                    <option value="1">Space</option>
+                                    <option value="2">Tab</option>
+                                    <option value="3">Comma</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="cvFileExtensionInput" class="block text-gray-700 text-sm font-bold mb-1">File Extension:</label>
+                                <input type="text" id="cvFileExtensionInput" value=".txt"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                        </div>
+                    </div>
+                </details>
+            </div>
+
+            <!-- Status and Start Button -->
+            <div class="mt-6 text-center">
+                <p id="cvFolderStatus" class="text-sm text-gray-600 mb-4">Configure parameters and start CV analysis</p>
+                <button id="startCVAnalysisBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition duration-300 ease-in-out hover-highlight text-lg">
+                    Start CV Analysis & Sync
+                </button>
             </div>
         </div>
 
