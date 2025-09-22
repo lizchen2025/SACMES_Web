@@ -18,7 +18,8 @@ export class SWVModule {
                 frequencyInput: document.getElementById('frequencyInput'),
                 numFilesInput: document.getElementById('numFilesInput'),
                 selectedElectrodesInput: document.getElementById('selectedElectrodesInput'),
-                filterModeInput: document.getElementById('filterModeInput'),
+                hampelModeInputs: document.querySelectorAll('input[name="hampelMode"]'),
+                sgModeInputs: document.querySelectorAll('input[name="sgMode"]'),
                 hampelWindowInput: document.getElementById('hampelWindowInput'),
                 hampelThresholdInput: document.getElementById('hampelThresholdInput'),
                 sgWindowInput: document.getElementById('sgWindowInput'),
@@ -116,12 +117,15 @@ export class SWVModule {
     }
 
     _setupFilterModeToggle() {
-        const filterModeInput = this.dom.params.filterModeInput;
         const autoModeDescription = document.getElementById('autoModeDescription');
         const manualFilterParams = document.getElementById('manualFilterParams');
 
         const toggleFilterParams = () => {
-            if (filterModeInput.value === 'manual') {
+            const hampelMode = this._getSelectedRadioValue('hampelMode');
+            const sgMode = this._getSelectedRadioValue('sgMode');
+
+            // Show manual params if either filter is set to manual
+            if (hampelMode === 'manual' || sgMode === 'manual') {
                 autoModeDescription.classList.add('hidden');
                 manualFilterParams.classList.remove('hidden');
             } else {
@@ -130,8 +134,20 @@ export class SWVModule {
             }
         };
 
-        filterModeInput.addEventListener('change', toggleFilterParams);
+        // Add event listeners to all radio buttons
+        this.dom.params.hampelModeInputs.forEach(input => {
+            input.addEventListener('change', toggleFilterParams);
+        });
+        this.dom.params.sgModeInputs.forEach(input => {
+            input.addEventListener('change', toggleFilterParams);
+        });
+
         toggleFilterParams(); // Initialize on load
+    }
+
+    _getSelectedRadioValue(name) {
+        const selected = document.querySelector(`input[name="${name}"]:checked`);
+        return selected ? selected.value : null;
     }
     
     _setupSocketHandlers() {
@@ -383,13 +399,17 @@ export class SWVModule {
         this.dom.visualization.postProcessLowFrequencySlopeInput.value = this.dom.params.lowFrequencySlopeInput.value;
         this.dom.visualization.postProcessInjectionPointInput.value = this.dom.params.injectionPointInput.value;
         
+        const hampelMode = this._getSelectedRadioValue('hampelMode');
+        const sgMode = this._getSelectedRadioValue('sgMode');
+
         const analysisParams = {
             num_files: numFiles, frequencies: this.state.currentFrequencies, num_electrodes: this._autoDetectNumElectrodes(),
-            filter_mode: this.dom.params.filterModeInput.value,
-            hampel_window: this.dom.params.filterModeInput.value === 'manual' ? parseInt(this.dom.params.hampelWindowInput.value) : undefined,
-            hampel_threshold: this.dom.params.filterModeInput.value === 'manual' ? parseFloat(this.dom.params.hampelThresholdInput.value) : undefined,
-            sg_window: this.dom.params.filterModeInput.value === 'manual' ? parseInt(this.dom.params.sgWindowInput.value) : undefined,
-            sg_degree: this.dom.params.filterModeInput.value === 'manual' ? parseInt(this.dom.params.sgDegreeInput.value) : undefined,
+            hampel_mode: hampelMode,
+            sg_mode: sgMode,
+            hampel_window: hampelMode === 'manual' ? parseInt(this.dom.params.hampelWindowInput.value) : undefined,
+            hampel_threshold: hampelMode === 'manual' ? parseFloat(this.dom.params.hampelThresholdInput.value) : undefined,
+            sg_window: sgMode === 'manual' ? parseInt(this.dom.params.sgWindowInput.value) : undefined,
+            sg_degree: sgMode === 'manual' ? parseInt(this.dom.params.sgDegreeInput.value) : undefined,
             polyfit_deg: parseInt(this.dom.params.polyfitDegreeInput.value), cutoff_frequency: parseInt(this.dom.params.cutoffFrequencyInput.value),
             normalizationPoint: parseInt(this.dom.params.normalizationPointInput.value), lowFrequencyOffset: parseFloat(this.dom.params.lowFrequencyOffsetInput.value),
             lowFrequencySlope: parseFloat(this.dom.params.lowFrequencySlopeInput.value), injectionPoint: this.dom.params.injectionPointInput.value === '' ? null : parseInt(this.dom.params.injectionPointInput.value),

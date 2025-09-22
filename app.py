@@ -63,8 +63,8 @@ def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
 
     # Calculate x-axis values based on user preference
     if x_axis_options == 'Experiment Time':
-        # Convert file numbers to hours: (file_number - 1) * sample_rate / 3600
-        x_axis_values = [(i * sample_rate) / 3600 for i in range(num_files)]
+        # Convert file numbers to minutes: (file_number - 1) * sample_rate / 60
+        x_axis_values = [(i * sample_rate) / 60 for i in range(num_files)]
     else:
         # Default file number mode
         x_axis_values = list(range(1, num_files + 1))

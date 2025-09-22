@@ -288,69 +288,94 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
     # Calculate FWHM for automatic parameter estimation
     fwhm = calculate_fwhm(adjusted_potentials, adjusted_currents)
 
-    # Get filter mode and parameters
-    filter_mode = analysis_params.get('filter_mode', 'auto')
+    # Get filter modes and parameters
+    hampel_mode = analysis_params.get('hampel_mode', 'disabled')
+    sg_mode = analysis_params.get('sg_mode', 'auto')
 
-    if filter_mode == 'auto':
-        # Automatic mode: Calculate parameters based on FWHM or data length
+    # Handle Hampel filter parameters
+    if hampel_mode == 'auto':
+        # Auto Hampel: Calculate parameters based on FWHM or data length
         if fwhm is not None:
-            # Calculate voltage step size
             voltage_range = max(adjusted_potentials) - min(adjusted_potentials)
             voltage_step = voltage_range / len(adjusted_potentials) if len(adjusted_potentials) > 1 else 0.01
-
-            # Calculate window sizes based on FWHM
             hampel_window_points = max(3, int(fwhm / (10 * voltage_step))) if voltage_step > 0 else 5
-            sg_window_points = max(3, int(fwhm / (3 * voltage_step))) if voltage_step > 0 else 15
         else:
-            # Fallback to data length based calculation
             hampel_window_points = max(3, int(len(adjusted_currents) * 0.1))
-            sg_window_points = max(3, int(len(adjusted_currents) * 0.2))
 
-        # Ensure odd window sizes and reasonable limits
         hampel_window_size = min(hampel_window_points if hampel_window_points % 2 == 1 else hampel_window_points + 1, len(adjusted_currents) // 3)
         hampel_threshold = 3.0  # 3 times MAD
-        sg_window = min(sg_window_points if sg_window_points % 2 == 1 else sg_window_points + 1, len(adjusted_currents) // 2)
-        sg_degree = 2
-    else:
-        # Manual mode: Use provided parameters
+    elif hampel_mode == 'manual':
+        # Manual Hampel: Use provided parameters
         hampel_window_size = analysis_params.get('hampel_window', 5)
         hampel_threshold = analysis_params.get('hampel_threshold', 3.0)
+    else:
+        # Disabled Hampel: Set to None
+        hampel_window_size = None
+        hampel_threshold = None
+
+    # Handle SG filter parameters
+    if sg_mode == 'auto':
+        # Auto SG: Calculate parameters based on FWHM or data length
+        if fwhm is not None:
+            voltage_range = max(adjusted_potentials) - min(adjusted_potentials)
+            voltage_step = voltage_range / len(adjusted_potentials) if len(adjusted_potentials) > 1 else 0.01
+            sg_window_points = max(3, int(fwhm / (3 * voltage_step))) if voltage_step > 0 else 15
+        else:
+            sg_window_points = max(3, int(len(adjusted_currents) * 0.2))
+
+        sg_window = min(sg_window_points if sg_window_points % 2 == 1 else sg_window_points + 1, len(adjusted_currents) // 2)
+        sg_degree = 2
+    elif sg_mode == 'manual':
+        # Manual SG: Use provided parameters
         sg_window = analysis_params.get('sg_window', 5)
         sg_degree = analysis_params.get('sg_degree', 2)
+    else:
+        # Disabled SG: Set to None
+        sg_window = None
+        sg_degree = None
 
-    # Ensure odd window sizes
-    if hampel_window_size % 2 == 0:
-        hampel_window_size += 1
-    if sg_window % 2 == 0:
-        sg_window += 1
+    # Validate and adjust window sizes only if filters are enabled
+    if hampel_window_size is not None:
+        if hampel_window_size % 2 == 0:
+            hampel_window_size += 1
+        if hampel_window_size > len(adjusted_currents):
+            hampel_window_size = len(adjusted_currents) if len(adjusted_currents) % 2 != 0 else len(adjusted_currents) - 1
 
-    # Validate window sizes
-    min_effective_sg_window = max(3, sg_degree + 1)
-    if sg_window <= sg_degree:
-        sg_window = sg_degree + 2 if (sg_degree + 2) % 2 != 0 else sg_degree + 3
-    if sg_window < min_effective_sg_window:
-        sg_window = min_effective_sg_window
-    if sg_window > len(adjusted_currents):
-        sg_window = len(adjusted_currents) if len(adjusted_currents) % 2 != 0 else len(adjusted_currents) - 1
-    if sg_window < min_effective_sg_window:
-        sg_window = min_effective_sg_window
+    if sg_window is not None:
+        if sg_window % 2 == 0:
+            sg_window += 1
 
-    if hampel_window_size > len(adjusted_currents):
-        hampel_window_size = len(adjusted_currents) if len(adjusted_currents) % 2 != 0 else len(adjusted_currents) - 1
+        min_effective_sg_window = max(3, sg_degree + 1)
+        if sg_window <= sg_degree:
+            sg_window = sg_degree + 2 if (sg_degree + 2) % 2 != 0 else sg_degree + 3
+        if sg_window < min_effective_sg_window:
+            sg_window = min_effective_sg_window
+        if sg_window > len(adjusted_currents):
+            sg_window = len(adjusted_currents) if len(adjusted_currents) % 2 != 0 else len(adjusted_currents) - 1
+        if sg_window < min_effective_sg_window:
+            sg_window = min_effective_sg_window
 
-    if sg_window <= sg_degree or sg_window > len(adjusted_currents):
-        return {"status": "error", "message": f"SG filter failed: Data too short for settings.",
-                "potentials": potentials, "raw_currents": currents, "smoothed_currents": [], "regression_line": [],
-                "adjusted_potentials": [], "peak_value": 0, "normalized_currents_data": [], "auc_vertices": [],
-                "filter_params": {}, "qc_metrics": {}}
+        if sg_window <= sg_degree or sg_window > len(adjusted_currents):
+            return {"status": "error", "message": f"SG filter failed: Data too short for settings.",
+                    "potentials": potentials, "raw_currents": currents, "smoothed_currents": [], "regression_line": [],
+                    "adjusted_potentials": [], "peak_value": 0, "normalized_currents_data": [], "auc_vertices": [],
+                    "filter_params": {}, "qc_metrics": {}}
 
     try:
-        # Apply Hampel filter first
+        # Apply filters sequentially based on enabled modes
         adjusted_currents_array = np.array(adjusted_currents)
-        hampel_filtered = hampel_filter(adjusted_currents_array, hampel_window_size, hampel_threshold)
 
-        # Then apply Savitzky-Golay filter
-        adjusted_smoothed_currents = savgol_filter(hampel_filtered, sg_window, sg_degree).tolist()
+        # Apply Hampel filter if enabled
+        if hampel_window_size is not None:
+            hampel_filtered = hampel_filter(adjusted_currents_array, hampel_window_size, hampel_threshold)
+        else:
+            hampel_filtered = adjusted_currents_array
+
+        # Apply Savitzky-Golay filter if enabled
+        if sg_window is not None:
+            adjusted_smoothed_currents = savgol_filter(hampel_filtered, sg_window, sg_degree).tolist()
+        else:
+            adjusted_smoothed_currents = hampel_filtered.tolist()
 
         # Calculate QC metrics
         snr_improvement = calculate_snr(adjusted_currents, adjusted_smoothed_currents)
@@ -360,7 +385,8 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
 
         # Store filter parameters and QC metrics
         filter_params = {
-            'filter_mode': filter_mode,
+            'hampel_mode': hampel_mode,
+            'sg_mode': sg_mode,
             'hampel_window': hampel_window_size,
             'hampel_threshold': hampel_threshold,
             'sg_window': sg_window,
