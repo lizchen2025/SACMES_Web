@@ -119,7 +119,8 @@ export class SWVModule {
         this.dom.settings.xAxisOptionsInput.addEventListener('change', () => {
             if (this.state.isAnalysisRunning && this.state.lastCalculatedData) {
                 this.state.currentXAxisOptions = this.dom.settings.xAxisOptionsInput.value;
-                this._renderTrendPlots(this.state.lastCalculatedData);
+                // Recalculate trends with new x-axis option
+                this._handlePostProcessUpdate();
             }
         });
     }
@@ -304,8 +305,28 @@ export class SWVModule {
         const lowFreqStr = freqStrings[0];
         const highFreqStr = freqStrings[freqStrings.length - 1];
 
+        // Calculate x-axis values based on user preference
+        let x_axis_values;
+
+        // Check if we have server-calculated x_axis_values that match our current settings
+        if (this.state.rawTrendData && this.state.rawTrendData.x_axis_values &&
+            this.state.rawTrendData.x_axis_values.length === num_files) {
+            // Use server-calculated values if available and correct length
+            x_axis_values = this.state.rawTrendData.x_axis_values;
+        } else {
+            // Calculate on client side if server data not available
+            if (this.state.currentXAxisOptions === 'Experiment Time') {
+                // Convert file numbers to minutes: (file_number - 1) * sample_rate / 60
+                const sampleRate = parseFloat(this.dom.settings.sampleRateInput.value) || 20; // seconds per file
+                x_axis_values = Array.from({ length: num_files }, (_, i) => (i * sampleRate) / 60);
+            } else {
+                // Default file number mode
+                x_axis_values = Array.from({ length: num_files }, (_, i) => i + 1);
+            }
+        }
+
         const recalculated = {
-            x_axis_values: Array.from({ length: num_files }, (_, i) => i + 1),
+            x_axis_values: x_axis_values,
             peak_current_trends: rawPeaks,
             normalized_peak_trends: {},
             kdm_trend: Array(num_files).fill(null)
