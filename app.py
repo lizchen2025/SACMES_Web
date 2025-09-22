@@ -75,7 +75,8 @@ def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
     # Get electrode-specific data
     electrode_data = raw_peaks.get(selected_electrode_key, {})
 
-    for i, file_num in enumerate(x_axis_values):
+    for i in range(num_files):
+        file_num = i + 1  # File numbers are 1-based
         for freq_str in peak_current_trends:
             peak = electrode_data.get(freq_str, {}).get(str(file_num))
             if peak is not None: peak_current_trends[freq_str][i] = peak

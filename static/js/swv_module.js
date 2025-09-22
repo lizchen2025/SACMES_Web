@@ -114,23 +114,44 @@ export class SWVModule {
         // Use a single handler for all adjustment updates
         this.dom.visualization.updateInjectionPointBtn.addEventListener('click', () => this._handlePostProcessUpdate());
         this.dom.visualization.applyPostProcessNormalizationBtn.addEventListener('click', () => this._handlePostProcessUpdate());
+
+        // Add listener for x-axis options change during analysis
+        this.dom.settings.xAxisOptionsInput.addEventListener('change', () => {
+            if (this.state.isAnalysisRunning && this.state.lastCalculatedData) {
+                this.state.currentXAxisOptions = this.dom.settings.xAxisOptionsInput.value;
+                this._renderTrendPlots(this.state.lastCalculatedData);
+            }
+        });
     }
 
     _setupFilterModeToggle() {
         const autoModeDescription = document.getElementById('autoModeDescription');
-        const manualFilterParams = document.getElementById('manualFilterParams');
+        const hampelManualParams = document.getElementById('hampelManualParams');
+        const sgManualParams = document.getElementById('sgManualParams');
 
         const toggleFilterParams = () => {
             const hampelMode = this._getSelectedRadioValue('hampelMode');
             const sgMode = this._getSelectedRadioValue('sgMode');
 
-            // Show manual params if either filter is set to manual
-            if (hampelMode === 'manual' || sgMode === 'manual') {
-                autoModeDescription.classList.add('hidden');
-                manualFilterParams.classList.remove('hidden');
-            } else {
+            // Show/hide auto mode description based on whether any filter is in auto mode
+            if (hampelMode === 'auto' || sgMode === 'auto') {
                 autoModeDescription.classList.remove('hidden');
-                manualFilterParams.classList.add('hidden');
+            } else {
+                autoModeDescription.classList.add('hidden');
+            }
+
+            // Show/hide Hampel manual params based on Hampel mode
+            if (hampelMode === 'manual') {
+                hampelManualParams.classList.remove('hidden');
+            } else {
+                hampelManualParams.classList.add('hidden');
+            }
+
+            // Show/hide SG manual params based on SG mode
+            if (sgMode === 'manual') {
+                sgManualParams.classList.remove('hidden');
+            } else {
+                sgManualParams.classList.add('hidden');
             }
         };
 
@@ -495,7 +516,7 @@ export class SWVModule {
         const injectionPoint = parseInt(this.dom.visualization.postProcessInjectionPointInput.value) || null;
         const resizeInterval = parseInt(this.dom.settings.resizeIntervalInput.value);
         const freqStrs = this.state.currentFrequencies.map(String);
-        const xAxisTitle = (this.state.currentXAxisOptions === "Experiment Time") ? 'Experiment Time (h)' : 'File Number';
+        const xAxisTitle = (this.state.currentXAxisOptions === "Experiment Time") ? 'Experiment Time (min)' : 'File Number';
         PlotlyPlotter.renderFullTrendPlot('peakCurrentTrendPlot', trendData, freqStrs, xAxisTitle, 'Peak Current (µA)', this.state.currentNumFiles, '', 'peak', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
         PlotlyPlotter.renderFullTrendPlot('normalizedPeakTrendPlot', trendData, freqStrs, xAxisTitle, 'Normalized Current', this.state.currentNumFiles, '', 'normalized', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
         PlotlyPlotter.renderFullTrendPlot('kdmTrendPlot', trendData, freqStrs, xAxisTitle, 'KDM Value', this.state.currentNumFiles, '', 'kdm', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
