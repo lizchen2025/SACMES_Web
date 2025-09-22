@@ -1,11 +1,14 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
+# Python
 venv/
+*.pyc
+__pycache__/
+.env
 
-# IDE files
-.idea/
-.vscode/
+# Build artifacts
+dist/
+build/
+*.spec
+*.exe
+
+# UPX Tool
+upx-*/
