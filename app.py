@@ -231,7 +231,11 @@ def process_file_in_background(original_filename, content, params_for_this_file)
                 "trend_data": full_trends,
                 "electrode_index": selected_electrode
             }
+            logger.info(f"Sending live_analysis_update to {len(web_viewer_sids)} viewers for file: {base_filename}")
+            logger.info(f"Analysis status: {analysis_result.get('status', 'unknown')}")
             socketio.emit('live_analysis_update', response_data, to=list(web_viewer_sids))
+        else:
+            logger.warning(f"No web viewers connected - analysis result for '{base_filename}' not sent to frontend")
     except Exception as e:
         logger.error(f"BACKGROUND_TASK: CRITICAL ERROR while processing '{original_filename}': {e}", exc_info=True)
     finally:

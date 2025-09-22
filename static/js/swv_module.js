@@ -114,7 +114,10 @@ export class SWVModule {
     }
     
     _setupSocketHandlers() {
-        this.socketManager.on('connect', () => this.socketManager.emit('request_agent_status', {}));
+        this.socketManager.on('connect', () => {
+            console.log('SWV Module: Connected to server');
+            this.socketManager.emit('request_agent_status', {});
+        });
 
         this.socketManager.on('agent_status', (data) => {
             this.dom.agentStatus.className = data.status === 'connected' ? 'text-sm text-green-700 mt-1' : 'text-sm text-red-700 mt-1';
@@ -133,9 +136,17 @@ export class SWVModule {
         });
 
         this.socketManager.on('live_analysis_update', (data) => {
-            if (!this.state.isAnalysisRunning) return;
+            console.log('Received live_analysis_update:', data);
+            console.log('Analysis running state:', this.state.isAnalysisRunning);
+            console.log('Current electrode:', this.state.currentElectrode);
+            console.log('Data electrode_index:', data.electrode_index);
 
-            // 1. Store electrode-specific data
+            if (!this.state.isAnalysisRunning) {
+                console.warn('Ignoring data because analysis is not running');
+                return;
+            }
+
+            // 1. Always store electrode-specific data for all electrodes
             if (data.individual_analysis && data.filename && data.electrode_index !== undefined) {
                 const match = data.filename.match(/_(\d+)Hz_?_?(\d+)\./);
                 if (match) {
@@ -151,6 +162,8 @@ export class SWVModule {
                     }
                     this.state.electrodeData[electrodeKey][freq][fileNum] = data.individual_analysis;
 
+                    console.log(`Stored data for electrode ${electrodeKey}, freq ${freq}, file ${fileNum}`);
+
                     // 3. Update individual plots only if this is the currently displayed electrode
                     if (data.electrode_index === this.state.currentElectrode) {
                         this._updateIndividualPlotsUI(data.filename, data.individual_analysis);
@@ -158,15 +171,30 @@ export class SWVModule {
                 }
             }
 
-            // 2. Update the source of truth for raw trend data (only for current electrode)
-            if (data.trend_data && data.electrode_index === this.state.currentElectrode) {
-                this.state.rawTrendData = {
-                    peak_current_trends: data.trend_data.peak_current_trends,
-                    x_axis_values: data.trend_data.x_axis_values
-                };
+            // 2. Update the source of truth for raw trend data - Fixed logic for electrode matching
+            if (data.trend_data) {
+                console.log('Received trend data for electrode:', data.electrode_index);
+                console.log('Current electrode is:', this.state.currentElectrode);
 
-                // 4. Always recalculate and render the trend plots based on the UI controls
-                this._handlePostProcessUpdate();
+                // Check if this data is for the current electrode or if we should use it anyway
+                const shouldUpdateTrend = (data.electrode_index === this.state.currentElectrode) ||
+                                        (this.state.currentElectrode === null && data.electrode_index === null);
+
+                console.log('Should update trend:', shouldUpdateTrend);
+
+                if (shouldUpdateTrend) {
+                    this.state.rawTrendData = {
+                        peak_current_trends: data.trend_data.peak_current_trends,
+                        x_axis_values: data.trend_data.x_axis_values
+                    };
+
+                    console.log('Updated rawTrendData:', this.state.rawTrendData);
+
+                    // 4. Always recalculate and render the trend plots based on the UI controls
+                    this._handlePostProcessUpdate();
+                } else {
+                    console.log('Skipping trend update - electrode mismatch');
+                }
             }
         });
 

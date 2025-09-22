@@ -249,14 +249,14 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
                 "peak_value": 0, "normalized_currents_data": [], "auc_vertices": []}
 
     min_potential, max_potential = min(potentials), max(potentials)
-    current_freq = analysis_params['frequency']
+    current_freq = analysis_params.get('frequency', 0)
 
-    if current_freq > analysis_params['cutoff_frequency']:
-        xstart_val = analysis_params['high_xstart'] if analysis_params['high_xstart'] is not None else max_potential
-        xend_val = analysis_params['high_xend'] if analysis_params['high_xend'] is not None else min_potential
+    if current_freq > analysis_params.get('cutoff_frequency', 50):
+        xstart_val = analysis_params.get('high_xstart', max_potential)
+        xend_val = analysis_params.get('high_xend', min_potential)
     else:
-        xstart_val = analysis_params['low_xstart'] if analysis_params['low_xstart'] is not None else max_potential
-        xend_val = analysis_params['low_xend'] if analysis_params['low_xend'] is not None else min_potential
+        xstart_val = analysis_params.get('low_xstart', max_potential)
+        xend_val = analysis_params.get('low_xend', min_potential)
 
     # Ensure data is sorted by potential for convex hull algorithm
     data_pairs = sorted(zip(potentials, currents), key=lambda p: p[0])
@@ -276,51 +276,78 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
     adjusted_potentials = [sorted_potentials[i] for i in range_indices]
     adjusted_currents = [sorted_currents[i] for i in range_indices]
 
-    # Apply new combined filtering system (Hampel + SG)
-    try:
-        # Extract filtering parameters
-        filter_mode = analysis_params.get('filter_mode', 'auto')  # 'auto' or 'manual'
+    # Apply filtering system (new combined or legacy SG)
+    filtering_metadata = {}
 
-        hampel_params = None
-        sg_params = None
+    # Check if new filtering system should be used
+    use_new_filtering = analysis_params.get('filter_mode') is not None
 
-        if filter_mode == 'manual':
-            # Manual parameters
-            hampel_params = {
-                'window_size': analysis_params.get('hampel_window', None),
-                'threshold': analysis_params.get('hampel_threshold', 3.0)
+    if use_new_filtering:
+        try:
+            # Extract filtering parameters
+            filter_mode = analysis_params.get('filter_mode', 'auto')  # 'auto' or 'manual'
+
+            hampel_params = None
+            sg_params = None
+
+            if filter_mode == 'manual':
+                # Manual parameters
+                hampel_params = {
+                    'window_size': analysis_params.get('hampel_window', None),
+                    'threshold': analysis_params.get('hampel_threshold', 3.0)
+                }
+                sg_params = {
+                    'window_length': analysis_params.get('sg_window', None),
+                    'polyorder': analysis_params.get('sg_degree', 2)
+                }
+
+            # Apply combined filtering
+            filtering_results = apply_combined_filtering(
+                adjusted_potentials,
+                adjusted_currents,
+                hampel_params=hampel_params,
+                sg_params=sg_params,
+                auto_mode=(filter_mode == 'auto')
+            )
+
+            adjusted_smoothed_currents = filtering_results['final_filtered']
+
+            # Store filtering metadata for export
+            filtering_metadata = {
+                'fwhm': filtering_results['fwhm'],
+                'hampel_params': filtering_results['hampel_params'],
+                'sg_params': filtering_results['sg_params'],
+                'qc_results': filtering_results['qc_results'],
+                'outlier_count': len(filtering_results['outlier_indices'])
             }
-            sg_params = {
-                'window_length': analysis_params.get('sg_window', None),
-                'polyorder': analysis_params.get('sg_degree', 2)
-            }
 
-        # Apply combined filtering
-        filtering_results = apply_combined_filtering(
-            adjusted_potentials,
-            adjusted_currents,
-            hampel_params=hampel_params,
-            sg_params=sg_params,
-            auto_mode=(filter_mode == 'auto')
-        )
+        except Exception as e:
+            logger.error(f"New filtering system failed, falling back to legacy: {e}")
+            use_new_filtering = False
 
-        adjusted_smoothed_currents = filtering_results['final_filtered']
-        qc_results = filtering_results['qc_results']
+    if not use_new_filtering:
+        # Legacy SG filtering for backward compatibility
+        sg_window, sg_degree = analysis_params.get('sg_window', 15), analysis_params.get('sg_degree', 1)
+        if sg_window % 2 == 0: sg_window += 1
+        min_effective_sg_window = max(3, sg_degree + 1)
+        if sg_window <= sg_degree: sg_window = sg_degree + 2 if (sg_degree + 2) % 2 != 0 else sg_degree + 3
+        if sg_window < min_effective_sg_window: sg_window = min_effective_sg_window
+        if sg_window > len(adjusted_currents): sg_window = len(adjusted_currents) if len(
+            adjusted_currents) % 2 != 0 else len(adjusted_currents) - 1
+        if sg_window < min_effective_sg_window: sg_window = min_effective_sg_window
 
-        # Store filtering metadata for export
-        filtering_metadata = {
-            'fwhm': filtering_results['fwhm'],
-            'hampel_params': filtering_results['hampel_params'],
-            'sg_params': filtering_results['sg_params'],
-            'qc_results': qc_results,
-            'outlier_count': len(filtering_results['outlier_indices'])
-        }
+        if sg_window <= sg_degree or sg_window > len(adjusted_currents):
+            return {"status": "error", "message": f"SG filter failed: Data too short for settings.",
+                    "potentials": potentials, "raw_currents": currents, "smoothed_currents": [], "regression_line": [],
+                    "adjusted_potentials": [], "peak_value": 0, "normalized_currents_data": [], "auc_vertices": [], "filtering_metadata": {}}
 
-    except Exception as e:
-        logger.error(f"Combined filtering failed: {e}")
-        return {"status": "error", "message": f"Filtering failed: {e}.", "potentials": potentials,
-                "raw_currents": currents, "smoothed_currents": [], "regression_line": [], "adjusted_potentials": [],
-                "peak_value": 0, "normalized_currents_data": [], "auc_vertices": [], "filtering_metadata": {}}
+        try:
+            # Apply legacy filter on the relevant, sorted data segment
+            adjusted_smoothed_currents = savgol_filter(adjusted_currents, sg_window, sg_degree).tolist()
+        except ValueError as e:
+            return {"status": "error", "message": f"SG filter failed: {e}.", "potentials": potentials,
+                    "raw_currents": currents, "smoothed_currents": [], "regression_line": [], "adjusted_potentials": [],
+                    "peak_value": 0, "normalized_currents_data": [], "auc_vertices": [], "filtering_metadata": {}}
 
     eval_regress = []
     peak_value = 0

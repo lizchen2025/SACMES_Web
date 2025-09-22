@@ -25,16 +25,15 @@ is_monitoring_active = False
 agent_thread = None
 
 # --- Socket.IO Client Setup ---
+# Note: ping_timeout and ping_interval are mainly server-side configurations
+# For client stability, we increase reconnection attempts and delays
 sio = socketio.Client(
     reconnection_attempts=10,
     reconnection_delay=2,
     reconnection_delay_max=10,
     randomization_factor=0.5,
     logger=True,
-    engineio_logger=True,
-    # Increase timeouts to prevent disconnections
-    ping_timeout=120,
-    ping_interval=25
+    engineio_logger=True
 )
 
 
@@ -227,7 +226,13 @@ class AgentApp:
             self.log(f"Attempting to connect to server at {server_url_to_connect}...")
             headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
 
-            sio.connect(server_url_to_connect, headers=headers, socketio_path='socket.io', transports=['polling'])
+            sio.connect(
+                server_url_to_connect,
+                headers=headers,
+                socketio_path='socket.io',
+                transports=['polling'],
+                wait_timeout=10
+            )
 
             self.log("Agent is now running and waiting for analysis instructions from the server...")
         except socketio.exceptions.ConnectionError as e:
