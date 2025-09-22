@@ -38,6 +38,7 @@ export class SWVModule {
                 analysisIntervalInput: document.getElementById('analysisIntervalInput'),
                 resizeIntervalInput: document.getElementById('resizeIntervalInput'),
                 selectedOptionsInput: document.getElementById('selectedOptionsInput'),
+                baselineStrategyInput: document.getElementById('baselineStrategyInput'),
                 xAxisOptionsInput: document.getElementById('xAxisOptionsInput'),
             },
             visualization: {
@@ -356,6 +357,7 @@ export class SWVModule {
             voltage_column: parseInt(this.dom.settings.voltageColumnInput.value), current_column: parseInt(this.dom.settings.currentColumnInput.value),
             spacing_index: parseInt(this.dom.settings.spacingIndexInput.value), delimiter: parseInt(this.dom.settings.delimiterInput.value),
             file_extension: this.dom.settings.fileExtensionInput.value, SelectedOptions: this.dom.settings.selectedOptionsInput.value,
+            baseline_strategy: this.dom.settings.baselineStrategyInput.value,
             xAxisOptions: this.state.currentXAxisOptions,
             sampleRate: parseFloat(this.dom.settings.sampleRateInput.value),
             selected_electrode: this.state.currentElectrode, // Add current electrode to params

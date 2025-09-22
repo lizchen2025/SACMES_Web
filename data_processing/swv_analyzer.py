@@ -10,12 +10,185 @@ from .data_reader import ReadData
 logger = logging.getLogger(__name__)
 
 
+# --- Baseline calculation functions ---
+
+def calculate_original_baseline(adjusted_potentials, adjusted_smoothed_currents, peak_index):
+    """
+    Original baseline strategy: Global minimum point.
+    Uses the lowest current value as the baseline reference point.
+
+    Returns:
+        tuple: (V_left_baseline, I_left_baseline, V_right_baseline, I_right_baseline, baseline_warning_type)
+    """
+    min_idx = np.argmin(adjusted_smoothed_currents)
+    V_baseline = adjusted_potentials[min_idx]
+    I_baseline = adjusted_smoothed_currents[min_idx]
+
+    # For original strategy, use the global minimum as both baseline points
+    return V_baseline, I_baseline, V_baseline, I_baseline, None
+
+
+def find_peak_from_monotonic_change(potentials, currents):
+    """
+    Find peak based on monotonic increase to decrease transition.
+    Uses first derivative to find the transition point.
+
+    Returns:
+        tuple: (peak_current, peak_potential, peak_index) or None if no peak found
+    """
+    if len(currents) < 5:
+        return None
+
+    # Calculate first derivative
+    first_derivative = np.gradient(np.array(currents), np.array(potentials))
+
+    # Find where derivative changes from positive to negative (peak)
+    for i in range(1, len(first_derivative) - 1):
+        if first_derivative[i-1] > 0 and first_derivative[i+1] < 0:
+            # Found a peak - check if it's significant
+            if currents[i] > np.mean(currents):  # Peak should be above average
+                return currents[i], potentials[i], i
+
+    # Fallback: use maximum current value
+    max_idx = np.argmax(currents)
+    return currents[max_idx], potentials[max_idx], max_idx
+
+
+def find_inflection_points(potentials, currents, peak_index):
+    """
+    Find inflection points (curvature changes) on both sides of the peak.
+
+    Returns:
+        tuple: (left_inflection_idx, right_inflection_idx) or None if not found
+    """
+    if len(currents) < 5:
+        return None, None
+
+    # Calculate second derivative to find inflection points
+    second_derivative = np.gradient(np.gradient(currents, potentials), potentials)
+
+    # Find inflection points on the left side of the peak
+    left_inflection_idx = None
+    for i in range(peak_index - 1, 0, -1):
+        if i > 0 and i < len(second_derivative) - 1:
+            # Look for sign change in second derivative
+            if second_derivative[i-1] * second_derivative[i+1] < 0:
+                left_inflection_idx = i
+                break
+
+    # Find inflection points on the right side of the peak
+    right_inflection_idx = None
+    for i in range(peak_index + 1, len(second_derivative) - 1):
+        if i > 0 and i < len(second_derivative) - 1:
+            # Look for sign change in second derivative
+            if second_derivative[i-1] * second_derivative[i+1] < 0:
+                right_inflection_idx = i
+                break
+
+    return left_inflection_idx, right_inflection_idx
+
+
+def calculate_bitangent_baseline(potentials, currents, peak_index, left_inflection_idx, right_inflection_idx):
+    """
+    Calculate baseline using bitangent method.
+    Simulates a line moving up from below until it touches the curve at two points.
+
+    Returns:
+        tuple: (V_left_baseline, I_left_baseline, V_right_baseline, I_right_baseline, warning_type)
+    """
+    if left_inflection_idx is None or right_inflection_idx is None:
+        return None, None, None, None, "no_inflection_points"
+
+    # Define search range around inflection points
+    left_range = range(max(0, left_inflection_idx - 2), min(len(potentials), left_inflection_idx + 3))
+    right_range = range(max(0, right_inflection_idx - 2), min(len(potentials), right_inflection_idx + 3))
+
+    best_baseline = None
+    min_max_distance = float('inf')
+
+    # Try different combinations of tangent points
+    for left_idx in left_range:
+        for right_idx in right_range:
+            if left_idx >= right_idx:
+                continue
+
+            # Calculate line between these two points
+            V_left, I_left = potentials[left_idx], currents[left_idx]
+            V_right, I_right = potentials[right_idx], currents[right_idx]
+
+            if V_right == V_left:
+                continue
+
+            slope = (I_right - I_left) / (V_right - V_left)
+            intercept = I_left - slope * V_left
+
+            # Check if this line is below all data points between left and right
+            valid_baseline = True
+            max_distance_above = 0
+
+            for i in range(left_idx, right_idx + 1):
+                line_value = slope * potentials[i] + intercept
+                distance = currents[i] - line_value
+
+                if distance < -1e-10:  # Line is above data point (with small tolerance)
+                    valid_baseline = False
+                    break
+
+                max_distance_above = max(max_distance_above, distance)
+
+            # If valid and has minimal maximum distance, use this baseline
+            if valid_baseline and max_distance_above < min_max_distance:
+                min_max_distance = max_distance_above
+                best_baseline = (V_left, I_left, V_right, I_right)
+
+    if best_baseline is not None:
+        return best_baseline[0], best_baseline[1], best_baseline[2], best_baseline[3], None
+    else:
+        return None, None, None, None, "no_valid_bitangent"
+
+
+def calculate_intelligent_baseline(adjusted_potentials, adjusted_smoothed_currents):
+    """
+    Intelligent baseline strategy: Peak detection with bitangent method.
+
+    Returns:
+        tuple: (V_left_baseline, I_left_baseline, V_right_baseline, I_right_baseline, baseline_warning_type, peak_current, peak_potential, peak_index)
+    """
+    # Step 1: Find peak based on monotonic change
+    peak_result = find_peak_from_monotonic_change(adjusted_potentials, adjusted_smoothed_currents)
+    if peak_result is None:
+        return None, None, None, None, "no_monotonic_peak", None, None, None
+
+    peak_current, peak_potential, peak_index = peak_result
+
+    # Step 2: Find inflection points on both sides
+    left_inflection_idx, right_inflection_idx = find_inflection_points(adjusted_potentials, adjusted_smoothed_currents, peak_index)
+
+    # Step 3: Apply bitangent method if inflection points exist
+    if left_inflection_idx is not None and right_inflection_idx is not None:
+        V_left, I_left, V_right, I_right, warning_type = calculate_bitangent_baseline(
+            adjusted_potentials, adjusted_smoothed_currents, peak_index, left_inflection_idx, right_inflection_idx
+        )
+
+        if V_left is not None:
+            return V_left, I_left, V_right, I_right, warning_type, peak_current, peak_potential, peak_index
+        else:
+            # Fallback to original method if bitangent fails
+            return calculate_original_baseline(adjusted_potentials, adjusted_smoothed_currents, peak_index) + (peak_current, peak_potential, peak_index)
+    else:
+        # Fallback to original method if no inflection points
+        V_base, I_base, _, _, warning = calculate_original_baseline(adjusted_potentials, adjusted_smoothed_currents, peak_index)
+        return V_base, I_base, V_base, I_base, "no_inflection_fallback", peak_current, peak_potential, peak_index
+
+
 # --- Main analysis function ---
 
 def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
     """
     Analyzes a single SWV data file based on provided parameters.
-    Implements a robust tangent-based baseline correction using a convex hull approach.
+    Supports two baseline strategies:
+    1. Original: Uses convex hull approach (current implementation)
+    2. Intelligent: Uses peak detection and bitangent method
 
     Args:
         selected_electrode: Index of specific electrode to analyze (0-based).
@@ -23,6 +196,9 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
     """
     delimiter_map = {1: " ", 2: "\t", 3: ","}
     delimiter_char = delimiter_map.get(analysis_params.get('delimiter', 1), " ")
+
+    # Extract baseline strategy (default to original for backward compatibility)
+    baseline_strategy = analysis_params.get('baseline_strategy', 'original')
 
     # Handle single electrode analysis or original averaging
     if selected_electrode is not None:
@@ -136,70 +312,83 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
 
     if analysis_params['SelectedOptions'] == "Peak Height Extraction":
         if len(adjusted_potentials) > 2:
-            # Peak finding must be done on smoothed data
-            first_derivative = np.gradient(np.array(adjusted_smoothed_currents), np.array(adjusted_potentials))
-            peak_candidates = []
+            # Choose baseline calculation method based on strategy
+            if baseline_strategy == 'intelligent':
+                # Use intelligent detection strategy
+                result = calculate_intelligent_baseline(adjusted_potentials, adjusted_smoothed_currents)
+                if len(result) == 8:  # Expected return with peak info
+                    V_left_baseline, I_left_baseline, V_right_baseline, I_right_baseline, baseline_warning_type, original_peak_current, peak_potential, peak_index = result
+                else:
+                    V_left_baseline, I_left_baseline, V_right_baseline, I_right_baseline, baseline_warning_type = result
+                    original_peak_current, peak_potential, peak_index = None, None, None
+            else:
+                # Use original convex hull strategy (default)
+                # Peak finding must be done on smoothed data
+                first_derivative = np.gradient(np.array(adjusted_smoothed_currents), np.array(adjusted_potentials))
+                peak_candidates = []
 
-            # Since data is sorted by potential, scan direction is always increasing
-            for i in range(1, len(first_derivative)):
-                if first_derivative[i - 1] > 0 and first_derivative[i] <= 0:
-                    peak_candidates.append((adjusted_smoothed_currents[i], adjusted_potentials[i], i))
+                # Since data is sorted by potential, scan direction is always increasing
+                for i in range(1, len(first_derivative)):
+                    if first_derivative[i - 1] > 0 and first_derivative[i] <= 0:
+                        peak_candidates.append((adjusted_smoothed_currents[i], adjusted_potentials[i], i))
 
-            if peak_candidates:
-                original_peak_current, peak_potential, peak_index = max(peak_candidates, key=lambda x: x[0])
+                if peak_candidates:
+                    original_peak_current, peak_potential, peak_index = max(peak_candidates, key=lambda x: x[0])
 
-                # --- Convex Hull Based Tangent Algorithm ---
-                points = list(zip(adjusted_potentials, adjusted_smoothed_currents))
+                    # --- Convex Hull Based Tangent Algorithm ---
+                    points = list(zip(adjusted_potentials, adjusted_smoothed_currents))
 
-                # Andrew's monotone chain algorithm to find the lower convex hull
-                def cross_product(p1, p2, p3):
-                    return (p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0])
+                    # Andrew's monotone chain algorithm to find the lower convex hull
+                    def cross_product(p1, p2, p3):
+                        return (p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0])
 
-                lower_hull = []
-                for p in points:
-                    while len(lower_hull) >= 2 and cross_product(lower_hull[-2], lower_hull[-1], p) <= 0:
-                        lower_hull.pop()
-                    lower_hull.append(p)
+                    lower_hull = []
+                    for p in points:
+                        while len(lower_hull) >= 2 and cross_product(lower_hull[-2], lower_hull[-1], p) <= 0:
+                            lower_hull.pop()
+                        lower_hull.append(p)
 
-                # Find the baseline edge on the hull that spans the peak
-                baseline_edge_found = False
-                for i in range(len(lower_hull) - 1):
-                    p_left = lower_hull[i]
-                    p_right = lower_hull[i + 1]
+                    # Find the baseline edge on the hull that spans the peak
+                    baseline_edge_found = False
+                    for i in range(len(lower_hull) - 1):
+                        p_left = lower_hull[i]
+                        p_right = lower_hull[i + 1]
 
-                    # Find original indices
-                    idx_left = adjusted_potentials.index(p_left[0])
-                    idx_right = adjusted_potentials.index(p_right[0])
+                        # Find original indices
+                        idx_left = adjusted_potentials.index(p_left[0])
+                        idx_right = adjusted_potentials.index(p_right[0])
 
-                    if idx_left <= peak_index < idx_right:
-                        V_left_baseline, I_left_baseline = p_left
-                        V_right_baseline, I_right_baseline = p_right
-                        baseline_edge_found = True
-                        break
+                        if idx_left <= peak_index < idx_right:
+                            V_left_baseline, I_left_baseline = p_left
+                            V_right_baseline, I_right_baseline = p_right
+                            baseline_edge_found = True
+                            break
 
-                if not baseline_edge_found:
-                    # Fallback if peak is outside the main hull segment (e.g., at the very edge)
-                    baseline_warning_type = "peak_outside_hull_fallback"
-                    min_idx = np.argmin(adjusted_smoothed_currents)
-                    V_left_baseline = V_right_baseline = adjusted_potentials[min_idx]
-                    I_left_baseline = I_right_baseline = adjusted_smoothed_currents[min_idx]
-
-                # --- Apply chosen baseline ---
-                if V_left_baseline is not None:
-                    if V_left_baseline != V_right_baseline:
-                        m = (I_right_baseline - I_left_baseline) / (V_right_baseline - V_left_baseline)
-                        b_line = I_left_baseline - m * V_left_baseline
-                    else:
-                        m, b_line = 0, I_left_baseline
-                    baseline_at_peak = m * peak_potential + b_line
-                    peak_value = original_peak_current - baseline_at_peak
-                    eval_regress = [m * p + b_line for p in adjusted_potentials]
+                    if not baseline_edge_found:
+                        # Fallback if peak is outside the main hull segment (e.g., at the very edge)
+                        baseline_warning_type = "peak_outside_hull_fallback"
+                        min_idx = np.argmin(adjusted_smoothed_currents)
+                        V_left_baseline = V_right_baseline = adjusted_potentials[min_idx]
+                        I_left_baseline = I_right_baseline = adjusted_smoothed_currents[min_idx]
                 else:
                     peak_value = None
-                    baseline_warning_type = "internal_baseline_error"
+                    baseline_warning_type = "no_derivative_peak"
+                    V_left_baseline = I_left_baseline = V_right_baseline = I_right_baseline = None
+
+            # --- Apply chosen baseline ---
+            if V_left_baseline is not None and original_peak_current is not None:
+                if V_left_baseline != V_right_baseline:
+                    m = (I_right_baseline - I_left_baseline) / (V_right_baseline - V_left_baseline)
+                    b_line = I_left_baseline - m * V_left_baseline
+                else:
+                    m, b_line = 0, I_left_baseline
+                baseline_at_peak = m * peak_potential + b_line
+                peak_value = original_peak_current - baseline_at_peak
+                eval_regress = [m * p + b_line for p in adjusted_potentials]
             else:
                 peak_value = None
-                baseline_warning_type = "no_derivative_peak"
+                if baseline_warning_type is None:
+                    baseline_warning_type = "internal_baseline_error"
         else:
             peak_value = None
             baseline_warning_type = "insufficient_points_for_derivative"
