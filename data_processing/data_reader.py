@@ -7,6 +7,11 @@ def ReadData(myfile, voltage_column_index, current_column_start_index, spacing_i
         selected_electrodes: List of electrode indices (0-based) to include in analysis.
                            If None, all electrodes will be averaged (original behavior).
                            If list provided, returns data for each selected electrode separately.
+
+    Returns:
+        dict or tuple: If selected_electrodes is provided, returns dict with electrode data.
+                      Otherwise returns dict with voltage, current, and data_dict keys.
+                      Also includes 'detected_electrodes' key with actual number of electrodes found.
     """
     potentials = []
     currents_raw_per_electrode = [[] for _ in range(num_electrodes)]
@@ -116,6 +121,13 @@ def ReadData(myfile, voltage_column_index, current_column_start_index, spacing_i
         for i in range(len(currents_raw_per_electrode)):
             currents_raw_per_electrode[i] = currents_raw_per_electrode[i][:min_len]
 
+    # Detect actual number of electrodes with valid data
+    detected_electrodes = 0
+    for i, electrode_currents in enumerate(currents_raw_per_electrode):
+        # Check if this electrode has non-zero data
+        if electrode_currents and any(abs(current) > 1e-12 for current in electrode_currents):
+            detected_electrodes = i + 1
+
     # Process based on selected_electrodes parameter
     if selected_electrodes is not None:
         # Return individual electrode data
@@ -128,6 +140,7 @@ def ReadData(myfile, voltage_column_index, current_column_start_index, spacing_i
                     'currents': electrode_currents,
                     'data_dict': {potentials[i]: [electrode_currents[i]] for i in range(len(potentials))} if electrode_currents else {}
                 }
+        electrodes_data['detected_electrodes'] = detected_electrodes
         return electrodes_data
     else:
         # Original averaging behavior
@@ -145,4 +158,9 @@ def ReadData(myfile, voltage_column_index, current_column_start_index, spacing_i
             averaged_currents = []
             potentials = [] # Clear potentials if no valid averaged currents can be formed.
 
-        return potentials, averaged_currents, data_dict
+        return {
+            'voltage': potentials,
+            'current': averaged_currents,
+            'data_dict': data_dict,
+            'detected_electrodes': detected_electrodes
+        }

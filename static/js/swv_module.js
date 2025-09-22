@@ -17,7 +17,6 @@ export class SWVModule {
                 fileHandleInput: document.getElementById('fileHandleInput'),
                 frequencyInput: document.getElementById('frequencyInput'),
                 numFilesInput: document.getElementById('numFilesInput'),
-                numElectrodesInput: document.getElementById('numElectrodesInput'),
                 selectedElectrodesInput: document.getElementById('selectedElectrodesInput'),
                 sgWindowInput: document.getElementById('sgWindowInput'),
                 sgDegreeInput: document.getElementById('sgDegreeInput'),
@@ -165,6 +164,15 @@ export class SWVModule {
                 // 4. Always recalculate and render the trend plots based on the UI controls
                 this._handlePostProcessUpdate();
             }
+        });
+
+        this.socketManager.on('electrode_validation_error', (data) => {
+            alert(data.message);
+            // Reset analysis state
+            this.state.isAnalysisRunning = false;
+            this.dom.startAnalysisBtn.textContent = 'Start Analysis & Sync';
+            this.dom.startAnalysisBtn.disabled = false;
+            this.dom.folderStatus.textContent = 'Please correct electrode selection and try again.';
         });
 
         this.socketManager.on('export_data_response', (data) => {
@@ -334,7 +342,7 @@ export class SWVModule {
         this.dom.visualization.postProcessInjectionPointInput.value = this.dom.params.injectionPointInput.value;
         
         const analysisParams = {
-            num_files: numFiles, frequencies: this.state.currentFrequencies, num_electrodes: parseInt(this.dom.params.numElectrodesInput.value),
+            num_files: numFiles, frequencies: this.state.currentFrequencies, num_electrodes: this._autoDetectNumElectrodes(),
             sg_window: parseInt(this.dom.params.sgWindowInput.value), sg_degree: parseInt(this.dom.params.sgDegreeInput.value),
             polyfit_deg: parseInt(this.dom.params.polyfitDegreeInput.value), cutoff_frequency: parseInt(this.dom.params.cutoffFrequencyInput.value),
             normalizationPoint: parseInt(this.dom.params.normalizationPointInput.value), lowFrequencyOffset: parseFloat(this.dom.params.lowFrequencyOffsetInput.value),
@@ -342,7 +350,8 @@ export class SWVModule {
             voltage_column: parseInt(this.dom.settings.voltageColumnInput.value), current_column: parseInt(this.dom.settings.currentColumnInput.value),
             spacing_index: parseInt(this.dom.settings.spacingIndexInput.value), delimiter: parseInt(this.dom.settings.delimiterInput.value),
             file_extension: this.dom.settings.fileExtensionInput.value, SelectedOptions: this.dom.settings.selectedOptionsInput.value,
-            XaxisOptions: this.state.currentXAxisOptions,
+            xAxisOptions: this.state.currentXAxisOptions,
+            sampleRate: parseFloat(this.dom.settings.sampleRateInput.value),
             selected_electrode: this.state.currentElectrode, // Add current electrode to params
             selected_electrodes: this.state.selectedElectrodes // Add all selected electrodes
         };
@@ -487,6 +496,34 @@ export class SWVModule {
                 </div>
             `;
         }
+    }
+
+    _autoDetectNumElectrodes() {
+        // Parse selected electrodes to determine max electrode number needed
+        const selectedElectrodesStr = this.dom.params.selectedElectrodesInput.value.trim();
+        if (selectedElectrodesStr) {
+            const selectedElectrodes = selectedElectrodesStr.split(',')
+                .map(e => parseInt(e.trim()))
+                .filter(e => !isNaN(e) && e >= 1);
+
+            if (selectedElectrodes.length > 0) {
+                // Return the maximum electrode number (they're 1-based in input)
+                return Math.max(...selectedElectrodes);
+            }
+        }
+
+        // Default to 1 electrode if no selection or invalid input
+        return 1;
+    }
+
+    _validateElectrodeCount(detectedElectrodes, requestedElectrodes) {
+        // This function will be called from backend response to validate
+        if (requestedElectrodes.some(e => e > detectedElectrodes)) {
+            const maxRequested = Math.max(...requestedElectrodes);
+            alert(`错误：文件中只检测到 ${detectedElectrodes} 个电极，但您请求了第 ${maxRequested} 号电极。请检查您的电极选择或文件格式设置。`);
+            return false;
+        }
+        return true;
     }
 }
 

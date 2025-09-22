@@ -50,10 +50,20 @@ def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
     num_files = params.get('num_files', 1)
     frequencies = params.get('frequencies', [])
     normalization_point = params.get('normalizationPoint', 1)
+    x_axis_options = params.get('xAxisOptions', 'File Number')
+    sample_rate = params.get('sampleRate', 20)  # seconds per file
+
     if not frequencies: return {}
     frequencies.sort()
     low_freq_str, high_freq_str = str(frequencies[0]), str(frequencies[-1])
-    x_axis_values = list(range(1, num_files + 1))
+
+    # Calculate x-axis values based on user preference
+    if x_axis_options == 'Experiment Time':
+        # Convert file numbers to hours: (file_number - 1) * sample_rate / 3600
+        x_axis_values = [(i * sample_rate) / 3600 for i in range(num_files)]
+    else:
+        # Default file number mode
+        x_axis_values = list(range(1, num_files + 1))
     peak_current_trends = {str(f): [None] * num_files for f in frequencies}
     normalized_peak_trends = {str(f): [None] * num_files for f in frequencies}
     kdm_trend = [None] * num_files
@@ -146,6 +156,17 @@ def process_file_in_background(original_filename, content, params_for_this_file)
         # Get selected electrode from params (if any)
         selected_electrode = params_for_this_file.get('selected_electrode')
         analysis_result = analyze_swv_data(temp_filepath, params_for_this_file, selected_electrode)
+
+        # Handle electrode validation errors
+        if analysis_result and analysis_result.get('status') == 'error' and 'detected_electrodes' in analysis_result:
+            logger.error(f"Electrode validation error: {analysis_result.get('message')}")
+            socketio.emit('electrode_validation_error', {
+                'message': analysis_result.get('message'),
+                'detected_electrodes': analysis_result.get('detected_electrodes'),
+                'requested_electrode': analysis_result.get('requested_electrode')
+            }, room=list(web_viewer_sids))
+            return
+
         if analysis_result and analysis_result.get('status') in ['success', 'warning']:
             # Extract from original filename (without electrode suffix)
             base_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename

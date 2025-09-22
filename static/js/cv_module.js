@@ -21,7 +21,6 @@ export class CVModule {
             params: {
                 fileHandleInput: document.getElementById('cvFileHandleInput'),
                 numFilesInput: document.getElementById('cvNumFilesInput'),
-                numElectrodesInput: document.getElementById('cvNumElectrodesInput'),
                 selectedElectrodesInput: document.getElementById('cvSelectedElectrodesInput'),
                 scanRateInput: document.getElementById('cvScanRateInput'),
                 lowVoltageInput: document.getElementById('cvLowVoltageInput'),
@@ -123,6 +122,15 @@ export class CVModule {
             }
         });
 
+        this.socketManager.on('electrode_validation_error', (data) => {
+            alert(data.message);
+            // Reset analysis state
+            this.state.isAnalysisRunning = false;
+            this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
+            this.dom.startAnalysisBtn.disabled = false;
+            this.dom.segmentStatus.textContent = 'Please correct electrode selection and try again.';
+        });
+
         this.socketManager.on('live_cv_update', (data) => {
             if (!this.state.isAnalysisRunning) return;
 
@@ -220,7 +228,7 @@ export class CVModule {
     _collectAnalysisParams() {
         return {
             num_files: parseInt(this.dom.params.numFilesInput.value),
-            num_electrodes: parseInt(this.dom.params.numElectrodesInput.value),
+            num_electrodes: this._autoDetectNumElectrodes(),
             scan_rate: parseFloat(this.dom.params.scanRateInput.value),
             forward_segment: parseInt(this.dom.visualization.forwardSegmentInput.value) || null,
             reverse_segment: parseInt(this.dom.visualization.reverseSegmentInput.value) || null,
@@ -337,5 +345,33 @@ export class CVModule {
         this.state.isAnalysisRunning = false;
         this.dom.startAnalysisBtn.disabled = false;
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
+    }
+
+    _autoDetectNumElectrodes() {
+        // Parse selected electrodes to determine max electrode number needed
+        const selectedElectrodesStr = this.dom.params.selectedElectrodesInput.value.trim();
+        if (selectedElectrodesStr) {
+            const selectedElectrodes = selectedElectrodesStr.split(',')
+                .map(e => parseInt(e.trim()))
+                .filter(e => !isNaN(e) && e >= 1);
+
+            if (selectedElectrodes.length > 0) {
+                // Return the maximum electrode number (they're 1-based in input)
+                return Math.max(...selectedElectrodes);
+            }
+        }
+
+        // Default to 1 electrode if no selection or invalid input
+        return 1;
+    }
+
+    _validateElectrodeCount(detectedElectrodes, requestedElectrodes) {
+        // This function will be called from backend response to validate
+        if (requestedElectrodes.some(e => e > detectedElectrodes)) {
+            const maxRequested = Math.max(...requestedElectrodes);
+            alert(`错误：文件中只检测到 ${detectedElectrodes} 个电极，但您请求了第 ${maxRequested} 号电极。请检查您的电极选择或文件格式设置。`);
+            return false;
+        }
+        return true;
     }
 }

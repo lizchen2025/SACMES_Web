@@ -53,6 +53,12 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
             selected_electrodes=[electrode_idx]
         )
 
+        # Check electrode validation
+        detected_electrodes = electrodes_data.get('detected_electrodes', 0)
+        if electrode_idx >= detected_electrodes:
+            logger.error(f"Electrode validation failed: File contains {detected_electrodes} electrodes, but electrode {electrode_idx + 1} was requested.")
+            return [], [], {'error': f'electrode_validation_failed', 'detected_electrodes': detected_electrodes, 'requested_electrode': electrode_idx + 1}
+
         if electrode_idx in electrodes_data:
             electrode_data = electrodes_data[electrode_idx]
             potentials = electrode_data['potentials']

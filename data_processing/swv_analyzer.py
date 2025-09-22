@@ -38,6 +38,14 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
             selected_electrodes=[selected_electrode]
         )
 
+        # Check electrode validation
+        detected_electrodes = electrodes_data.get('detected_electrodes', 0)
+        if selected_electrode >= detected_electrodes:
+            return {"status": "error",
+                   "message": f"Electrode validation failed: File contains {detected_electrodes} electrodes, but electrode {selected_electrode + 1} was requested.",
+                   "detected_electrodes": detected_electrodes,
+                   "requested_electrode": selected_electrode + 1}
+
         if selected_electrode in electrodes_data:
             electrode_data = electrodes_data[selected_electrode]
             potentials = electrode_data['potentials']
@@ -46,7 +54,7 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
             potentials, currents = [], []
     else:
         # Original averaging behavior
-        potentials, currents, _ = ReadData(
+        data_result = ReadData(
             myfile=file_path,
             voltage_column_index=analysis_params['voltage_column'] - 1,
             current_column_start_index=analysis_params['current_column'] - 1,
@@ -55,6 +63,8 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
             delimiter_char=delimiter_char,
             file_extension=analysis_params.get('file_extension', '.txt')
         )
+        potentials = data_result['voltage']
+        currents = data_result['current']
 
     if not potentials or not currents:
         return {"status": "warning", "message": "No valid data found.", "warning_type": "no_data", "potentials": [],

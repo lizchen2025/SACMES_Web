@@ -68,20 +68,31 @@ export class PlotlyPlotter {
         const getTraceConfig = (yData, namePrefix, initialColor, injectedColor, injectIdx) => {
             const currentTraces = [];
             if (!yData || yData.length === 0) return [];
-            
+
             if (injectIdx !== null && injectIdx >= 1 && injectIdx <= xData.length) {
                 const xBefore = [], yBefore = [], xAfter = [], yAfter = [];
-                
+
+                // Calculate injection threshold based on mode
+                let injectionThreshold;
+                if (xAxisUnits === 'Experiment Time') {
+                    // For time mode, find the time value corresponding to the injection file number
+                    const injectionIndex = injectIdx - 1; // Convert to 0-based index
+                    injectionThreshold = injectionIndex >= 0 && injectionIndex < xData.length ? xData[injectionIndex] : injectIdx;
+                } else {
+                    // For file number mode, use the injection index directly
+                    injectionThreshold = injectIdx;
+                }
+
                 // Correctly split the data
                 for (let i = 0; i < xData.length; i++) {
                     const xValue = xData[i];
                     // "Before" trace includes all points UP TO AND INCLUDING the injection point
-                    if (xValue <= injectIdx) {
+                    if (xValue <= injectionThreshold) {
                         xBefore.push(xValue);
                         yBefore.push(yData[i]);
                     }
                     // "After" trace includes all points FROM the injection point ONWARD
-                    if (xValue >= injectIdx) {
+                    if (xValue >= injectionThreshold) {
                         xAfter.push(xValue);
                         yAfter.push(yData[i]);
                     }
@@ -118,22 +129,44 @@ export class PlotlyPlotter {
             traces = traces.concat(getTraceConfig(yData, 'KDM', colors.kdmBefore, colors.kdmAfter, injectFileNumIdx));
         }
 
-        const layout = { 
-            title: title, 
-            xaxis: { title: xAxisTitle, range: [1, numFiles] }, 
-            yaxis: { title: yAxisTitle, autorange: true }, 
-            margin: { t: 40, b: 40, l: 60, r: 20 }, 
-            shapes: [], 
-            annotations: [] 
+        // Calculate appropriate x-axis range based on data
+        let xAxisRange;
+        if (xAxisUnits === 'Experiment Time') {
+            // For time mode, use the actual time values from x_axis_values
+            const maxTime = Math.max(...xData);
+            xAxisRange = [0, maxTime];
+        } else {
+            // For file number mode, use traditional 1 to numFiles range
+            xAxisRange = [1, numFiles];
+        }
+
+        const layout = {
+            title: title,
+            xaxis: { title: xAxisTitle, range: xAxisRange },
+            yaxis: { title: yAxisTitle, autorange: true },
+            margin: { t: 40, b: 40, l: 60, r: 20 },
+            shapes: [],
+            annotations: []
         };
 
         if (injectFileNumIdx !== null) {
+            // For time mode, convert injection file number to time
+            let injectionXValue = injectFileNumIdx;
+            if (xAxisUnits === 'Experiment Time') {
+                // Find the corresponding time value for the injection file number
+                // injectionXValue should be the time corresponding to the file number
+                const injectionIndex = injectFileNumIdx - 1; // Convert to 0-based index
+                if (injectionIndex >= 0 && injectionIndex < xData.length) {
+                    injectionXValue = xData[injectionIndex];
+                }
+            }
+
              layout.shapes.push({
-                type: 'line', xref: 'x', yref: 'paper', x0: injectFileNumIdx, y0: 0, x1: injectFileNumIdx, y1: 1,
+                type: 'line', xref: 'x', yref: 'paper', x0: injectionXValue, y0: 0, x1: injectionXValue, y1: 1,
                 line: { color: 'grey', width: 2, dash: 'dot' }
             });
             layout.annotations.push({
-                xref: 'x', yref: 'paper', x: injectFileNumIdx, y: 1.05, text: 'Injection', showarrow: false,
+                xref: 'x', yref: 'paper', x: injectionXValue, y: 1.05, text: 'Injection', showarrow: false,
                 font: { color: 'grey', size: 10 }
             });
         }
