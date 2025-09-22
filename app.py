@@ -10,6 +10,7 @@ import logging
 import sys
 import io
 import csv
+from datetime import datetime
 from flask import Flask, send_from_directory, request
 from flask_socketio import SocketIO, emit
 from werkzeug.utils import secure_filename
@@ -26,18 +27,30 @@ logger.propagate = False
 try:
     from data_processing.swv_analyzer import analyze_swv_data
     from data_processing.cv_analyzer import analyze_cv_data, get_cv_segments
+    from data_processing.excel_exporter import export_swv_data_to_excel, convert_to_csv_fallback
 
-    logger.info("Successfully imported swv_analyzer and cv_analyzer.")
+    logger.info("Successfully imported swv_analyzer, cv_analyzer, and excel_exporter.")
 except ImportError as e:
     logger.critical(f"FATAL: Failed to import analyzers: {e}")
     analyze_swv_data = None
     analyze_cv_data = None
+    export_swv_data_to_excel = None
+    convert_to_csv_fallback = None
     get_cv_segments = None
 
 # --- App Setup (Unchanged) ---
 app = Flask(__name__, static_folder='static', static_url_path='')
 app.config['SECRET_KEY'] = 'a_very_secret_key_that_should_be_changed'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', logger=True, engineio_logger=True)
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='eventlet',
+    logger=True,
+    engineio_logger=True,
+    # Increase timeouts to prevent disconnections
+    ping_timeout=120,
+    ping_interval=25
+)
 UPLOAD_FOLDER = 'temp_uploads'
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -269,6 +282,44 @@ def generate_csv_data(current_electrode=None):
         writer.writerow(row)
 
     return string_io.getvalue()
+
+
+# --- *** NEW *** HELPER FUNCTION TO PREPARE ELECTRODE DATA FOR EXCEL EXPORT ---
+def prepare_electrode_data_for_export(current_electrode=None):
+    """
+    Prepare electrode data structure for Excel export.
+
+    Args:
+        current_electrode: The electrode index to export data for (None for averaged data).
+
+    Returns:
+        dict: Prepared electrode data dictionary
+    """
+    if not live_trend_data or 'raw_peaks' not in live_trend_data:
+        return {}
+
+    try:
+        raw_peaks = live_trend_data['raw_peaks']
+
+        if current_electrode is not None:
+            # Export specific electrode
+            electrode_key = str(current_electrode)
+            if electrode_key in raw_peaks:
+                return {electrode_key: raw_peaks[electrode_key]}
+            else:
+                logger.warning(f"Electrode {current_electrode} not found in data")
+                return {}
+        else:
+            # Export all electrodes or averaged data
+            if 'averaged' in raw_peaks:
+                return {'averaged': raw_peaks['averaged']}
+            else:
+                # Return all electrode data
+                return raw_peaks
+
+    except Exception as e:
+        logger.error(f"Failed to prepare electrode data for export: {e}")
+        return {}
 
 
 # --- Socket.IO Event Handlers (Connect, Disconnect, Start Session are Unchanged) ---
@@ -602,19 +653,42 @@ def handle_cv_data_from_agent(data):
 @socketio.on('request_export_data')
 def handle_export_request(data):
     """
-    Handles a request from the client to export data to CSV.
+    Handles a request from the client to export data to Excel with multiple sheets.
     """
     logger.info(f"Received 'request_export_data' from {request.sid} with data: {data}")
     try:
         # Get current electrode from request data
         current_electrode = data.get('current_electrode') if data else None
+
+        # Try Excel export first
+        if export_swv_data_to_excel and live_trend_data and live_analysis_params:
+            # Prepare electrode data for export
+            electrode_data_dict = prepare_electrode_data_for_export(current_electrode)
+
+            if electrode_data_dict:
+                excel_bytes = export_swv_data_to_excel(electrode_data_dict, live_analysis_params)
+
+                # Convert bytes to base64 for transmission
+                import base64
+                excel_base64 = base64.b64encode(excel_bytes).decode('utf-8')
+
+                emit('export_data_response', {
+                    'status': 'success',
+                    'data': excel_base64,
+                    'format': 'excel',
+                    'filename': f'SACMES_Analysis_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+                })
+                return
+
+        # Fallback to CSV
         csv_data = generate_csv_data(current_electrode)
         if csv_data:
-            emit('export_data_response', {'status': 'success', 'data': csv_data})
+            emit('export_data_response', {'status': 'success', 'data': csv_data, 'format': 'csv'})
         else:
             emit('export_data_response', {'status': 'error', 'message': 'No data available to export.'})
+
     except Exception as e:
-        logger.error(f"Failed to generate CSV for export: {e}", exc_info=True)
+        logger.error(f"Failed to generate export data: {e}", exc_info=True)
         emit('export_data_response', {'status': 'error', 'message': f'Export failed: {str(e)}'})
 
 

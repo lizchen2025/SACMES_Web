@@ -304,11 +304,34 @@
         #annotationTable th {
             background-color: #f9fafb;
         }
+
+        /* Disable style for manual filter parameters */
+        .filter-manual-param:disabled {
+            background-color: #f9f9f9;
+            color: #999;
+        }
     </style>
     <!-- Plotly.js CDN -->
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <!-- Socket.IO Client CDN -->
     <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script>
+        // Filter mode toggle functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const filterModeSelect = document.getElementById('filterModeInput');
+            const manualParams = document.querySelectorAll('.filter-manual-param');
+
+            function toggleFilterParams() {
+                const isManual = filterModeSelect.value === 'manual';
+                manualParams.forEach(param => {
+                    param.disabled = !isManual;
+                });
+            }
+
+            filterModeSelect.addEventListener('change', toggleFilterParams);
+            toggleFilterParams(); // Initialize state
+        });
+    </script>
 </head>
 <body class="bg-gray-100">
 
@@ -401,20 +424,58 @@
 
                     <div class="border-t pt-4 mt-4">
                         <h4 class="text-md font-semibold text-gray-700 mb-2">Signal Processing:</h4>
-                         <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label for="sgWindowInput" class="block text-gray-700 text-sm font-bold mb-1">SG Window:</label>
-                                <input type="number" id="sgWindowInput" value="15" min="3" step="2"
-                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
-                            </div>
-                            <div>
-                                <label for="sgDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">SG Degree:</label>
-                                <input type="number" id="sgDegreeInput" value="1" min="0"
-                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+
+                        <!-- Filter Mode Selection -->
+                        <div class="mb-4">
+                            <label for="filterModeInput" class="block text-gray-700 text-sm font-bold mb-1">Filter Mode:</label>
+                            <select id="filterModeInput"
+                                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                <option value="auto">Auto (FWHM-based)</option>
+                                <option value="manual">Manual Parameters</option>
+                            </select>
+                        </div>
+
+                        <!-- Hampel Filter Settings -->
+                        <div class="mb-4 p-3 bg-gray-50 rounded">
+                            <h5 class="text-sm font-semibold text-gray-600 mb-2">Hampel Filter:</h5>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label for="hampelWindowInput" class="block text-gray-700 text-xs font-bold mb-1">Window Size:</label>
+                                    <input type="number" id="hampelWindowInput" value="5" min="3" max="15" step="2"
+                                           class="shadow appearance-none border rounded w-full py-1 px-2 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight filter-manual-param"
+                                           disabled/>
+                                </div>
+                                <div>
+                                    <label for="hampelThresholdInput" class="block text-gray-700 text-xs font-bold mb-1">Threshold (MAD):</label>
+                                    <input type="number" id="hampelThresholdInput" value="3.0" min="1" max="6" step="0.5"
+                                           class="shadow appearance-none border rounded w-full py-1 px-2 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight filter-manual-param"
+                                           disabled/>
+                                </div>
                             </div>
                         </div>
+
+                        <!-- SG Filter Settings -->
+                        <div class="mb-4 p-3 bg-gray-50 rounded">
+                            <h5 class="text-sm font-semibold text-gray-600 mb-2">Savitzky-Golay Filter:</h5>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label for="sgWindowInput" class="block text-gray-700 text-xs font-bold mb-1">Window Size:</label>
+                                    <input type="number" id="sgWindowInput" value="15" min="7" max="31" step="2"
+                                           class="shadow appearance-none border rounded w-full py-1 px-2 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight filter-manual-param"
+                                           disabled/>
+                                </div>
+                                <div>
+                                    <label for="sgDegreeInput" class="block text-gray-700 text-xs font-bold mb-1">Polynomial Order:</label>
+                                    <input type="number" id="sgDegreeInput" value="2" min="1" max="5"
+                                           class="shadow appearance-none border rounded w-full py-1 px-2 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight filter-manual-param"
+                                           disabled/>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Legacy Settings for Backward Compatibility -->
                         <div class="mt-4">
-                            <label for="polyfitDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">Polyfit Degree:</label>
+                            <label for="polyfitDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">Polyfit Degree (AUC only):</label>
                             <input type="number" id="polyfitDegreeInput" value="15" min="1"
                                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
                         </div>

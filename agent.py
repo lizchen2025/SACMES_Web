@@ -25,7 +25,17 @@ is_monitoring_active = False
 agent_thread = None
 
 # --- Socket.IO Client Setup ---
-sio = socketio.Client(reconnection_attempts=5, reconnection_delay=5, logger=True, engineio_logger=True)
+sio = socketio.Client(
+    reconnection_attempts=10,
+    reconnection_delay=2,
+    reconnection_delay_max=10,
+    randomization_factor=0.5,
+    logger=True,
+    engineio_logger=True,
+    # Increase timeouts to prevent disconnections
+    ping_timeout=120,
+    ping_interval=25
+)
 
 
 # --- Core Agent Logic (Unchanged) ---

@@ -4,8 +4,9 @@ import numpy as np
 from scipy.signal import savgol_filter
 import logging
 
-# Import the new data_reader
+# Import the new data_reader and signal filters
 from .data_reader import ReadData
+from .signal_filters import apply_combined_filtering
 
 logger = logging.getLogger(__name__)
 
@@ -275,34 +276,51 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
     adjusted_potentials = [sorted_potentials[i] for i in range_indices]
     adjusted_currents = [sorted_currents[i] for i in range_indices]
 
-    # Smoothing needs to be done on the original data order if we want to preserve it
-    # But for analysis, using sorted data is simpler and more robust
-    sg_window, sg_degree = analysis_params['sg_window'], analysis_params['sg_degree']
-    if sg_window % 2 == 0: sg_window += 1
-    min_effective_sg_window = max(3, sg_degree + 1)
-    if sg_window <= sg_degree: sg_window = sg_degree + 2 if (sg_degree + 2) % 2 != 0 else sg_degree + 3
-    if sg_window < min_effective_sg_window: sg_window = min_effective_sg_window
-    if sg_window > len(adjusted_currents): sg_window = len(adjusted_currents) if len(
-        adjusted_currents) % 2 != 0 else len(adjusted_currents) - 1
-    if sg_window < min_effective_sg_window: sg_window = min_effective_sg_window
-
-    if sg_window <= sg_degree or sg_window > len(adjusted_currents):
-        return {"status": "error", "message": f"SG filter failed: Data too short for settings.",
-                "potentials": potentials, "raw_currents": currents, "smoothed_currents": [], "regression_line": [],
-                "adjusted_potentials": [], "peak_value": 0, "normalized_currents_data": [], "auc_vertices": []}
-
+    # Apply new combined filtering system (Hampel + SG)
     try:
-        # Apply filter on the relevant, sorted data segment
-        adjusted_smoothed_currents = savgol_filter(adjusted_currents, sg_window, sg_degree).tolist()
-    except ValueError as e:
-        return {"status": "error", "message": f"SG filter failed: {e}.", "potentials": potentials,
-                "raw_currents": currents, "smoothed_currents": [], "regression_line": [], "adjusted_potentials": [],
-                "peak_value": 0, "normalized_currents_data": [], "auc_vertices": []}
+        # Extract filtering parameters
+        filter_mode = analysis_params.get('filter_mode', 'auto')  # 'auto' or 'manual'
 
-    # Reconstruct the full smoothed curve for plotting if needed
-    full_smoothed_currents = list(currents)  # Start with a copy
-    # This part is complex if we need to map back. For now, let's focus on the analysis logic.
-    # The UI plots adjusted_potentials vs adjusted_smoothed_currents anyway for the individual plot.
+        hampel_params = None
+        sg_params = None
+
+        if filter_mode == 'manual':
+            # Manual parameters
+            hampel_params = {
+                'window_size': analysis_params.get('hampel_window', None),
+                'threshold': analysis_params.get('hampel_threshold', 3.0)
+            }
+            sg_params = {
+                'window_length': analysis_params.get('sg_window', None),
+                'polyorder': analysis_params.get('sg_degree', 2)
+            }
+
+        # Apply combined filtering
+        filtering_results = apply_combined_filtering(
+            adjusted_potentials,
+            adjusted_currents,
+            hampel_params=hampel_params,
+            sg_params=sg_params,
+            auto_mode=(filter_mode == 'auto')
+        )
+
+        adjusted_smoothed_currents = filtering_results['final_filtered']
+        qc_results = filtering_results['qc_results']
+
+        # Store filtering metadata for export
+        filtering_metadata = {
+            'fwhm': filtering_results['fwhm'],
+            'hampel_params': filtering_results['hampel_params'],
+            'sg_params': filtering_results['sg_params'],
+            'qc_results': qc_results,
+            'outlier_count': len(filtering_results['outlier_indices'])
+        }
+
+    except Exception as e:
+        logger.error(f"Combined filtering failed: {e}")
+        return {"status": "error", "message": f"Filtering failed: {e}.", "potentials": potentials,
+                "raw_currents": currents, "smoothed_currents": [], "regression_line": [], "adjusted_potentials": [],
+                "peak_value": 0, "normalized_currents_data": [], "auc_vertices": [], "filtering_metadata": {}}
 
     eval_regress = []
     peak_value = 0
@@ -433,4 +451,5 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
         "adjusted_potentials": adjusted_potentials,  # This is somewhat redundant, but kept for consistency
         "peak_value": peak_value,
         "auc_vertices": auc_vertices,
+        "filtering_metadata": filtering_metadata if 'filtering_metadata' in locals() else {}
     }

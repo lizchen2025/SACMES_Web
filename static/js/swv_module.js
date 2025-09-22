@@ -39,6 +39,9 @@ export class SWVModule {
                 resizeIntervalInput: document.getElementById('resizeIntervalInput'),
                 selectedOptionsInput: document.getElementById('selectedOptionsInput'),
                 baselineStrategyInput: document.getElementById('baselineStrategyInput'),
+                filterModeInput: document.getElementById('filterModeInput'),
+                hampelWindowInput: document.getElementById('hampelWindowInput'),
+                hampelThresholdInput: document.getElementById('hampelThresholdInput'),
                 xAxisOptionsInput: document.getElementById('xAxisOptionsInput'),
             },
             visualization: {
@@ -93,8 +96,8 @@ export class SWVModule {
         
         this.dom.visualization.exportDataBtn.addEventListener('click', () => {
             const electrodeInfo = this.state.currentElectrode !== null ? `_Electrode_${this.state.currentElectrode + 1}` : '_Averaged';  // Display as 1-based
-            const defaultFilename = `SACMES_Analysis${electrodeInfo}_${new Date().toISOString().slice(0, 10)}.csv`;
-            const filename = prompt("Please enter a filename for the CSV export:", defaultFilename);
+            const defaultFilename = `SACMES_Analysis${electrodeInfo}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            const filename = prompt("Please enter a filename for the Excel export:", defaultFilename);
             if (filename) {
                 this.dom.visualization.exportDataBtn.dataset.filename = filename;
                 this.dom.visualization.exportStatus.textContent = 'Generating export file...';
@@ -184,9 +187,14 @@ export class SWVModule {
 
         this.socketManager.on('export_data_response', (data) => {
             if (data.status === 'success') {
-                const filename = this.dom.visualization.exportDataBtn.dataset.filename || 'export.csv';
+                const filename = data.filename || this.dom.visualization.exportDataBtn.dataset.filename || 'export.csv';
                 this.dom.visualization.exportStatus.textContent = `Export successful! Downloading ${filename}...`;
-                this._triggerCsvDownload(data.data, filename);
+
+                if (data.format === 'excel') {
+                    this._triggerExcelDownload(data.data, filename);
+                } else {
+                    this._triggerCsvDownload(data.data, filename);
+                }
             } else {
                 this.dom.visualization.exportStatus.textContent = `Export failed: ${data.message}`;
             }
@@ -203,6 +211,34 @@ export class SWVModule {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+    }
+
+    _triggerExcelDownload(excelBase64, filename) {
+        try {
+            // Convert base64 to bytes
+            const binaryString = atob(excelBase64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            // Create blob and download
+            const blob = new Blob([bytes], {
+                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", filename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Failed to download Excel file:', error);
+            this.dom.visualization.exportStatus.textContent = 'Excel download failed, please try again.';
+        }
     }
 
     _recalculateTrends() {
@@ -358,6 +394,10 @@ export class SWVModule {
             spacing_index: parseInt(this.dom.settings.spacingIndexInput.value), delimiter: parseInt(this.dom.settings.delimiterInput.value),
             file_extension: this.dom.settings.fileExtensionInput.value, SelectedOptions: this.dom.settings.selectedOptionsInput.value,
             baseline_strategy: this.dom.settings.baselineStrategyInput.value,
+            // New filtering parameters
+            filter_mode: this.dom.settings.filterModeInput.value,
+            hampel_window: this.dom.settings.filterModeInput.value === 'manual' ? parseInt(this.dom.settings.hampelWindowInput.value) : null,
+            hampel_threshold: this.dom.settings.filterModeInput.value === 'manual' ? parseFloat(this.dom.settings.hampelThresholdInput.value) : 3.0,
             xAxisOptions: this.state.currentXAxisOptions,
             sampleRate: parseFloat(this.dom.settings.sampleRateInput.value),
             selected_electrode: this.state.currentElectrode, // Add current electrode to params
