@@ -136,10 +136,21 @@ export class SWVModule {
         });
 
         this.socketManager.on('live_analysis_update', (data) => {
-            console.log('Received live_analysis_update:', data);
+            console.log('=== RECEIVED LIVE_ANALYSIS_UPDATE ===');
+            console.log('Full data object:', JSON.stringify(data, null, 2));
             console.log('Analysis running state:', this.state.isAnalysisRunning);
             console.log('Current electrode:', this.state.currentElectrode);
             console.log('Data electrode_index:', data.electrode_index);
+
+            // Check key data fields
+            if (data.individual_analysis) {
+                console.log('Individual analysis status:', data.individual_analysis.status);
+                console.log('Individual analysis peak_value:', data.individual_analysis.peak_value);
+            }
+            if (data.trend_data) {
+                console.log('Trend data keys:', Object.keys(data.trend_data));
+                console.log('Peak current trends:', data.trend_data.peak_current_trends);
+            }
 
             if (!this.state.isAnalysisRunning) {
                 console.warn('Ignoring data because analysis is not running');
@@ -163,6 +174,7 @@ export class SWVModule {
                     this.state.electrodeData[electrodeKey][freq][fileNum] = data.individual_analysis;
 
                     console.log(`Stored data for electrode ${electrodeKey}, freq ${freq}, file ${fileNum}`);
+                    console.log(`Peak value stored:`, data.individual_analysis.peak_value);
 
                     // 3. Update individual plots only if this is the currently displayed electrode
                     if (data.electrode_index === this.state.currentElectrode) {

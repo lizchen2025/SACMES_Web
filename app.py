@@ -86,10 +86,23 @@ def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
     # Get electrode-specific data
     electrode_data = raw_peaks.get(selected_electrode_key, {})
 
+    logger.info(f"CALCULATE_TRENDS DEBUG:")
+    logger.info(f"  Selected electrode key: {selected_electrode_key}")
+    logger.info(f"  Available electrode keys in raw_peaks: {list(raw_peaks.keys())}")
+    logger.info(f"  Electrode data available: {electrode_data is not None}")
+    if electrode_data:
+        logger.info(f"  Available frequencies in electrode data: {list(electrode_data.keys())}")
+        for freq_key, freq_data in electrode_data.items():
+            logger.info(f"    Frequency {freq_key} has file keys: {list(freq_data.keys())}")
+
     for i, file_num in enumerate(x_axis_values):
         for freq_str in peak_current_trends:
             peak = electrode_data.get(freq_str, {}).get(str(file_num))
-            if peak is not None: peak_current_trends[freq_str][i] = peak
+            if peak is not None:
+                peak_current_trends[freq_str][i] = peak
+                logger.info(f"  Found peak {peak} for freq {freq_str}, file {file_num} at index {i}")
+            else:
+                logger.info(f"  No peak found for freq {freq_str}, file {file_num} (key: {str(file_num)})")
     norm_factors = {}
     for freq_str in peak_current_trends:
         norm_idx = normalization_point - 1
@@ -219,10 +232,10 @@ def process_file_in_background(original_filename, content, params_for_this_file)
                     live_trend_data['raw_peaks'][electrode_key][freq_key] = {}
 
                 live_trend_data['raw_peaks'][electrode_key][freq_key][file_key] = peak
-        # Get current electrode selection from params
-        current_electrode = live_analysis_params.get('selected_electrode')
-        electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
-        full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key)
+        # Use the specific electrode being processed for trend calculation
+        # selected_electrode is the one being processed in this file
+        electrode_key_for_trends = str(selected_electrode) if selected_electrode is not None else 'averaged'
+        full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key_for_trends)
         if web_viewer_sids:
             # Send update with electrode-specific information
             response_data = {
@@ -231,8 +244,18 @@ def process_file_in_background(original_filename, content, params_for_this_file)
                 "trend_data": full_trends,
                 "electrode_index": selected_electrode
             }
-            logger.info(f"Sending live_analysis_update to {len(web_viewer_sids)} viewers for file: {base_filename}")
+
+            # Enhanced debugging
+            logger.info(f"=== SENDING LIVE_ANALYSIS_UPDATE ===")
+            logger.info(f"Target viewers: {len(web_viewer_sids)}")
+            logger.info(f"Filename: {base_filename}")
+            logger.info(f"Electrode index: {selected_electrode}")
             logger.info(f"Analysis status: {analysis_result.get('status', 'unknown')}")
+            logger.info(f"Peak value: {analysis_result.get('peak_value')}")
+            logger.info(f"Trend data keys: {list(full_trends.keys()) if full_trends else 'None'}")
+            if full_trends and 'peak_current_trends' in full_trends:
+                logger.info(f"Peak current trends keys: {list(full_trends['peak_current_trends'].keys())}")
+
             socketio.emit('live_analysis_update', response_data, to=list(web_viewer_sids))
         else:
             logger.warning(f"No web viewers connected - analysis result for '{base_filename}' not sent to frontend")
