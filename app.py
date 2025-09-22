@@ -155,8 +155,18 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
             }
             socketio.emit('live_cv_update', response_data, to=list(web_viewer_sids))
 
+        # Send processing complete acknowledgment to agent for CV
+        base_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename
+        if agent_sid:
+            socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
+            logger.info(f"CV_BACKGROUND_TASK: Sent processing complete ack for '{base_filename}' to agent")
+
     except Exception as e:
         logger.error(f"CV_BACKGROUND_TASK: CRITICAL ERROR while processing '{original_filename}': {e}", exc_info=True)
+        # Send error acknowledgment to agent even if processing failed
+        base_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename
+        if agent_sid:
+            socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
     finally:
         if os.path.exists(temp_filepath): os.remove(temp_filepath)
         logger.info(f"CV_BACKGROUND_TASK: Finished job for '{original_filename}'.")
@@ -257,8 +267,17 @@ def process_file_in_background(original_filename, content, params_for_this_file)
                 "peak_detection_warnings": live_peak_detection_warnings.get(electrode_key, [])
             }
             socketio.emit('live_analysis_update', response_data, to=list(web_viewer_sids))
+
+        # Send processing complete acknowledgment to agent
+        if agent_sid:
+            socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
+            logger.info(f"BACKGROUND_TASK: Sent processing complete ack for '{base_filename}' to agent")
+
     except Exception as e:
         logger.error(f"BACKGROUND_TASK: CRITICAL ERROR while processing '{original_filename}': {e}", exc_info=True)
+        # Send error acknowledgment to agent even if processing failed
+        if agent_sid:
+            socketio.emit('file_processing_complete', {'filename': original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename}, to=agent_sid)
     finally:
         if os.path.exists(temp_filepath): os.remove(temp_filepath)
         logger.info(f"BACKGROUND_TASK: Finished job for '{original_filename}'.")

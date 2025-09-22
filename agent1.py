@@ -24,6 +24,8 @@ current_filters = {}
 processed_files = set()
 is_monitoring_active = False
 agent_thread = None
+file_processing_complete = False
+pending_file_ack = None
 
 # --- Socket.IO Client Setup ---
 # The KEY CHANGE is forcing transports=['polling']
@@ -56,19 +58,43 @@ def file_matches_filters(filename):
 
 def send_file_to_server(file_path):
     """Reads a file's content and sends it to the server via WebSocket."""
+    global file_processing_complete, pending_file_ack
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
         filename = os.path.basename(file_path)
         if sio.connected:
             app.log(f"--> Sending '{filename}'...")
+
+            # Reset processing state and set pending file
+            file_processing_complete = False
+            pending_file_ack = filename
+
+            # Send file to server
             sio.emit('stream_instrument_data', {'filename': filename, 'content': content})
+
+            # Wait for server processing complete acknowledgment
+            timeout_counter = 0
+            max_wait_time = 30  # 30 seconds timeout
+            while not file_processing_complete and timeout_counter < max_wait_time:
+                time.sleep(0.1)
+                timeout_counter += 0.1
+
+            if file_processing_complete:
+                app.log(f"<-- Server confirmed processing complete for '{filename}'")
+            else:
+                app.log(f"[Warning] Timeout waiting for server confirmation for '{filename}'")
+
+            # Reset state
+            pending_file_ack = None
+
         else:
             app.log(f"[Warning] Cannot send '{filename}', not connected.")
             global is_monitoring_active
             is_monitoring_active = False
     except Exception as e:
         app.log(f"[Error] Could not read or send file {file_path}: {e}")
+        pending_file_ack = None
 
 
 def monitor_directory_loop(directory):
@@ -137,6 +163,17 @@ def on_set_filters(data):
     directory = app.watch_directory.get()
     agent_thread = threading.Thread(target=monitor_directory_loop, args=(directory,), daemon=True)
     agent_thread.start()
+
+
+@sio.on('file_processing_complete')
+def on_file_processing_complete(data):
+    global file_processing_complete, pending_file_ack
+    received_filename = data.get('filename', '')
+    if pending_file_ack and received_filename == pending_file_ack:
+        file_processing_complete = True
+        app.log(f"<-- Processing acknowledgment received for: {received_filename}")
+    else:
+        app.log(f"[Warning] Unexpected processing acknowledgment for: {received_filename}")
 
 
 # --- GUI Application Class ---
