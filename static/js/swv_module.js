@@ -52,6 +52,8 @@ export class SWVModule {
                 backToSWVBtn: document.getElementById('backToSWVBtn'),
                 exportDataBtn: document.getElementById('exportDataBtn'),
                 exportStatus: document.getElementById('exportStatus'),
+                peakDetectionWarnings: document.getElementById('peakDetectionWarnings'),
+                warningsList: document.getElementById('warningsList'),
                 postProcessNormalizationPointInput: document.getElementById('postProcessNormalizationPointInput'),
                 postProcessLowFrequencyOffsetInput: document.getElementById('postProcessLowFrequencyOffsetInput'),
                 postProcessLowFrequencySlopeInput: document.getElementById('postProcessLowFrequencySlopeInput'),
@@ -187,6 +189,11 @@ export class SWVModule {
                 // 4. Always recalculate and render the trend plots based on the UI controls
                 this._handlePostProcessUpdate();
             }
+
+            // 5. Update peak detection warnings
+            if (data.peak_detection_warnings && data.electrode_index === this.state.currentElectrode) {
+                this._updatePeakDetectionWarnings(data.peak_detection_warnings);
+            }
         });
 
         this.socketManager.on('electrode_validation_error', (data) => {
@@ -211,6 +218,12 @@ export class SWVModule {
                 this._triggerCsvDownload(data.data, filename);
             } else {
                 this.dom.visualization.exportStatus.textContent = `Export failed: ${data.message}`;
+            }
+        });
+
+        this.socketManager.on('electrode_warnings_response', (data) => {
+            if (data.status === 'success' && data.electrode_index === this.state.currentElectrode) {
+                this._updatePeakDetectionWarnings(data.warnings);
             }
         });
     }
@@ -399,6 +412,9 @@ export class SWVModule {
         this.dom.visualization.adjustmentControls.classList.remove('hidden');
         this.dom.visualization.exportDataBtn.classList.remove('hidden');
         this.dom.visualization.exportStatus.textContent = '';
+        // Clear warnings at the start of analysis
+        this.dom.visualization.peakDetectionWarnings.classList.add('hidden');
+        this.dom.visualization.warningsList.innerHTML = '';
         this.socketManager.emit('start_analysis_session', { filters, analysisParams });
     }
     
@@ -510,6 +526,12 @@ export class SWVModule {
         this._setupElectrodeControls(); // Update button states
         this._updateIndividualPlotsForElectrode(electrodeIdx); // Update individual plots
         this._handlePostProcessUpdate(); // Refresh trend plots with new electrode data
+
+        // Update warnings for this electrode
+        // Note: We'll need to request updated warnings from the server for this electrode
+        this.socketManager.emit('request_electrode_warnings', {
+            electrode_index: electrodeIdx
+        });
     }
 
     _setupVisualizationLayout() {
@@ -557,6 +579,79 @@ export class SWVModule {
             return false;
         }
         return true;
+    }
+
+    _updatePeakDetectionWarnings(warnings) {
+        const warningsContainer = this.dom.visualization.peakDetectionWarnings;
+        const warningsList = this.dom.visualization.warningsList;
+
+        if (!warnings || warnings.length === 0) {
+            warningsContainer.classList.add('hidden');
+            return;
+        }
+
+        // Group warnings by type for better display
+        const groupedWarnings = {};
+        warnings.forEach(warning => {
+            const key = warning.warning_type || 'unknown';
+            if (!groupedWarnings[key]) {
+                groupedWarnings[key] = [];
+            }
+            groupedWarnings[key].push(warning);
+        });
+
+        // Clear existing warnings
+        warningsList.innerHTML = '';
+
+        // Display grouped warnings
+        Object.keys(groupedWarnings).forEach(warningType => {
+            const warningGroup = groupedWarnings[warningType];
+            const count = warningGroup.length;
+
+            let description = '';
+            switch (warningType) {
+                case 'no_derivative_peak':
+                    description = `No derivative peaks found in ${count} file(s)`;
+                    break;
+                case 'insufficient_points_for_derivative':
+                    description = `Insufficient data points for peak detection in ${count} file(s)`;
+                    break;
+                case 'internal_baseline_error':
+                    description = `Baseline calculation error in ${count} file(s)`;
+                    break;
+                default:
+                    description = `Peak detection issues in ${count} file(s)`;
+            }
+
+            const warningDiv = document.createElement('div');
+            warningDiv.className = 'mb-2 p-2 bg-yellow-100 border border-yellow-200 rounded';
+
+            // Create collapsible details
+            const summary = document.createElement('div');
+            summary.className = 'font-medium cursor-pointer flex items-center justify-between';
+            summary.innerHTML = `
+                <span>${description}</span>
+                <span class="text-xs bg-yellow-200 px-2 py-1 rounded">Show Files</span>
+            `;
+
+            const details = document.createElement('div');
+            details.className = 'mt-2 text-xs hidden';
+            details.innerHTML = warningGroup.map(w =>
+                `• ${w.filename} (${w.frequency}Hz, File #${w.file_number})`
+            ).join('<br>');
+
+            summary.addEventListener('click', () => {
+                details.classList.toggle('hidden');
+                const showText = details.classList.contains('hidden') ? 'Show Files' : 'Hide Files';
+                summary.querySelector('span:last-child').textContent = showText;
+            });
+
+            warningDiv.appendChild(summary);
+            warningDiv.appendChild(details);
+            warningsList.appendChild(warningDiv);
+        });
+
+        warningsContainer.classList.remove('hidden');
     }
 }
 

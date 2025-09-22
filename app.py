@@ -44,6 +44,7 @@ if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 AGENT_AUTH_TOKEN = os.environ.get('AGENT_AUTH_TOKEN', "your_super_secret_token_here")
 agent_sid, web_viewer_sids, live_analysis_params, live_trend_data = None, set(), {}, {}
+live_peak_detection_warnings = {}  # Track peak detection warnings
 # Add flag to track validation errors and prevent duplicate alerts
 validation_error_sent = False
 
@@ -229,6 +230,19 @@ def process_file_in_background(original_filename, content, params_for_this_file)
 
                 if 'qc_metrics' in analysis_result and analysis_result['qc_metrics']:
                     live_trend_data['qc_metrics'][electrode_key][freq_key][file_key] = analysis_result['qc_metrics']
+
+                # Track peak detection warnings
+                if analysis_result.get('warning_type') in ['no_derivative_peak', 'insufficient_points_for_derivative', 'internal_baseline_error']:
+                    if electrode_key not in live_peak_detection_warnings:
+                        live_peak_detection_warnings[electrode_key] = []
+                    warning_info = {
+                        'filename': base_filename,
+                        'frequency': parsed_frequency,
+                        'file_number': parsed_filenum,
+                        'warning_type': analysis_result.get('warning_type'),
+                        'message': analysis_result.get('message', '')
+                    }
+                    live_peak_detection_warnings[electrode_key].append(warning_info)
         # Get current electrode selection from params
         current_electrode = live_analysis_params.get('selected_electrode')
         electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
@@ -239,7 +253,8 @@ def process_file_in_background(original_filename, content, params_for_this_file)
                 "filename": base_filename,  # Use base filename for frontend processing
                 "individual_analysis": analysis_result,
                 "trend_data": full_trends,
-                "electrode_index": selected_electrode
+                "electrode_index": selected_electrode,
+                "peak_detection_warnings": live_peak_detection_warnings.get(electrode_key, [])
             }
             socketio.emit('live_analysis_update', response_data, to=list(web_viewer_sids))
     except Exception as e:
@@ -404,11 +419,12 @@ def handle_disconnect():
 
 @socketio.on('start_analysis_session')
 def handle_start_analysis_session(data):
-    global live_analysis_params, live_trend_data, validation_error_sent
+    global live_analysis_params, live_trend_data, live_peak_detection_warnings, validation_error_sent
     logger.info(f"Received 'start_analysis_session' from {request.sid}")
     if 'analysisParams' in data:
         live_analysis_params = data['analysisParams']
         live_trend_data = {"raw_peaks": {}}
+        live_peak_detection_warnings = {}  # Reset peak detection warnings
         validation_error_sent = False  # Reset validation error flag
         logger.info("Analysis session started. Params set and trend data reset.")
     if 'filters' in data and agent_sid:
@@ -440,12 +456,13 @@ def handle_start_cv_analysis_session(data):
 
 @socketio.on('stop_analysis_session')
 def handle_stop_analysis_session(data):
-    global live_analysis_params, live_trend_data, validation_error_sent
+    global live_analysis_params, live_trend_data, live_peak_detection_warnings, validation_error_sent
     logger.info(f"Received 'stop_analysis_session' from {request.sid}")
 
     # Reset all analysis states
     live_analysis_params = {}
     live_trend_data = {}
+    live_peak_detection_warnings = {}
     validation_error_sent = False
 
     # Notify agent to stop if connected
@@ -716,6 +733,31 @@ def handle_export_request(data):
     except Exception as e:
         logger.error(f"Failed to generate CSV for export: {e}", exc_info=True)
         emit('export_data_response', {'status': 'error', 'message': f'Export failed: {str(e)}'})
+
+
+@socketio.on('request_electrode_warnings')
+def handle_electrode_warnings_request(data):
+    """
+    Handles a request from the client to get warnings for a specific electrode.
+    """
+    logger.info(f"Received 'request_electrode_warnings' from {request.sid} with data: {data}")
+    try:
+        electrode_index = data.get('electrode_index')
+        electrode_key = str(electrode_index) if electrode_index is not None else 'averaged'
+        warnings = live_peak_detection_warnings.get(electrode_key, [])
+
+        emit('electrode_warnings_response', {
+            'status': 'success',
+            'warnings': warnings,
+            'electrode_index': electrode_index
+        })
+    except Exception as e:
+        logger.error(f"Failed to get electrode warnings: {e}", exc_info=True)
+        emit('electrode_warnings_response', {
+            'status': 'error',
+            'message': f'Failed to get warnings: {str(e)}',
+            'electrode_index': electrode_index
+        })
 
 
 
