@@ -327,11 +327,34 @@ export class SWVModule {
     }
 
     _reconstructTrendDataFromElectrodeData(electrodeKey) {
+        console.log(`Looking for electrode data with key: "${electrodeKey}"`);
+        console.log('Available electrode data keys:', Object.keys(this.state.electrodeData));
+        console.log('Full electrode data structure:', this.state.electrodeData);
+
         const electrodeData = this.state.electrodeData[electrodeKey];
         if (!electrodeData) {
             console.log(`No data found for electrode: ${electrodeKey}`);
+            console.log('Current electrode state:', this.state.currentElectrode);
+            console.log('Selected electrodes:', this.state.selectedElectrodes);
+
+            // Try to find any available electrode data as fallback
+            const availableKeys = Object.keys(this.state.electrodeData);
+            if (availableKeys.length > 0) {
+                console.log(`Trying fallback with first available electrode: ${availableKeys[0]}`);
+                const fallbackData = this.state.electrodeData[availableKeys[0]];
+                if (fallbackData) {
+                    console.log('Using fallback electrode data');
+                    return this._reconstructPeaksFromElectrodeData(fallbackData);
+                }
+            }
+
             return null;
         }
+
+        return this._reconstructPeaksFromElectrodeData(electrodeData);
+    }
+
+    _reconstructPeaksFromElectrodeData(electrodeData) {
 
         const rawPeaks = {};
         let hasData = false;
@@ -342,7 +365,7 @@ export class SWVModule {
             const freqData = electrodeData[freqStr];
 
             if (!freqData) {
-                console.log(`No data for frequency ${freqStr} in electrode ${electrodeKey}`);
+                console.log(`No data for frequency ${freqStr} in electrode data`);
                 continue;
             }
 
@@ -362,11 +385,11 @@ export class SWVModule {
         }
 
         if (!hasData) {
-            console.log(`No valid peak data found for electrode ${electrodeKey}`);
+            console.log(`No valid peak data found in electrode data`);
             return null;
         }
 
-        console.log(`Successfully reconstructed data for electrode ${electrodeKey}:`, rawPeaks);
+        console.log(`Successfully reconstructed electrode data:`, rawPeaks);
         return rawPeaks;
     }
 
