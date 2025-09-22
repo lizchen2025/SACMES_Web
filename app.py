@@ -208,13 +208,27 @@ def process_file_in_background(original_filename, content, params_for_this_file)
 
                 live_trend_data['raw_peaks'][electrode_key][freq_key][file_key] = peak
 
-                # Store QC metrics if available
+                # Store filter parameters and QC metrics for each individual file
+                if 'filter_params' not in live_trend_data:
+                    live_trend_data['filter_params'] = {}
+                if electrode_key not in live_trend_data['filter_params']:
+                    live_trend_data['filter_params'][electrode_key] = {}
+                if freq_key not in live_trend_data['filter_params'][electrode_key]:
+                    live_trend_data['filter_params'][electrode_key][freq_key] = {}
+
+                if 'qc_metrics' not in live_trend_data:
+                    live_trend_data['qc_metrics'] = {}
+                if electrode_key not in live_trend_data['qc_metrics']:
+                    live_trend_data['qc_metrics'][electrode_key] = {}
+                if freq_key not in live_trend_data['qc_metrics'][electrode_key]:
+                    live_trend_data['qc_metrics'][electrode_key][freq_key] = {}
+
+                # Store filter parameters and QC metrics for this specific file
+                if 'filter_params' in analysis_result and analysis_result['filter_params']:
+                    live_trend_data['filter_params'][electrode_key][freq_key][file_key] = analysis_result['filter_params']
+
                 if 'qc_metrics' in analysis_result and analysis_result['qc_metrics']:
-                    if 'qc_metrics' not in live_trend_data:
-                        live_trend_data['qc_metrics'] = {}
-                    if electrode_key not in live_trend_data['qc_metrics']:
-                        live_trend_data['qc_metrics'][electrode_key] = {}
-                    live_trend_data['qc_metrics'][electrode_key][freq_key] = analysis_result['qc_metrics']
+                    live_trend_data['qc_metrics'][electrode_key][freq_key][file_key] = analysis_result['qc_metrics']
         # Get current electrode selection from params
         current_electrode = live_analysis_params.get('selected_electrode')
         electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
@@ -277,28 +291,27 @@ def generate_csv_data(current_electrode=None):
 
     writer.writerow([])
 
-    # Get QC metrics from stored data (if available)
-    electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
-    qc_data = live_trend_data.get('qc_metrics', {}).get(electrode_key, {})
-
-    if qc_data:
-        writer.writerow(['# Quality Control Metrics'])
-        for freq in frequencies:
-            freq_qc = qc_data.get(freq, {})
-            if freq_qc:
-                writer.writerow([f'## {freq}Hz Analysis'])
-                writer.writerow(['SNR Improvement:', f"{freq_qc.get('snr_improvement', 'N/A'):.3f}"])
-                writer.writerow(['Peak Retention:', f"{freq_qc.get('peak_retention', 'N/A'):.3f}"])
-                writer.writerow(['Residual Metric:', f"{freq_qc.get('residual_metric', 'N/A'):.3f}"])
-                writer.writerow(['QC Status:', freq_qc.get('qc_status', 'N/A')])
-                writer.writerow([])
-
     writer.writerow(['# Analysis Data'])
 
-    # Write header
+    # Get electrode key
+    electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
+
+    # Write detailed header with QC and filter parameters for each frequency
     header = ['File_Number']
     for freq in frequencies:
-        header.append(f'Peak_Current_{freq}Hz')
+        header.extend([
+            f'Peak_Current_{freq}Hz',
+            f'Filter_Mode_{freq}Hz',
+            f'Hampel_Window_{freq}Hz',
+            f'Hampel_Threshold_{freq}Hz',
+            f'SG_Window_{freq}Hz',
+            f'SG_Degree_{freq}Hz',
+            f'FWHM_{freq}Hz',
+            f'SNR_Improvement_{freq}Hz',
+            f'Peak_Retention_{freq}Hz',
+            f'Residual_Metric_{freq}Hz',
+            f'QC_Status_{freq}Hz'
+        ])
     for freq in frequencies:
         header.append(f'Normalized_Peak_{freq}Hz')
     header.append('KDM')
@@ -307,14 +320,51 @@ def generate_csv_data(current_electrode=None):
     # Recalculate full trends to ensure data is consistent
     full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key)
 
-    # Write data rows
+    # Get stored data
+    filter_data = live_trend_data.get('filter_params', {}).get(electrode_key, {})
+    qc_data = live_trend_data.get('qc_metrics', {}).get(electrode_key, {})
+
+    # Write data rows with individual file parameters
     for i in range(num_files):
         file_num = i + 1
+        file_key = str(file_num)
         row = [file_num]
+
+        # Add peak current and corresponding filter/QC data for each frequency
         for freq in frequencies:
-            row.append(full_trends.get('peak_current_trends', {}).get(freq, [None] * num_files)[i])
+            freq_str = str(freq)
+            peak_value = full_trends.get('peak_current_trends', {}).get(freq_str, [None] * num_files)[i]
+            row.append(peak_value)
+
+            # Get filter and QC data for this specific file and frequency
+            file_filter_data = filter_data.get(freq_str, {}).get(file_key, {})
+            file_qc_data = qc_data.get(freq_str, {}).get(file_key, {})
+
+            # Add filter parameters
+            row.extend([
+                file_filter_data.get('filter_mode', 'N/A'),
+                file_filter_data.get('hampel_window', 'N/A'),
+                file_filter_data.get('hampel_threshold', 'N/A'),
+                file_filter_data.get('sg_window', 'N/A'),
+                file_filter_data.get('sg_degree', 'N/A'),
+                file_filter_data.get('fwhm', 'N/A')
+            ])
+
+            # Add QC metrics
+            row.extend([
+                f"{file_qc_data.get('snr_improvement', 'N/A'):.3f}" if isinstance(file_qc_data.get('snr_improvement'), (int, float)) else 'N/A',
+                f"{file_qc_data.get('peak_retention', 'N/A'):.3f}" if isinstance(file_qc_data.get('peak_retention'), (int, float)) else 'N/A',
+                f"{file_qc_data.get('residual_metric', 'N/A'):.3f}" if isinstance(file_qc_data.get('residual_metric'), (int, float)) else 'N/A',
+                file_qc_data.get('qc_status', 'N/A')
+            ])
+
+        # Add normalized peaks
         for freq in frequencies:
-            row.append(full_trends.get('normalized_peak_trends', {}).get(freq, [None] * num_files)[i])
+            freq_str = str(freq)
+            normalized_value = full_trends.get('normalized_peak_trends', {}).get(freq_str, [None] * num_files)[i]
+            row.append(normalized_value)
+
+        # Add KDM
         row.append(full_trends.get('kdm_trend', [None] * num_files)[i])
         writer.writerow(row)
 

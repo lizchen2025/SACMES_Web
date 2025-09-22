@@ -120,8 +120,8 @@ def calculate_peak_retention(original_data, filtered_data):
     Returns:
         Peak retention ratio (0-1)
     """
-    original_peak = np.max(original_data)
-    filtered_peak = np.max(filtered_data)
+    original_peak = np.max(np.abs(original_data))  # Use absolute max to handle negative peaks
+    filtered_peak = np.max(np.abs(filtered_data))
 
     if original_peak == 0:
         return 1.0
@@ -397,13 +397,19 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
             first_derivative = np.gradient(np.array(adjusted_smoothed_currents), np.array(adjusted_potentials))
             peak_candidates = []
 
+            # Log some debug information
+            logger.info(f"Peak detection: Data points={len(adjusted_potentials)}, Current range=[{min(adjusted_smoothed_currents):.4f}, {max(adjusted_smoothed_currents):.4f}]")
+
             # Since data is sorted by potential, scan direction is always increasing
             for i in range(1, len(first_derivative)):
                 if first_derivative[i - 1] > 0 and first_derivative[i] <= 0:
                     peak_candidates.append((adjusted_smoothed_currents[i], adjusted_potentials[i], i))
 
+            logger.info(f"Peak detection: Found {len(peak_candidates)} peak candidates")
+
             if peak_candidates:
                 original_peak_current, peak_potential, peak_index = max(peak_candidates, key=lambda x: x[0])
+                logger.info(f"Peak detection: Selected peak at V={peak_potential:.4f}, I={original_peak_current:.4f}, index={peak_index}")
 
                 # --- Convex Hull Based Tangent Algorithm ---
                 points = list(zip(adjusted_potentials, adjusted_smoothed_currents))
@@ -452,13 +458,14 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
                     peak_value = original_peak_current - baseline_at_peak
                     eval_regress = [m * p + b_line for p in adjusted_potentials]
                 else:
-                    peak_value = None
+                    peak_value = 0  # Set to 0 instead of None for consistency
                     baseline_warning_type = "internal_baseline_error"
             else:
-                peak_value = None
+                peak_value = 0  # Set to 0 instead of None for consistency
                 baseline_warning_type = "no_derivative_peak"
+                logger.warning(f"Peak detection: No derivative peaks found in data with {len(adjusted_potentials)} points")
         else:
-            peak_value = None
+            peak_value = 0  # Set to 0 instead of None for consistency
             baseline_warning_type = "insufficient_points_for_derivative"
 
     elif analysis_params['SelectedOptions'] == "Area Under the Curve":
