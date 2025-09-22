@@ -364,6 +364,29 @@ def handle_cv_instrument_data(data):
                                      params_for_this_file=params_for_this_file)
 
 
+@socketio.on('get_cv_preview')
+def handle_get_cv_preview(data):
+    """Get CV preview file from agent for segment selection"""
+    try:
+        if not agent_sid:
+            emit('cv_preview_response', {'status': 'error', 'message': 'Agent not connected'})
+            return
+
+        filters = data.get('filters', {})
+        analysis_params = data.get('analysisParams', {})
+
+        # Request first file from agent for preview
+        socketio.emit('get_cv_file_for_preview', {
+            'filters': filters,
+            'analysisParams': analysis_params,
+            'preview_mode': True
+        }, room=agent_sid)
+
+    except Exception as e:
+        logger.error(f"Error requesting CV preview: {e}", exc_info=True)
+        emit('cv_preview_response', {'status': 'error', 'message': str(e)})
+
+
 @socketio.on('get_cv_segments')
 def handle_get_cv_segments(data):
     """Get available CV segments from uploaded file"""
@@ -395,6 +418,106 @@ def handle_get_cv_segments(data):
     except Exception as e:
         logger.error(f"Error getting CV segments: {e}", exc_info=True)
         emit('cv_segments_response', {'status': 'error', 'message': str(e)})
+
+
+@socketio.on('cv_data_from_agent')
+def handle_cv_data_from_agent(data):
+    """Handle CV data from agent - both preview and analysis modes"""
+    if request.sid != agent_sid:
+        return
+
+    try:
+        preview_mode = data.get('preview_mode', False)
+        file_content = data.get('content', '')
+        analysis_params = data.get('analysisParams', {})
+
+        if preview_mode:
+            # This is for segment selection preview
+            if file_content:
+                # Parse the CV data for preview visualization
+                import tempfile
+                from data_processing.data_reader import ReadData
+
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
+                    temp_file.write(file_content)
+                    temp_path = temp_file.name
+
+                try:
+                    # Read the data for preview
+                    voltage_column = analysis_params.get('voltage_column', 1) - 1
+                    current_column = analysis_params.get('current_column', 2) - 1
+                    spacing_index = analysis_params.get('spacing_index', 1)
+                    delimiter = analysis_params.get('delimiter', 1)
+                    file_extension = analysis_params.get('file_extension', '.txt')
+
+                    # Read data for first electrode or averaged
+                    data_result = ReadData(
+                        temp_path,
+                        voltage_column_index=voltage_column,
+                        current_column_start_index=current_column,
+                        spacing_index=spacing_index,
+                        num_electrodes=1,
+                        delimiter_char=delimiter,
+                        file_extension=file_extension,
+                        selected_electrodes=None  # Use averaging for preview
+                    )
+
+                    if data_result and 'voltage' in data_result and 'current' in data_result:
+                        # Send the CV data for preview visualization
+                        emit('cv_preview_response', {
+                            'status': 'success',
+                            'content': file_content,
+                            'cv_data': {
+                                'voltage': data_result['voltage'],
+                                'current': data_result['current']
+                            }
+                        })
+                    else:
+                        emit('cv_preview_response', {
+                            'status': 'error',
+                            'message': 'Could not parse CV data for preview'
+                        })
+
+                finally:
+                    import os
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+            else:
+                emit('cv_preview_response', {
+                    'status': 'error',
+                    'message': 'No file content received'
+                })
+        else:
+            # Regular analysis mode - use existing logic
+            original_filename = data.get('filename', 'unknown_file.txt')
+            if not live_analysis_params:
+                return
+
+            # Get selected electrodes from analysis params
+            selected_electrodes = live_analysis_params.get('selected_electrodes', [])
+
+            if selected_electrodes:
+                # Process each selected electrode for CV
+                for electrode_idx in selected_electrodes:
+                    params_for_this_file = live_analysis_params.copy()
+                    params_for_this_file['selected_electrode'] = electrode_idx
+
+                    socketio.start_background_task(target=process_cv_file_in_background,
+                                                 original_filename=f"{original_filename}_electrode_{electrode_idx}",
+                                                 content=file_content,
+                                                 params_for_this_file=params_for_this_file)
+            else:
+                # Original averaging behavior for CV
+                params_for_this_file = live_analysis_params.copy()
+                socketio.start_background_task(target=process_cv_file_in_background,
+                                             original_filename=original_filename,
+                                             content=file_content,
+                                             params_for_this_file=params_for_this_file)
+
+    except Exception as e:
+        logger.error(f"Error handling CV data from agent: {e}", exc_info=True)
+        if data.get('preview_mode', False):
+            emit('cv_preview_response', {'status': 'error', 'message': str(e)})
 
 
 # --- *** NEW *** SOCKET.IO EVENT HANDLER FOR EXPORTING DATA ---

@@ -10,24 +10,28 @@ export class CVModule {
         this.dom = {
             cvBtn: document.getElementById('cvBtn'),
             backToWelcomeBtn: document.getElementById('backToWelcomeFromCV'),
+            backToCVSettingsBtn: document.getElementById('backToCVSettingsBtn'),
+            nextToVisualizationBtn: document.getElementById('cvNextToVisualizationBtn'),
             startAnalysisBtn: document.getElementById('startCVAnalysisBtn'),
             agentStatus: document.getElementById('cvAgentStatus'),
             folderStatus: document.getElementById('cvFolderStatus'),
-            fileUpload: document.getElementById('cvFileUpload'),
             detectSegmentsBtn: document.getElementById('detectCVSegmentsBtn'),
             segmentStatus: document.getElementById('cvSegmentStatus'),
+            cvPreviewPlot: document.getElementById('cvPreviewPlot'),
             params: {
                 fileHandleInput: document.getElementById('cvFileHandleInput'),
                 numFilesInput: document.getElementById('cvNumFilesInput'),
                 numElectrodesInput: document.getElementById('cvNumElectrodesInput'),
                 selectedElectrodesInput: document.getElementById('cvSelectedElectrodesInput'),
                 scanRateInput: document.getElementById('cvScanRateInput'),
-                forwardSegmentInput: document.getElementById('cvForwardSegmentInput'),
-                reverseSegmentInput: document.getElementById('cvReverseSegmentInput'),
                 lowVoltageInput: document.getElementById('cvLowVoltageInput'),
                 highVoltageInput: document.getElementById('cvHighVoltageInput'),
                 massTransportInput: document.getElementById('cvMassTransportInput'),
                 analysisOptionsInput: document.getElementById('cvAnalysisOptionsInput'),
+            },
+            visualization: {
+                forwardSegmentInput: document.getElementById('cvForwardSegmentInput'),
+                reverseSegmentInput: document.getElementById('cvReverseSegmentInput'),
             },
             settings: {
                 voltageColumnInput: document.getElementById('cvVoltageColumnInput'),
@@ -35,6 +39,10 @@ export class CVModule {
                 spacingIndexInput: document.getElementById('cvSpacingIndexInput'),
                 delimiterInput: document.getElementById('cvDelimiterInput'),
                 fileExtensionInput: document.getElementById('cvFileExtensionInput'),
+                byteLimitInput: document.getElementById('cvByteLimitInput'),
+                sampleRateInput: document.getElementById('cvSampleRateInput'),
+                analysisIntervalInput: document.getElementById('cvAnalysisIntervalInput'),
+                resizeIntervalInput: document.getElementById('cvResizeIntervalInput'),
             }
         };
 
@@ -44,8 +52,9 @@ export class CVModule {
             selectedElectrodes: [],
             currentElectrode: null,
             cvResults: {},
-            uploadedFileContent: null,
-            availableSegments: []
+            previewFileContent: null,
+            availableSegments: [],
+            currentScreen: 'settings' // 'settings', 'visualization', 'analysis'
         };
 
         this._setupEventListeners();
@@ -53,16 +62,23 @@ export class CVModule {
     }
 
     _setupEventListeners() {
-        this.dom.cvBtn.addEventListener('click', () => this.uiManager.showScreen('cvAnalysisScreen'));
+        this.dom.cvBtn.addEventListener('click', () => {
+            this.state.currentScreen = 'settings';
+            this.uiManager.showScreen('cvAnalysisScreen');
+        });
+
         this.dom.backToWelcomeBtn.addEventListener('click', () => {
             this.uiManager.showScreen('welcomeScreen');
             this._resetAnalysis();
         });
 
-        this.dom.startAnalysisBtn.addEventListener('click', this._handleStartAnalysis.bind(this));
+        this.dom.backToCVSettingsBtn.addEventListener('click', () => {
+            this.state.currentScreen = 'settings';
+            this.uiManager.showScreen('cvAnalysisScreen');
+        });
 
-        // File upload and segment detection
-        this.dom.fileUpload.addEventListener('change', this._handleFileUpload.bind(this));
+        this.dom.nextToVisualizationBtn.addEventListener('click', this._handleNextToVisualization.bind(this));
+        this.dom.startAnalysisBtn.addEventListener('click', this._handleStartAnalysis.bind(this));
         this.dom.detectSegmentsBtn.addEventListener('click', this._handleDetectSegments.bind(this));
     }
 
@@ -80,6 +96,18 @@ export class CVModule {
             } else {
                 this.dom.folderStatus.textContent = data.message;
                 this._resetAnalysisState();
+            }
+        });
+
+        this.socketManager.on('cv_preview_response', (data) => {
+            if (data.status === 'success') {
+                this.state.previewFileContent = data.content;
+                this._displayCVPreview(data.cv_data);
+                this.dom.segmentStatus.textContent = 'CV preview loaded. Click "Detect Segments" to analyze.';
+                this.dom.segmentStatus.className = 'text-sm text-green-600 mt-2';
+            } else {
+                this.dom.segmentStatus.textContent = `Error loading preview: ${data.message}`;
+                this.dom.segmentStatus.className = 'text-sm text-red-600 mt-2';
             }
         });
 
@@ -121,28 +149,47 @@ export class CVModule {
         });
     }
 
-    _handleFileUpload(event) {
-        const file = event.target.files[0];
-        if (!file) return;
+    _handleNextToVisualization() {
+        // Validate basic parameters first
+        const numFiles = parseInt(this.dom.params.numFilesInput.value);
+        if (isNaN(numFiles) || numFiles < 1) {
+            alert("Please enter a valid number of files.");
+            return;
+        }
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            this.state.uploadedFileContent = e.target.result;
-            this.dom.detectSegmentsBtn.disabled = false;
-            this.dom.segmentStatus.textContent = 'File loaded. Click "Detect Segments" to analyze.';
-            this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
+        this.state.currentScreen = 'visualization';
+        this.uiManager.showScreen('cvVisualizationScreen');
+
+        // Request a preview file from the agent
+        this._requestPreviewFile();
+    }
+
+    _requestPreviewFile() {
+        const analysisParams = this._collectAnalysisParams();
+        const filters = {
+            handle: this.dom.params.fileHandleInput.value.trim(),
+            range_start: 1,
+            range_end: 1 // Just get the first file for preview
         };
-        reader.readAsText(file);
+
+        this.dom.segmentStatus.textContent = 'Loading CV preview...';
+        this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
+
+        // Request the first file for preview
+        this.socketManager.emit('get_cv_preview', { filters, analysisParams });
     }
 
     _handleDetectSegments() {
-        if (!this.state.uploadedFileContent) return;
+        if (!this.state.previewFileContent) {
+            this._requestPreviewFile();
+            return;
+        }
 
         const analysisParams = this._collectAnalysisParams();
 
         this.socketManager.emit('get_cv_segments', {
-            content: this.state.uploadedFileContent,
-            filename: this.dom.fileUpload.files[0].name,
+            content: this.state.previewFileContent,
+            filename: 'preview_file',
             params: analysisParams
         });
 
@@ -152,21 +199,21 @@ export class CVModule {
 
     _updateSegmentDropdowns() {
         // Clear existing options
-        this.dom.params.forwardSegmentInput.innerHTML = '<option value="">Auto-detect</option>';
-        this.dom.params.reverseSegmentInput.innerHTML = '<option value="">Auto-detect</option>';
+        this.dom.visualization.forwardSegmentInput.innerHTML = '<option value="">Auto-detect</option>';
+        this.dom.visualization.reverseSegmentInput.innerHTML = '<option value="">Auto-detect</option>';
 
         // Add detected segments
         this.state.availableSegments.forEach(segment => {
             const option1 = new Option(`Segment ${segment}`, segment);
             const option2 = new Option(`Segment ${segment}`, segment);
-            this.dom.params.forwardSegmentInput.add(option1);
-            this.dom.params.reverseSegmentInput.add(option2);
+            this.dom.visualization.forwardSegmentInput.add(option1);
+            this.dom.visualization.reverseSegmentInput.add(option2);
         });
 
         // Auto-select typical forward and reverse segments if available
         if (this.state.availableSegments.length >= 2) {
-            this.dom.params.forwardSegmentInput.value = this.state.availableSegments[0];
-            this.dom.params.reverseSegmentInput.value = this.state.availableSegments[1];
+            this.dom.visualization.forwardSegmentInput.value = this.state.availableSegments[0];
+            this.dom.visualization.reverseSegmentInput.value = this.state.availableSegments[1];
         }
     }
 
@@ -175,8 +222,8 @@ export class CVModule {
             num_files: parseInt(this.dom.params.numFilesInput.value),
             num_electrodes: parseInt(this.dom.params.numElectrodesInput.value),
             scan_rate: parseFloat(this.dom.params.scanRateInput.value),
-            forward_segment: parseInt(this.dom.params.forwardSegmentInput.value) || null,
-            reverse_segment: parseInt(this.dom.params.reverseSegmentInput.value) || null,
+            forward_segment: parseInt(this.dom.visualization.forwardSegmentInput.value) || null,
+            reverse_segment: parseInt(this.dom.visualization.reverseSegmentInput.value) || null,
             low_voltage: parseFloat(this.dom.params.lowVoltageInput.value),
             high_voltage: parseFloat(this.dom.params.highVoltageInput.value),
             mass_transport: this.dom.params.massTransportInput.value,
@@ -186,6 +233,10 @@ export class CVModule {
             spacing_index: parseInt(this.dom.settings.spacingIndexInput.value),
             delimiter: parseInt(this.dom.settings.delimiterInput.value),
             file_extension: this.dom.settings.fileExtensionInput.value,
+            byte_limit: parseInt(this.dom.settings.byteLimitInput.value),
+            sample_rate: parseFloat(this.dom.settings.sampleRateInput.value),
+            analysis_interval: parseInt(this.dom.settings.analysisIntervalInput.value),
+            resize_interval: parseInt(this.dom.settings.resizeIntervalInput.value),
         };
     }
 
@@ -248,9 +299,36 @@ export class CVModule {
         // - Charge/AUC display
     }
 
+    _displayCVPreview(cvData) {
+        // Use PlotlyPlotter to display CV preview
+        if (cvData && cvData.voltage && cvData.current) {
+            const plotData = [{
+                x: cvData.voltage,
+                y: cvData.current,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'CV Preview',
+                line: { color: '#1f77b4', width: 2 }
+            }];
+
+            const layout = {
+                title: 'CV Preview - Select Segments',
+                xaxis: { title: 'Voltage (V)' },
+                yaxis: { title: 'Current (A)' },
+                margin: { t: 50, r: 50, b: 50, l: 80 },
+                showlegend: false
+            };
+
+            Plotly.newPlot(this.dom.cvPreviewPlot, plotData, layout, { responsive: true });
+        }
+    }
+
     _resetAnalysis() {
         this.state.isAnalysisRunning = false;
         this.state.cvResults = {};
+        this.state.previewFileContent = null;
+        this.state.availableSegments = [];
+        this.state.currentScreen = 'settings';
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
         this.dom.startAnalysisBtn.disabled = false;
     }
