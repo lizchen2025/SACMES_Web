@@ -92,7 +92,7 @@ export class SWVModule {
         });
         
         this.dom.visualization.exportDataBtn.addEventListener('click', () => {
-            const electrodeInfo = this.state.currentElectrode !== null ? `_Electrode_${this.state.currentElectrode}` : '_Averaged';
+            const electrodeInfo = this.state.currentElectrode !== null ? `_Electrode_${this.state.currentElectrode + 1}` : '_Averaged';  // Display as 1-based
             const defaultFilename = `SACMES_Analysis${electrodeInfo}_${new Date().toISOString().slice(0, 10)}.csv`;
             const filename = prompt("Please enter a filename for the CSV export:", defaultFilename);
             if (filename) {
@@ -195,13 +195,13 @@ export class SWVModule {
         const currentElectrode = this.state.currentElectrode;
         const electrodeKey = currentElectrode !== null ? currentElectrode.toString() : 'averaged';
 
-        // If we have rawTrendData (from server), use it; otherwise, reconstruct from stored electrode data
-        let rawPeaks = null;
-        if (this.state.rawTrendData && this.state.rawTrendData.peak_current_trends) {
+        // Always try to reconstruct from stored electrode data first (for electrode switching)
+        // Fall back to rawTrendData only if no stored data is available
+        let rawPeaks = this._reconstructTrendDataFromElectrodeData(electrodeKey);
+
+        // If reconstruction failed and we have rawTrendData from server, use it
+        if (!rawPeaks && this.state.rawTrendData && this.state.rawTrendData.peak_current_trends) {
             rawPeaks = this.state.rawTrendData.peak_current_trends;
-        } else {
-            // Reconstruct trend data from stored electrode data
-            rawPeaks = this._reconstructTrendDataFromElectrodeData(electrodeKey);
         }
 
         if (!rawPeaks) return null;
@@ -249,16 +249,23 @@ export class SWVModule {
 
     _reconstructTrendDataFromElectrodeData(electrodeKey) {
         const electrodeData = this.state.electrodeData[electrodeKey];
-        if (!electrodeData) return null;
+        if (!electrodeData) {
+            console.log(`No data found for electrode: ${electrodeKey}`);
+            return null;
+        }
 
         const rawPeaks = {};
+        let hasData = false;
 
         // Reconstruct peak data for each frequency
         for (const freq of this.state.currentFrequencies) {
             const freqStr = freq.toString();
             const freqData = electrodeData[freqStr];
 
-            if (!freqData) continue;
+            if (!freqData) {
+                console.log(`No data for frequency ${freqStr} in electrode ${electrodeKey}`);
+                continue;
+            }
 
             rawPeaks[freqStr] = Array(this.state.currentNumFiles).fill(null);
 
@@ -269,11 +276,18 @@ export class SWVModule {
                     const analysisResult = freqData[fileNum];
                     if (analysisResult && analysisResult.peak_value !== null) {
                         rawPeaks[freqStr][fileIndex] = analysisResult.peak_value;
+                        hasData = true;
                     }
                 }
             }
         }
 
+        if (!hasData) {
+            console.log(`No valid peak data found for electrode ${electrodeKey}`);
+            return null;
+        }
+
+        console.log(`Successfully reconstructed data for electrode ${electrodeKey}:`, rawPeaks);
         return rawPeaks;
     }
 
@@ -291,15 +305,15 @@ export class SWVModule {
         const frequencies = this.dom.params.frequencyInput.value.split(',').map(f => parseInt(f.trim())).filter(f => !isNaN(f));
         if (frequencies.length < 2) { alert("Please enter at least two valid frequencies."); return; }
 
-        // Parse selected electrodes
+        // Parse selected electrodes (convert from 1-based to 0-based)
         const selectedElectrodesStr = this.dom.params.selectedElectrodesInput.value.trim();
         let selectedElectrodes = [];
         if (selectedElectrodesStr) {
             selectedElectrodes = selectedElectrodesStr.split(',')
-                .map(e => parseInt(e.trim()))
+                .map(e => parseInt(e.trim()) - 1)  // Convert from 1-based to 0-based
                 .filter(e => !isNaN(e) && e >= 0);
             if (selectedElectrodes.length === 0) {
-                alert("Please enter valid electrode indices (0-based) or leave empty for averaging.");
+                alert("Please enter valid electrode numbers (starting from 1) or leave empty for averaging.");
                 return;
             }
         }
@@ -433,7 +447,7 @@ export class SWVModule {
                         ? 'bg-blue-500 text-white'
                         : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                 }`;
-                btn.textContent = `Electrode ${electrodeIdx}`;
+                btn.textContent = `Electrode ${electrodeIdx + 1}`;  // Display as 1-based
                 btn.onclick = () => this._switchElectrode(electrodeIdx);
                 electrodeControls.appendChild(btn);
             });
@@ -443,7 +457,14 @@ export class SWVModule {
     _switchElectrode(electrodeIdx) {
         if (this.state.currentElectrode === electrodeIdx) return;
 
+        console.log(`Switching to electrode ${electrodeIdx}`);
+        console.log('Available electrode data:', Object.keys(this.state.electrodeData));
+
         this.state.currentElectrode = electrodeIdx;
+
+        // Clear rawTrendData to force using stored electrode data
+        this.state.rawTrendData = null;
+
         this._setupElectrodeControls(); // Update button states
         this._updateIndividualPlotsForElectrode(electrodeIdx); // Update individual plots
         this._handlePostProcessUpdate(); // Refresh trend plots with new electrode data
