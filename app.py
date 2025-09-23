@@ -715,21 +715,63 @@ def generate_csv_data(current_electrode=None):
 # --- Socket.IO Event Handlers (Connect, Disconnect, Start Session are Unchanged) ---
 @socketio.on('connect')
 def handle_connect():
-    session_id = get_session_id()
-    logger.info(f"Client connected with SID: {request.sid}, Session: {session_id}")
+    # Check if this is an agent with a specific session_id in auth data
     auth_header = request.headers.get('Authorization')
     token = auth_header.split(' ')[1] if auth_header and auth_header.startswith('Bearer ') else None
+
     if token and token == AGENT_AUTH_TOKEN:
+        # For agents: try to get session_id from query params or generate new one
+        agent_session_id = request.args.get('session_id')
+        if not agent_session_id:
+            # Generate a new session for agent
+            agent_session_id = str(uuid.uuid4())
+
+        session['session_id'] = agent_session_id
+        session_id = agent_session_id
+
         set_session_agent_sid(session_id, request.sid)
-        logger.info(f"Authenticated client is an AGENT. SID: {request.sid}, Session: {session_id}")
-        web_viewer_sids = get_session_web_viewer_sids(session_id)
-        emit('agent_status', {'status': 'connected'}, to=list(web_viewer_sids))
+        logger.info(f"AGENT connected. SID: {request.sid}, Session: {session_id}")
+
+        # Notify ALL web viewers in ALL sessions (temporary fix for session mismatch)
+        all_web_viewer_sids = []
+        if redis_client:
+            try:
+                # Get all session keys
+                session_keys = redis_client.keys("session:*")
+                for session_key in session_keys:
+                    session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                    if session_data:
+                        viewer_sids = json.loads(session_data)
+                        all_web_viewer_sids.extend(list(viewer_sids))
+            except Exception as e:
+                logger.error(f"Error getting all web viewers: {e}")
+
+        if all_web_viewer_sids:
+            emit('agent_status', {'status': 'connected'}, to=all_web_viewer_sids)
+            logger.info(f"Notified {len(all_web_viewer_sids)} web viewers across all sessions of agent connection")
+        else:
+            logger.info("No web viewers to notify of agent connection")
+
+        # Send session info back to agent
+        emit('session_info', {'session_id': session_id})
+
     else:
+        # For web viewers: use normal session management
+        session_id = get_session_id()
         add_session_web_viewer_sid(session_id, request.sid)
         web_viewer_sids = get_session_web_viewer_sids(session_id)
-        logger.info(f"Client is a WEB VIEWER. SID: {request.sid}, Session: {session_id}, Total viewers: {len(web_viewer_sids)}")
+        logger.info(f"WEB VIEWER connected. SID: {request.sid}, Session: {session_id}, Total viewers: {len(web_viewer_sids)}")
+
         # Send session ID to client for tracking
         emit('session_info', {'session_id': session_id})
+
+        # Check if agent is already connected to this session
+        agent_sid = get_session_agent_sid(session_id)
+        if agent_sid:
+            emit('agent_status', {'status': 'connected'})
+            logger.info("Notified new web viewer that agent is already connected")
+        else:
+            emit('agent_status', {'status': 'disconnected'})
 
 
 @socketio.on('disconnect')
@@ -742,8 +784,23 @@ def handle_disconnect():
     if request.sid == agent_sid:
         set_session_agent_sid(session_id, None)
         logger.warning(f"Agent has disconnected from session {session_id}")
-        web_viewer_sids = get_session_web_viewer_sids(session_id)
-        emit('agent_status', {'status': 'disconnected'}, to=list(web_viewer_sids))
+
+        # Notify ALL web viewers across all sessions (temporary fix for session mismatch)
+        all_web_viewer_sids = []
+        if redis_client:
+            try:
+                session_keys = redis_client.keys("session:*")
+                for session_key in session_keys:
+                    session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                    if session_data:
+                        viewer_sids = json.loads(session_data)
+                        all_web_viewer_sids.extend(list(viewer_sids))
+            except Exception as e:
+                logger.error(f"Error getting all web viewers for disconnect: {e}")
+
+        if all_web_viewer_sids:
+            emit('agent_status', {'status': 'disconnected'}, to=all_web_viewer_sids)
+            logger.info(f"Notified {len(all_web_viewer_sids)} web viewers across all sessions of agent disconnection")
     else:
         # Check if this was a web viewer disconnection
         web_viewer_sids = get_session_web_viewer_sids(session_id)
@@ -763,14 +820,27 @@ def handle_disconnect():
 @socketio.on('request_agent_status')
 def handle_request_agent_status(data):
     """Handle frontend request for current agent connection status"""
-    session_id = get_session_id()
-    agent_sid = get_session_agent_sid(session_id)
+    # Check for any connected agent across all sessions (temporary fix)
+    any_agent_connected = False
+
+    if redis_client:
+        try:
+            session_keys = redis_client.keys("session:*")
+            for session_key in session_keys:
+                agent_sid_data = redis_client.hget(session_key, 'agent_sid')
+                if agent_sid_data and agent_sid_data != 'null':
+                    any_agent_connected = True
+                    break
+        except Exception as e:
+            logger.error(f"Error checking agent status across sessions: {e}")
 
     # Check if agent is connected
-    if agent_sid:
+    if any_agent_connected:
         emit('agent_status', {'status': 'connected'})
+        logger.info("Reported agent as connected (found in any session)")
     else:
         emit('agent_status', {'status': 'disconnected'})
+        logger.info("Reported agent as disconnected (not found in any session)")
 
 def cleanup_session_after_delay(session_id, delay_seconds):
     """Clean up session data after a delay if no active connections"""
