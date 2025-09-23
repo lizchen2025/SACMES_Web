@@ -1235,6 +1235,54 @@
     
     <script type="module" src="js/main.js"></script>
     <script>
+        // Browser close confirmation and cleanup
+        let hasUnsavedData = false;
+        let currentSessionId = null;
+
+        // Set up beforeunload event for browser close confirmation
+        window.addEventListener('beforeunload', function (e) {
+            if (hasUnsavedData) {
+                const confirmationMessage = 'You have unsaved analysis data. We will not keep any data after you close. Please export your data if needed. Are you sure you want to leave?';
+                e.preventDefault();
+                e.returnValue = confirmationMessage;
+                return confirmationMessage;
+            }
+        });
+
+        // Listen for session info from server
+        if (typeof socket !== 'undefined') {
+            socket.on('session_info', function(data) {
+                currentSessionId = data.session_id;
+                console.log('Session ID received:', currentSessionId);
+            });
+
+            // Mark data as unsaved when analysis starts
+            socket.on('live_analysis_update', function(data) {
+                hasUnsavedData = true;
+            });
+
+            socket.on('live_cv_update', function(data) {
+                hasUnsavedData = true;
+            });
+
+            // Clear unsaved data flag after export
+            socket.on('export_data_response', function(data) {
+                if (data.status === 'success') {
+                    hasUnsavedData = false;
+                }
+            });
+        }
+
+        // Clean up session data when page is hidden/closed
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'hidden' && currentSessionId) {
+                // Send beacon to clean up session
+                navigator.sendBeacon('/cleanup-session', JSON.stringify({
+                    session_id: currentSessionId
+                }));
+            }
+        });
+
         // JavaScript for copying citation text
         document.getElementById('copyCitationBtn').addEventListener('click', function() {
             const citationTextarea = document.getElementById('citationText');

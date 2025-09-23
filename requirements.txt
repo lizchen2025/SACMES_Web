@@ -4,3 +4,5 @@ eventlet
 numpy
 scipy
 gunicorn
+redis
+uuid

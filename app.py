@@ -10,8 +10,12 @@ import logging
 import sys
 import io
 import csv
+import uuid
+import redis
+import json
+import threading
 from datetime import datetime
-from flask import Flask, send_from_directory, request
+from flask import Flask, send_from_directory, request, session
 from flask_socketio import SocketIO, emit
 from werkzeug.utils import secure_filename
 
@@ -35,21 +39,124 @@ except ImportError as e:
     analyze_cv_data = None
     get_cv_segments = None
 
-# --- App Setup (Unchanged) ---
+# --- App Setup with Redis Session Management ---
 app = Flask(__name__, static_folder='static', static_url_path='')
-app.config['SECRET_KEY'] = 'a_very_secret_key_that_should_be_changed'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a_very_secret_key_that_should_be_changed')
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', logger=True, engineio_logger=True)
+
+# Redis connection
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+try:
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    redis_client.ping()  # Test connection
+    logger.info("Successfully connected to Redis")
+except Exception as e:
+    logger.error(f"Failed to connect to Redis: {e}")
+    redis_client = None
+
 UPLOAD_FOLDER = 'temp_uploads'
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 AGENT_AUTH_TOKEN = os.environ.get('AGENT_AUTH_TOKEN', "your_super_secret_token_here")
-agent_sid, web_viewer_sids, live_analysis_params, live_trend_data = None, set(), {}, {}
-live_peak_detection_warnings = {}  # Track peak detection warnings
-# Add flag to track validation errors and prevent duplicate alerts
-validation_error_sent = False
 
+# Session management - now using Redis instead of global variables
+session_lock = threading.Lock()
+active_sessions = {}  # {session_id: {'agent_sid': sid, 'web_viewer_sids': set(), ...}}
 
-# --- Helper function calculate_trends (Unchanged) ---
+# Global fallback for when Redis is not available
+fallback_data = {
+    'agent_sid': None,
+    'web_viewer_sids': set(),
+    'live_analysis_params': {},
+    'live_trend_data': {},
+    'live_peak_detection_warnings': {},
+    'validation_error_sent': False
+}
+
+# --- Session Management Helper Functions ---
+def get_session_id():
+    """Get or create a session ID for the current user"""
+    if 'session_id' not in session:
+        session['session_id'] = str(uuid.uuid4())
+    return session['session_id']
+
+def get_session_data(session_id, key, default=None):
+    """Get session-specific data from Redis or fallback"""
+    if redis_client:
+        try:
+            data = redis_client.hget(f"session:{session_id}", key)
+            if data:
+                return json.loads(data)
+            return default
+        except Exception as e:
+            logger.error(f"Redis get error for session {session_id}, key {key}: {e}")
+
+    # Fallback to in-memory storage
+    return fallback_data.get(key, default)
+
+def set_session_data(session_id, key, value):
+    """Set session-specific data in Redis or fallback"""
+    if redis_client:
+        try:
+            redis_client.hset(f"session:{session_id}", key, json.dumps(value, default=str))
+            redis_client.expire(f"session:{session_id}", 86400)  # 24 hour expiry
+            return True
+        except Exception as e:
+            logger.error(f"Redis set error for session {session_id}, key {key}: {e}")
+
+    # Fallback to in-memory storage
+    fallback_data[key] = value
+    return False
+
+def clear_session_data(session_id):
+    """Clear all session data"""
+    if redis_client:
+        try:
+            redis_client.delete(f"session:{session_id}")
+            logger.info(f"Cleared Redis data for session {session_id}")
+        except Exception as e:
+            logger.error(f"Redis clear error for session {session_id}: {e}")
+
+    # Clear from active sessions
+    with session_lock:
+        if session_id in active_sessions:
+            del active_sessions[session_id]
+
+    # Clear fallback data (this affects all users when Redis is down)
+    for key in fallback_data:
+        if isinstance(fallback_data[key], dict):
+            fallback_data[key] = {}
+        elif isinstance(fallback_data[key], set):
+            fallback_data[key] = set()
+        else:
+            fallback_data[key] = None
+
+def get_session_agent_sid(session_id):
+    """Get agent SID for a session"""
+    return get_session_data(session_id, 'agent_sid')
+
+def set_session_agent_sid(session_id, agent_sid):
+    """Set agent SID for a session"""
+    set_session_data(session_id, 'agent_sid', agent_sid)
+
+def get_session_web_viewer_sids(session_id):
+    """Get web viewer SIDs for a session"""
+    sids = get_session_data(session_id, 'web_viewer_sids', [])
+    return set(sids) if sids else set()
+
+def add_session_web_viewer_sid(session_id, sid):
+    """Add web viewer SID to a session"""
+    sids = get_session_web_viewer_sids(session_id)
+    sids.add(sid)
+    set_session_data(session_id, 'web_viewer_sids', list(sids))
+
+def remove_session_web_viewer_sid(session_id, sid):
+    """Remove web viewer SID from a session"""
+    sids = get_session_web_viewer_sids(session_id)
+    sids.discard(sid)
+    set_session_data(session_id, 'web_viewer_sids', list(sids))
+
+# --- Helper function calculate_trends (Updated for session support) ---
 def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
     num_files = params.get('num_files', 1)
     frequencies = params.get('frequencies', [])
@@ -101,10 +208,10 @@ def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
             "normalized_peak_trends": normalized_peak_trends, "kdm_trend": kdm_trend}
 
 
-# --- Background Task ---
-def process_cv_file_in_background(original_filename, content, params_for_this_file):
-    logger.info(f"CV_BACKGROUND_TASK: Started processing for '{original_filename}'.")
-    filename = secure_filename(original_filename)
+# --- Background Task (Updated for session support) ---
+def process_cv_file_in_background(original_filename, content, params_for_this_file, session_id):
+    logger.info(f"CV_BACKGROUND_TASK: Started processing for '{original_filename}' in session {session_id}")
+    filename = secure_filename(f"{session_id}_{original_filename}")
     temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     try:
         with open(temp_filepath, 'w', encoding='utf-8') as f:
@@ -117,10 +224,11 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
 
         # Handle electrode validation errors for CV
         if analysis_result and analysis_result.get('status') == 'error' and 'detected_electrodes' in analysis_result:
-            global validation_error_sent
+            validation_error_sent = get_session_data(session_id, 'validation_error_sent', False)
             if not validation_error_sent:
-                validation_error_sent = True
+                set_session_data(session_id, 'validation_error_sent', True)
                 logger.error(f"CV Electrode validation error: {analysis_result.get('message')}")
+                web_viewer_sids = get_session_web_viewer_sids(session_id)
                 socketio.emit('electrode_validation_error', {
                     'message': analysis_result.get('message'),
                     'detected_electrodes': analysis_result.get('detected_electrodes'),
@@ -140,13 +248,16 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
                 electrode_key = str(selected_electrode) if selected_electrode is not None else 'averaged'
 
                 # Initialize CV results structure if needed
+                live_trend_data = get_session_data(session_id, 'live_trend_data', {})
                 if 'cv_results' not in live_trend_data:
                     live_trend_data['cv_results'] = {}
                 if electrode_key not in live_trend_data['cv_results']:
                     live_trend_data['cv_results'][electrode_key] = {}
 
                 live_trend_data['cv_results'][electrode_key][str(parsed_filenum)] = analysis_result
+                set_session_data(session_id, 'live_trend_data', live_trend_data)
 
+        web_viewer_sids = get_session_web_viewer_sids(session_id)
         if web_viewer_sids:
             # Send CV update
             response_data = {
@@ -158,6 +269,7 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
 
         # Send processing complete acknowledgment to agent for CV
         base_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename
+        agent_sid = get_session_agent_sid(session_id)
         if agent_sid:
             socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
             logger.info(f"CV_BACKGROUND_TASK: Sent processing complete ack for '{base_filename}' to agent")
@@ -166,6 +278,7 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
         logger.error(f"CV_BACKGROUND_TASK: CRITICAL ERROR while processing '{original_filename}': {e}", exc_info=True)
         # Send error acknowledgment to agent even if processing failed
         base_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename
+        agent_sid = get_session_agent_sid(session_id)
         if agent_sid:
             socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
     finally:
@@ -173,9 +286,9 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
         logger.info(f"CV_BACKGROUND_TASK: Finished job for '{original_filename}'.")
 
 
-def process_file_in_background(original_filename, content, params_for_this_file):
-    logger.info(f"BACKGROUND_TASK: Started processing for '{original_filename}'.")
-    filename = secure_filename(original_filename)
+def process_file_in_background(original_filename, content, params_for_this_file, session_id):
+    logger.info(f"BACKGROUND_TASK: Started processing for '{original_filename}' in session {session_id}")
+    filename = secure_filename(f"{session_id}_{original_filename}")
     temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     try:
         with open(temp_filepath, 'w', encoding='utf-8') as f:
@@ -187,10 +300,11 @@ def process_file_in_background(original_filename, content, params_for_this_file)
 
         # Handle electrode validation errors
         if analysis_result and analysis_result.get('status') == 'error' and 'detected_electrodes' in analysis_result:
-            global validation_error_sent
+            validation_error_sent = get_session_data(session_id, 'validation_error_sent', False)
             if not validation_error_sent:
-                validation_error_sent = True
+                set_session_data(session_id, 'validation_error_sent', True)
                 logger.error(f"Electrode validation error: {analysis_result.get('message')}")
+                web_viewer_sids = get_session_web_viewer_sids(session_id)
                 socketio.emit('electrode_validation_error', {
                     'message': analysis_result.get('message'),
                     'detected_electrodes': analysis_result.get('detected_electrodes'),
@@ -211,6 +325,7 @@ def process_file_in_background(original_filename, content, params_for_this_file)
                 file_key = str(parsed_filenum)
 
                 # Initialize nested structure if needed
+                live_trend_data = get_session_data(session_id, 'live_trend_data', {})
                 if 'raw_peaks' not in live_trend_data:
                     live_trend_data['raw_peaks'] = {}
                 if electrode_key not in live_trend_data['raw_peaks']:
@@ -242,8 +357,12 @@ def process_file_in_background(original_filename, content, params_for_this_file)
                 if 'qc_metrics' in analysis_result and analysis_result['qc_metrics']:
                     live_trend_data['qc_metrics'][electrode_key][freq_key][file_key] = analysis_result['qc_metrics']
 
+                # Save the updated trend data back to session
+                set_session_data(session_id, 'live_trend_data', live_trend_data)
+
                 # Track peak detection warnings
                 if analysis_result.get('warning_type') in ['no_derivative_peak', 'insufficient_points_for_derivative', 'internal_baseline_error']:
+                    live_peak_detection_warnings = get_session_data(session_id, 'live_peak_detection_warnings', {})
                     if electrode_key not in live_peak_detection_warnings:
                         live_peak_detection_warnings[electrode_key] = []
                     warning_info = {
@@ -254,10 +373,15 @@ def process_file_in_background(original_filename, content, params_for_this_file)
                         'message': analysis_result.get('message', '')
                     }
                     live_peak_detection_warnings[electrode_key].append(warning_info)
+                    set_session_data(session_id, 'live_peak_detection_warnings', live_peak_detection_warnings)
         # Get current electrode selection from params
+        live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
+        live_trend_data = get_session_data(session_id, 'live_trend_data', {})
+        live_peak_detection_warnings = get_session_data(session_id, 'live_peak_detection_warnings', {})
         current_electrode = live_analysis_params.get('selected_electrode')
         electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
         full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key)
+        web_viewer_sids = get_session_web_viewer_sids(session_id)
         if web_viewer_sids:
             # Send update with electrode-specific information
             response_data = {
@@ -270,6 +394,7 @@ def process_file_in_background(original_filename, content, params_for_this_file)
             socketio.emit('live_analysis_update', response_data, to=list(web_viewer_sids))
 
         # Send processing complete acknowledgment to agent
+        agent_sid = get_session_agent_sid(session_id)
         if agent_sid:
             socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
             logger.info(f"BACKGROUND_TASK: Sent processing complete ack for '{base_filename}' to agent")
@@ -277,6 +402,7 @@ def process_file_in_background(original_filename, content, params_for_this_file)
     except Exception as e:
         logger.error(f"BACKGROUND_TASK: CRITICAL ERROR while processing '{original_filename}': {e}", exc_info=True)
         # Send error acknowledgment to agent even if processing failed
+        agent_sid = get_session_agent_sid(session_id)
         if agent_sid:
             socketio.emit('file_processing_complete', {'filename': original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename}, to=agent_sid)
     finally:
@@ -409,45 +535,81 @@ def generate_csv_data(current_electrode=None):
 # --- Socket.IO Event Handlers (Connect, Disconnect, Start Session are Unchanged) ---
 @socketio.on('connect')
 def handle_connect():
-    global agent_sid
-    logger.info(f"Client connected with SID: {request.sid}")
+    session_id = get_session_id()
+    logger.info(f"Client connected with SID: {request.sid}, Session: {session_id}")
     auth_header = request.headers.get('Authorization')
     token = auth_header.split(' ')[1] if auth_header and auth_header.startswith('Bearer ') else None
     if token and token == AGENT_AUTH_TOKEN:
-        agent_sid = request.sid
-        logger.info(f"Authenticated client is an AGENT. SID: {agent_sid}")
+        set_session_agent_sid(session_id, request.sid)
+        logger.info(f"Authenticated client is an AGENT. SID: {request.sid}, Session: {session_id}")
+        web_viewer_sids = get_session_web_viewer_sids(session_id)
         emit('agent_status', {'status': 'connected'}, to=list(web_viewer_sids))
     else:
-        web_viewer_sids.add(request.sid)
-        logger.info(f"Client is a WEB VIEWER. Total viewers: {len(web_viewer_sids)}")
+        add_session_web_viewer_sid(session_id, request.sid)
+        web_viewer_sids = get_session_web_viewer_sids(session_id)
+        logger.info(f"Client is a WEB VIEWER. SID: {request.sid}, Session: {session_id}, Total viewers: {len(web_viewer_sids)}")
+        # Send session ID to client for tracking
+        emit('session_info', {'session_id': session_id})
 
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    global agent_sid, validation_error_sent
-    logger.info(f"Client disconnected: {request.sid}. Reason: {request.args.get('reason', 'N/A')}")
+    session_id = get_session_id()
+    logger.info(f"Client disconnected: {request.sid}, Session: {session_id}. Reason: {request.args.get('reason', 'N/A')}")
+
+    # Check if this was an agent disconnection
+    agent_sid = get_session_agent_sid(session_id)
     if request.sid == agent_sid:
-        agent_sid = None
-        logger.warning("Agent has disconnected.")
+        set_session_agent_sid(session_id, None)
+        logger.warning(f"Agent has disconnected from session {session_id}")
+        web_viewer_sids = get_session_web_viewer_sids(session_id)
         emit('agent_status', {'status': 'disconnected'}, to=list(web_viewer_sids))
-    elif request.sid in web_viewer_sids:
-        web_viewer_sids.remove(request.sid)
-        # Reset validation error flag when a web viewer disconnects
-        validation_error_sent = False
-        logger.info("Web viewer disconnected, validation error flag reset.")
+    else:
+        # Check if this was a web viewer disconnection
+        web_viewer_sids = get_session_web_viewer_sids(session_id)
+        if request.sid in web_viewer_sids:
+            remove_session_web_viewer_sid(session_id, request.sid)
+            # Reset validation error flag when a web viewer disconnects
+            set_session_data(session_id, 'validation_error_sent', False)
+            remaining_viewers = get_session_web_viewer_sids(session_id)
+            logger.info(f"Web viewer disconnected from session {session_id}, remaining viewers: {len(remaining_viewers)}")
+
+            # Clean up session if no more viewers and no agent
+            if not remaining_viewers and not get_session_agent_sid(session_id):
+                logger.info(f"Session {session_id} has no active connections, scheduling cleanup")
+                # Schedule cleanup after a delay to allow for reconnections
+                socketio.start_background_task(cleanup_session_after_delay, session_id, 300)  # 5 minutes
+
+def cleanup_session_after_delay(session_id, delay_seconds):
+    """Clean up session data after a delay if no active connections"""
+    import time
+    time.sleep(delay_seconds)
+
+    # Check if session still has no active connections
+    web_viewer_sids = get_session_web_viewer_sids(session_id)
+    agent_sid = get_session_agent_sid(session_id)
+
+    if not web_viewer_sids and not agent_sid:
+        logger.info(f"Cleaning up abandoned session {session_id}")
+        clear_session_data(session_id)
+    else:
+        logger.info(f"Session {session_id} has active connections, skipping cleanup")
 
 
 @socketio.on('start_analysis_session')
 def handle_start_analysis_session(data):
-    global live_analysis_params, live_trend_data, live_peak_detection_warnings, validation_error_sent
-    logger.info(f"Received 'start_analysis_session' from {request.sid}")
+    session_id = get_session_id()
+    logger.info(f"Received 'start_analysis_session' from {request.sid}, Session: {session_id}")
     if 'analysisParams' in data:
-        live_analysis_params = data['analysisParams']
-        live_trend_data = {"raw_peaks": {}}
-        live_peak_detection_warnings = {}  # Reset peak detection warnings
-        validation_error_sent = False  # Reset validation error flag
-        logger.info("Analysis session started. Params set and trend data reset.")
+        set_session_data(session_id, 'live_analysis_params', data['analysisParams'])
+        set_session_data(session_id, 'live_trend_data', {"raw_peaks": {}})
+        set_session_data(session_id, 'live_peak_detection_warnings', {})
+        set_session_data(session_id, 'validation_error_sent', False)
+        logger.info(f"Analysis session started for session {session_id}. Params set and trend data reset.")
+
+    agent_sid = get_session_agent_sid(session_id)
     if 'filters' in data and agent_sid:
+        live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
         filters = data['filters']
         filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
         emit('set_filters', filters, to=agent_sid)
@@ -458,14 +620,17 @@ def handle_start_analysis_session(data):
 
 @socketio.on('start_cv_analysis_session')
 def handle_start_cv_analysis_session(data):
-    global live_analysis_params, live_trend_data, validation_error_sent
-    logger.info(f"Received 'start_cv_analysis_session' from {request.sid}")
+    session_id = get_session_id()
+    logger.info(f"Received 'start_cv_analysis_session' from {request.sid}, Session: {session_id}")
     if 'analysisParams' in data:
-        live_analysis_params = data['analysisParams']
-        live_trend_data = {"cv_results": {}}
-        validation_error_sent = False  # Reset validation error flag
-        logger.info("CV Analysis session started. Params set and CV data reset.")
+        set_session_data(session_id, 'live_analysis_params', data['analysisParams'])
+        set_session_data(session_id, 'live_trend_data', {"cv_results": {}})
+        set_session_data(session_id, 'validation_error_sent', False)
+        logger.info(f"CV Analysis session started for session {session_id}. Params set and CV data reset.")
+
+    agent_sid = get_session_agent_sid(session_id)
     if 'filters' in data and agent_sid:
+        live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
         filters = data['filters']
         filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
         emit('set_filters', filters, to=agent_sid)
@@ -476,53 +641,62 @@ def handle_start_cv_analysis_session(data):
 
 @socketio.on('stop_analysis_session')
 def handle_stop_analysis_session(data):
-    global live_analysis_params, live_trend_data, live_peak_detection_warnings, validation_error_sent
-    logger.info(f"Received 'stop_analysis_session' from {request.sid}")
+    session_id = get_session_id()
+    logger.info(f"Received 'stop_analysis_session' from {request.sid}, Session: {session_id}")
 
     # Reset all analysis states
-    live_analysis_params = {}
-    live_trend_data = {}
-    live_peak_detection_warnings = {}
-    validation_error_sent = False
+    set_session_data(session_id, 'live_analysis_params', {})
+    set_session_data(session_id, 'live_trend_data', {})
+    set_session_data(session_id, 'live_peak_detection_warnings', {})
+    set_session_data(session_id, 'validation_error_sent', False)
 
     # Notify agent to stop if connected
+    agent_sid = get_session_agent_sid(session_id)
     if agent_sid:
         emit('stop_data_stream', {}, to=agent_sid)
 
-    logger.info("Analysis session stopped and states reset.")
+    logger.info(f"Analysis session stopped for session {session_id} and states reset.")
 
 
 @socketio.on('stop_cv_analysis_session')
 def handle_stop_cv_analysis_session(data):
-    global live_analysis_params, live_trend_data, validation_error_sent
-    logger.info(f"Received 'stop_cv_analysis_session' from {request.sid}")
+    session_id = get_session_id()
+    logger.info(f"Received 'stop_cv_analysis_session' from {request.sid}, Session: {session_id}")
 
     # Reset all analysis states
-    live_analysis_params = {}
-    live_trend_data = {}
-    validation_error_sent = False
+    set_session_data(session_id, 'live_analysis_params', {})
+    set_session_data(session_id, 'live_trend_data', {})
+    set_session_data(session_id, 'validation_error_sent', False)
 
     # Notify agent to stop if connected
+    agent_sid = get_session_agent_sid(session_id)
     if agent_sid:
         emit('stop_cv_data_stream', {}, to=agent_sid)
 
-    logger.info("CV Analysis session stopped and states reset.")
+    logger.info(f"CV Analysis session stopped for session {session_id} and states reset.")
 
 
 @socketio.on('stream_instrument_data')
 def handle_instrument_data(data):
-    if request.sid != agent_sid: return
+    session_id = get_session_id()
+    agent_sid = get_session_agent_sid(session_id)
+    if request.sid != agent_sid:
+        return
+
     original_filename = data.get('filename', 'unknown_file.txt')
-    if not live_analysis_params: return
+    live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
+    if not live_analysis_params:
+        return
 
     match = re.search(r'_(\d+)Hz', original_filename, re.IGNORECASE)
-    if not match: return
+    if not match:
+        return
 
     # Get selected electrodes from analysis params
     selected_electrodes = live_analysis_params.get('selected_electrodes', [])
 
     if selected_electrodes:
-        # Process each selected electrode
+        # Process each selected electrode in parallel
         for electrode_idx in selected_electrodes:
             params_for_this_file = live_analysis_params.copy()
             params_for_this_file['frequency'] = int(match.group(1))
@@ -535,7 +709,8 @@ def handle_instrument_data(data):
             socketio.start_background_task(target=process_file_in_background,
                                          original_filename=f"{original_filename}_electrode_{electrode_idx}",
                                          content=data.get('content', ''),
-                                         params_for_this_file=params_for_this_file)
+                                         params_for_this_file=params_for_this_file,
+                                         session_id=session_id)
     else:
         # Original averaging behavior
         params_for_this_file = live_analysis_params.copy()
@@ -548,7 +723,8 @@ def handle_instrument_data(data):
         socketio.start_background_task(target=process_file_in_background,
                                      original_filename=original_filename,
                                      content=data.get('content', ''),
-                                     params_for_this_file=params_for_this_file)
+                                     params_for_this_file=params_for_this_file,
+                                     session_id=session_id)
 
 
 @socketio.on('stream_cv_data')
@@ -781,10 +957,25 @@ def handle_electrode_warnings_request(data):
 
 
 
-# --- HTTP Routes (Unchanged) ---
+# --- HTTP Routes ---
 @app.route('/')
 def index():
     return send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/cleanup-session', methods=['POST'])
+def cleanup_session():
+    """Handle session cleanup from client-side beacon"""
+    try:
+        data = request.get_json()
+        if data and 'session_id' in data:
+            session_id = data['session_id']
+            logger.info(f"Cleaning up session {session_id} via beacon")
+            clear_session_data(session_id)
+            return {'status': 'success'}, 200
+        return {'status': 'error', 'message': 'No session_id provided'}, 400
+    except Exception as e:
+        logger.error(f"Error cleaning up session: {e}")
+        return {'status': 'error', 'message': str(e)}, 500
 
 
 # --- Main Execution (Unchanged) ---
