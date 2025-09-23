@@ -4,6 +4,7 @@
 import os
 import re
 import time
+import json
 import socketio
 import threading
 import uuid
@@ -20,12 +21,82 @@ AUTH_TOKEN = "your_super_secret_token_here"
 POLLING_INTERVAL_SECONDS = 2
 SEND_DELAY_SECONDS = 0.05
 
+# --- ID Management System ---
+class IDManager:
+    def __init__(self, config_file='agent.json'):
+        self.config_file = config_file
+        self.user_id = None
+        self.session_id = None
+        self._load_or_create_config()
+
+    def _load_or_create_config(self):
+        """Load existing config or create new one with persistent user ID"""
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    self.user_id = config.get('user_id')
+                    if self.user_id:
+                        print(f"Loaded existing user ID: {self.user_id}")
+                    else:
+                        self._generate_new_user_id()
+            else:
+                self._generate_new_user_id()
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Error loading config: {e}, generating new user ID")
+            self._generate_new_user_id()
+
+    def _generate_new_user_id(self):
+        """Generate new persistent user ID and save to config"""
+        self.user_id = str(uuid.uuid4())
+        print(f"Generated new user ID: {self.user_id}")
+        self._save_config()
+
+    def _save_config(self):
+        """Save current configuration to file"""
+        try:
+            config = {
+                'user_id': self.user_id,
+                'created_at': datetime.now().isoformat(),
+                'last_session': self.session_id
+            }
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2)
+        except IOError as e:
+            print(f"Warning: Could not save config: {e}")
+
+    def get_user_id(self):
+        """Get the persistent user ID"""
+        return self.user_id
+
+    def start_new_session(self):
+        """Generate new session ID and save to config"""
+        self.session_id = str(uuid.uuid4())
+        print(f"Started new session: {self.session_id}")
+        self._save_config()
+        return self.session_id
+
+    def get_session_id(self):
+        """Get current session ID"""
+        return self.session_id
+
+    def get_consent_data(self):
+        """Get consent data with user ID and session ID"""
+        return {
+            'user_id': self.user_id,
+            'session_id': self.session_id,
+            'timestamp': datetime.now().isoformat(),
+            'agent_version': '1.0'
+        }
+
+# Global ID manager instance
+id_manager = IDManager()
+
 # --- Consent Dialog Class ---
 class ConsentDialog:
     def __init__(self, parent_window):
         self.parent = parent_window
         self.consent_given = False
-        self.user_id = str(uuid.uuid4())
         self.consent_text = self.load_consent_text()
 
     def load_consent_text(self):
@@ -423,8 +494,10 @@ class AgentApp:
             self.log("User declined consent - monitoring cancelled.")
             return
 
-        # Log consent acceptance
-        self.log(f"User consent obtained (ID: {consent_dialog.user_id})")
+        # Start new session and log consent acceptance
+        session_id = id_manager.start_new_session()
+        user_id = id_manager.get_user_id()
+        self.log(f"User consent obtained (User ID: {user_id}, Session ID: {session_id})")
 
         # Proceed with monitoring immediately (skip blocking consent logging to server)
         self.start_button.config(state=tk.DISABLED)
@@ -433,11 +506,7 @@ class AgentApp:
         self.url_entry.config(state=tk.DISABLED)  # Disable URL entry while running
 
         # Store consent data for later logging through main connection
-        self.consent_data = {
-            'user_id': consent_dialog.user_id,
-            'timestamp': datetime.now().isoformat(),
-            'agent_version': '1.0'
-        }
+        self.consent_data = id_manager.get_consent_data()
 
         connection_thread = threading.Thread(target=self.run_connection_logic, daemon=True)
         connection_thread.start()

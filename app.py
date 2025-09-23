@@ -242,12 +242,33 @@ def clear_session_data(session_id):
         else:
             fallback_data[key] = None
 
-def log_consent(user_id, user_ip=None):
-    """Log user consent with user ID and timestamp"""
+def get_real_client_ip():
+    """Get real client IP address, considering proxies and load balancers"""
+    # Check X-Forwarded-For header (most common for proxies/load balancers)
+    if 'X-Forwarded-For' in request.headers:
+        # X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+        # The first IP is usually the original client
+        forwarded_ips = request.headers['X-Forwarded-For'].split(',')
+        return forwarded_ips[0].strip()
+
+    # Check X-Real-IP header (used by some proxies like nginx)
+    if 'X-Real-IP' in request.headers:
+        return request.headers['X-Real-IP'].strip()
+
+    # Check X-Original-Forwarded-For (used by some cloud services)
+    if 'X-Original-Forwarded-For' in request.headers:
+        return request.headers['X-Original-Forwarded-For'].strip()
+
+    # Fallback to direct connection IP
+    return request.remote_addr
+
+def log_consent(user_id, user_ip=None, session_id=None):
+    """Log user consent with user ID, session ID and timestamp"""
     try:
         timestamp = datetime.now().isoformat()
         consent_record = {
             'user_id': user_id,
+            'session_id': session_id or 'unknown',
             'timestamp': timestamp,
             'user_ip': user_ip or 'unknown'
         }
@@ -725,6 +746,18 @@ def handle_disconnect():
                 # Schedule cleanup after a delay to allow for reconnections
                 socketio.start_background_task(cleanup_session_after_delay, session_id, 300)  # 5 minutes
 
+@socketio.on('request_agent_status')
+def handle_request_agent_status(data):
+    """Handle frontend request for current agent connection status"""
+    session_id = get_session_id()
+    agent_sid = get_session_agent_sid(session_id)
+
+    # Check if agent is connected
+    if agent_sid:
+        emit('agent_status', {'status': 'connected'})
+    else:
+        emit('agent_status', {'status': 'disconnected'})
+
 def cleanup_session_after_delay(session_id, delay_seconds):
     """Clean up session data after a delay if no active connections"""
     import time
@@ -1139,11 +1172,12 @@ def handle_agent_consent(data):
     """Handle consent logging from local agent"""
     # This will be called by the local agent when user gives consent
     user_id = data.get('user_id', 'unknown')
-    user_ip = request.remote_addr
+    session_id = data.get('session_id', 'unknown')
+    user_ip = get_real_client_ip()
 
-    logger.info(f"Received consent from agent for user {user_id}, IP: {user_ip}")
+    logger.info(f"Received consent from agent for user {user_id}, session {session_id}, real IP: {user_ip}")
 
-    success = log_consent(user_id, user_ip)
+    success = log_consent(user_id, user_ip, session_id)
 
     emit('consent_logged', {
         'status': 'success' if success else 'error',
