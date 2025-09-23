@@ -39,6 +39,74 @@ except ImportError as e:
     analyze_cv_data = None
     get_cv_segments = None
 
+# --- File Safety Validation Functions ---
+def validate_file_safety(filename, content):
+    """
+    Perform efficient safety checks on uploaded files.
+    Returns (is_safe: bool, error_message: str)
+    """
+    # 1. File extension validation (most efficient - check first)
+    allowed_extensions = {'.txt', '.dta', '.csv'}
+    file_ext = os.path.splitext(filename.lower())[1]
+    if file_ext not in allowed_extensions:
+        return False, f"File extension '{file_ext}' not allowed. Only .txt, .dta, .csv files are accepted."
+
+    # 2. File size validation (check content length)
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB in bytes
+    content_size = len(content.encode('utf-8'))
+    if content_size > MAX_FILE_SIZE:
+        return False, f"File size ({content_size / 1024 / 1024:.1f}MB) exceeds 5MB limit."
+
+    # 3. Efficient content validation (sample-based for performance)
+    if not validate_content_safety(content):
+        return False, "File contains binary or suspicious content. Only text-based data files are allowed."
+
+    return True, ""
+
+def validate_content_safety(content, sample_size=2048):
+    """
+    Efficiently validate content is text-based and safe.
+    Uses sampling for large files to maintain performance.
+    """
+    # Sample beginning and end of file for efficiency
+    if len(content) <= sample_size:
+        sample = content
+    else:
+        # Sample first 1KB and last 1KB
+        half_sample = sample_size // 2
+        sample = content[:half_sample] + content[-half_sample:]
+
+    # Check for binary content (null bytes and excessive non-printable chars)
+    if '\x00' in sample:
+        return False
+
+    # Count non-printable characters (excluding common whitespace)
+    printable_count = 0
+    for char in sample:
+        if char.isprintable() or char in '\n\r\t':
+            printable_count += 1
+
+    # If more than 20% non-printable, likely binary
+    if len(sample) > 0 and (printable_count / len(sample)) < 0.8:
+        return False
+
+    # Check for suspicious patterns (basic security patterns)
+    suspicious_patterns = [
+        b'\x7fELF',  # ELF binary
+        b'MZ',       # Windows executable
+        b'\xff\xd8\xff',  # JPEG
+        b'\x89PNG',  # PNG
+        b'PK\x03\x04',    # ZIP
+        b'\xd0\xcf\x11\xe0',  # MS Office
+    ]
+
+    content_bytes = sample.encode('utf-8', errors='ignore')
+    for pattern in suspicious_patterns:
+        if pattern in content_bytes:
+            return False
+
+    return True
+
 # --- Helper function to read secrets ---
 def read_secret(secret_name, fallback_env_var=None, default_value=None):
     """Read secret from file or environment variable"""
@@ -761,6 +829,19 @@ def handle_instrument_data(data):
         return
 
     original_filename = data.get('filename', 'unknown_file.txt')
+    file_content = data.get('content', '')
+
+    # SAFETY VALIDATION: Check file safety before processing
+    is_safe, error_message = validate_file_safety(original_filename, file_content)
+    if not is_safe:
+        logger.warning(f"File safety check failed for {original_filename}: {error_message}")
+        emit('file_validation_error', {
+            'filename': original_filename,
+            'error': error_message,
+            'message': f"File '{original_filename}' was rejected: {error_message}"
+        }, to=agent_sid)
+        return
+
     live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
     if not live_analysis_params:
         return
@@ -785,7 +866,7 @@ def handle_instrument_data(data):
 
             socketio.start_background_task(target=process_file_in_background,
                                          original_filename=f"{original_filename}_electrode_{electrode_idx}",
-                                         content=data.get('content', ''),
+                                         content=file_content,
                                          params_for_this_file=params_for_this_file,
                                          session_id=session_id)
     else:
@@ -799,16 +880,35 @@ def handle_instrument_data(data):
 
         socketio.start_background_task(target=process_file_in_background,
                                      original_filename=original_filename,
-                                     content=data.get('content', ''),
+                                     content=file_content,
                                      params_for_this_file=params_for_this_file,
                                      session_id=session_id)
 
 
 @socketio.on('stream_cv_data')
 def handle_cv_instrument_data(data):
-    if request.sid != agent_sid: return
+    session_id = get_session_id()
+    agent_sid = get_session_agent_sid(session_id)
+    if request.sid != agent_sid:
+        return
+
     original_filename = data.get('filename', 'unknown_file.txt')
-    if not live_analysis_params: return
+    file_content = data.get('content', '')
+
+    # SAFETY VALIDATION: Check file safety before processing
+    is_safe, error_message = validate_file_safety(original_filename, file_content)
+    if not is_safe:
+        logger.warning(f"CV file safety check failed for {original_filename}: {error_message}")
+        emit('file_validation_error', {
+            'filename': original_filename,
+            'error': error_message,
+            'message': f"File '{original_filename}' was rejected: {error_message}"
+        }, to=agent_sid)
+        return
+
+    live_analysis_params = get_session_data(session_id, 'cv_live_analysis_params', {})
+    if not live_analysis_params:
+        return
 
     # Get selected electrodes from analysis params
     selected_electrodes = live_analysis_params.get('selected_electrodes', [])
@@ -821,15 +921,17 @@ def handle_cv_instrument_data(data):
 
             socketio.start_background_task(target=process_cv_file_in_background,
                                          original_filename=f"{original_filename}_electrode_{electrode_idx}",
-                                         content=data.get('content', ''),
-                                         params_for_this_file=params_for_this_file)
+                                         content=file_content,
+                                         params_for_this_file=params_for_this_file,
+                                         session_id=session_id)
     else:
         # Original averaging behavior for CV
         params_for_this_file = live_analysis_params.copy()
         socketio.start_background_task(target=process_cv_file_in_background,
                                      original_filename=original_filename,
-                                     content=data.get('content', ''),
-                                     params_for_this_file=params_for_this_file)
+                                     content=file_content,
+                                     params_for_this_file=params_for_this_file,
+                                     session_id=session_id)
 
 
 @socketio.on('get_cv_preview')

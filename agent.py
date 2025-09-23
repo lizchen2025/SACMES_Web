@@ -45,17 +45,26 @@ DATA HANDLING:
 • We do not permanently retain your raw data files after session completion
 • Analysis results and processed data may be temporarily cached for session continuity
 
+FILE RESTRICTIONS:
+• Only text-based files with extensions .txt, .dta, .csv are accepted by the server
+• Files must be under 5MB in size
+• Binary files and suspicious content will be automatically rejected
+• The server performs content validation to ensure data integrity
+
 SECURITY CONSIDERATIONS:
 • Ensure your selected folder contains only data you consent to share
 • Do not include sensitive, confidential, or proprietary files in the monitored folder
 • This agent operates with the same file access privileges as your user account
 • Network transmission occurs over HTTPS with standard encryption
 
-USER RESPONSIBILITIES:
-• You are responsible for ensuring you have proper authorization to share the data
+USER RESPONSIBILITIES AND FILE SAFETY:
+• YOU ARE SOLELY RESPONSIBLE for ensuring all files in the monitored folder are safe to share
+• YOU MUST verify that no sensitive, confidential, or proprietary information is included
+• YOU ARE RESPONSIBLE for ensuring you have proper authorization to share the data
 • Verify that sharing this data complies with your institutional policies
 • Remove any sensitive files from the monitored folder before starting the agent
 • You may stop monitoring at any time by clicking the "Stop" button
+• SACMES is not liable for any data you choose to share through this agent
 
 TECHNICAL OPERATION:
 • The agent scans for files matching specific naming patterns related to electrochemical data
@@ -323,6 +332,14 @@ def on_file_processing_complete(data):
         app.log(f"<-- Processing acknowledgment received for: {received_filename}")
     else:
         app.log(f"[Warning] Unexpected processing acknowledgment for: {received_filename}")
+
+
+@sio.on('file_validation_error')
+def on_file_validation_error(data):
+    filename = data.get('filename', 'unknown_file')
+    error_message = data.get('message', 'File validation failed')
+    app.log(f"[SECURITY] File rejected by server: {filename}")
+    app.log(f"[SECURITY] Reason: {error_message}")
 
 
 # --- GUI Application Class ---
