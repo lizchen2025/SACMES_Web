@@ -1235,53 +1235,167 @@
     
     <script type="module" src="js/main.js"></script>
     <script>
-        // Browser close confirmation and cleanup
+        // Browser close confirmation and cleanup - Enhanced for all environments
         let hasUnsavedData = false;
         let currentSessionId = null;
+        let isAnalysisActive = false;
 
-        // Set up beforeunload event for browser close confirmation
-        window.addEventListener('beforeunload', function (e) {
-            if (hasUnsavedData) {
-                const confirmationMessage = 'You have unsaved analysis data. We will not keep any data after you close. Please export your data if needed. Are you sure you want to leave?';
-                e.preventDefault();
-                e.returnValue = confirmationMessage;
-                return confirmationMessage;
-            }
-        });
+        // Multiple event listeners for comprehensive coverage
+        function setupBrowserCloseWarning() {
+            const warningMessage = 'You have unsaved analysis data. We will not keep any data after you close. Please export your data if needed.';
 
-        // Listen for session info from server
-        if (typeof socket !== 'undefined') {
-            socket.on('session_info', function(data) {
-                currentSessionId = data.session_id;
-                console.log('Session ID received:', currentSessionId);
+            // Primary beforeunload handler
+            window.addEventListener('beforeunload', function (e) {
+                if (hasUnsavedData || isAnalysisActive) {
+                    e.preventDefault();
+                    e.returnValue = warningMessage;
+                    return warningMessage;
+                }
             });
 
-            // Mark data as unsaved when analysis starts
-            socket.on('live_analysis_update', function(data) {
-                hasUnsavedData = true;
+            // Additional handlers for different scenarios
+            window.addEventListener('unload', function (e) {
+                if (currentSessionId) {
+                    // Send synchronous cleanup request as last resort
+                    navigator.sendBeacon('/cleanup-session', JSON.stringify({
+                        session_id: currentSessionId,
+                        reason: 'unload'
+                    }));
+                }
             });
 
-            socket.on('live_cv_update', function(data) {
-                hasUnsavedData = true;
+            // Page visibility API for better mobile/tab switching detection
+            document.addEventListener('visibilitychange', function() {
+                if (document.visibilityState === 'hidden' && currentSessionId) {
+                    // Send beacon immediately when page becomes hidden
+                    navigator.sendBeacon('/cleanup-session', JSON.stringify({
+                        session_id: currentSessionId,
+                        reason: 'visibility_hidden'
+                    }));
+                }
             });
 
-            // Clear unsaved data flag after export
-            socket.on('export_data_response', function(data) {
-                if (data.status === 'success') {
-                    hasUnsavedData = false;
+            // Pagehide event for iOS Safari and other mobile browsers
+            window.addEventListener('pagehide', function(e) {
+                if (currentSessionId) {
+                    navigator.sendBeacon('/cleanup-session', JSON.stringify({
+                        session_id: currentSessionId,
+                        reason: 'pagehide'
+                    }));
                 }
             });
         }
 
-        // Clean up session data when page is hidden/closed
-        document.addEventListener('visibilitychange', function() {
-            if (document.visibilityState === 'hidden' && currentSessionId) {
-                // Send beacon to clean up session
-                navigator.sendBeacon('/cleanup-session', JSON.stringify({
-                    session_id: currentSessionId
-                }));
+        // Initialize warning system when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setupBrowserCloseWarning);
+        } else {
+            setupBrowserCloseWarning();
+        }
+
+        // Enhanced session and data tracking
+        function initializeSessionTracking() {
+            if (typeof socket !== 'undefined') {
+                socket.on('session_info', function(data) {
+                    currentSessionId = data.session_id;
+                    console.log('Session ID received:', currentSessionId);
+                });
+
+                // Mark data as unsaved when analysis starts
+                socket.on('live_analysis_update', function(data) {
+                    hasUnsavedData = true;
+                    isAnalysisActive = true;
+                });
+
+                socket.on('live_cv_update', function(data) {
+                    hasUnsavedData = true;
+                    isAnalysisActive = true;
+                });
+
+                // Track when analysis sessions start
+                socket.on('ack_start_session', function(data) {
+                    if (data.status === 'success') {
+                        isAnalysisActive = true;
+                        hasUnsavedData = false; // Reset until first data comes in
+                    }
+                });
+
+                socket.on('ack_start_cv_session', function(data) {
+                    if (data.status === 'success') {
+                        isAnalysisActive = true;
+                        hasUnsavedData = false; // Reset until first data comes in
+                    }
+                });
+
+                // Clear flags when analysis stops
+                socket.on('disconnect', function() {
+                    isAnalysisActive = false;
+                });
+
+                // Clear unsaved data flag after successful export
+                socket.on('export_data_response', function(data) {
+                    if (data.status === 'success') {
+                        hasUnsavedData = false;
+                        // Show brief confirmation
+                        if (typeof showNotification === 'function') {
+                            showNotification('Data exported successfully. Safe to close browser.', 'success');
+                        }
+                    }
+                });
+
+                // Connection status tracking
+                socket.on('connect', function() {
+                    console.log('Socket connected');
+                });
+
+                socket.on('disconnect', function() {
+                    console.log('Socket disconnected');
+                    isAnalysisActive = false;
+                });
             }
-        });
+        }
+
+        // Initialize session tracking
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeSessionTracking);
+        } else {
+            initializeSessionTracking();
+        }
+
+        // Add manual cleanup button for users (optional)
+        function addManualCleanupOption() {
+            // Create a small cleanup button that users can click
+            const cleanupButton = document.createElement('button');
+            cleanupButton.innerHTML = '🧹 Clear Session';
+            cleanupButton.className = 'fixed bottom-4 right-4 bg-gray-600 text-white px-3 py-1 rounded text-xs opacity-50 hover:opacity-100 transition-opacity';
+            cleanupButton.title = 'Manually clear your session data';
+            cleanupButton.style.zIndex = '1001';
+
+            cleanupButton.addEventListener('click', function() {
+                if (confirm('Clear your session data? This will remove all unsaved analysis results.')) {
+                    hasUnsavedData = false;
+                    isAnalysisActive = false;
+                    if (currentSessionId) {
+                        fetch('/cleanup-session', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({session_id: currentSessionId, reason: 'manual'})
+                        }).then(() => {
+                            alert('Session cleared successfully.');
+                        }).catch(console.error);
+                    }
+                }
+            });
+
+            document.body.appendChild(cleanupButton);
+        }
+
+        // Add manual cleanup option after page loads
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', addManualCleanupOption);
+        } else {
+            addManualCleanupOption();
+        }
 
         // JavaScript for copying citation text
         document.getElementById('copyCitationBtn').addEventListener('click', function() {

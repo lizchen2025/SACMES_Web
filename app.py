@@ -39,13 +39,57 @@ except ImportError as e:
     analyze_cv_data = None
     get_cv_segments = None
 
+# --- Helper function to read secrets ---
+def read_secret(secret_name, fallback_env_var=None, default_value=None):
+    """Read secret from file or environment variable"""
+    # Try to read from Docker secret file first
+    secret_file = f"/run/secrets/{secret_name}"
+    if os.path.exists(secret_file):
+        try:
+            with open(secret_file, 'r') as f:
+                return f.read().strip()
+        except Exception as e:
+            logger.warning(f"Could not read secret file {secret_file}: {e}")
+
+    # Try environment variable with _FILE suffix
+    env_file_var = f"{secret_name.upper()}_FILE"
+    if env_file_var in os.environ:
+        try:
+            with open(os.environ[env_file_var], 'r') as f:
+                return f.read().strip()
+        except Exception as e:
+            logger.warning(f"Could not read secret file from {env_file_var}: {e}")
+
+    # Fallback to regular environment variable
+    if fallback_env_var and fallback_env_var in os.environ:
+        return os.environ[fallback_env_var]
+
+    # Return default value
+    return default_value
+
 # --- App Setup with Redis Session Management ---
 app = Flask(__name__, static_folder='static', static_url_path='')
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a_very_secret_key_that_should_be_changed')
+
+# Read secrets securely
+SECRET_KEY = read_secret('secret_key', 'SECRET_KEY', 'a_very_secret_key_that_should_be_changed')
+REDIS_PASSWORD = read_secret('redis_password', 'REDIS_PASSWORD')
+AGENT_AUTH_TOKEN = read_secret('agent_auth_token', 'AGENT_AUTH_TOKEN', 'your_super_secret_token_here')
+
+app.config['SECRET_KEY'] = SECRET_KEY
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', logger=True, engineio_logger=True)
 
-# Redis connection
-REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+# Redis connection - construct URL securely
+REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
+REDIS_PORT = os.environ.get('REDIS_PORT', '6379')
+REDIS_DB = os.environ.get('REDIS_DB', '0')
+
+if REDIS_PASSWORD:
+    REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+else:
+    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+
+# Allow override via environment variable
+REDIS_URL = os.environ.get('REDIS_URL', REDIS_URL)
 try:
     redis_client = redis.from_url(REDIS_URL, decode_responses=True)
     redis_client.ping()  # Test connection
@@ -57,7 +101,6 @@ except Exception as e:
 UPLOAD_FOLDER = 'temp_uploads'
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-AGENT_AUTH_TOKEN = os.environ.get('AGENT_AUTH_TOKEN', "your_super_secret_token_here")
 
 # Session management - now using Redis instead of global variables
 session_lock = threading.Lock()

@@ -1,7 +1,7 @@
 // static/js/plot_utils.js (Final version with injection point fix)
 
 export class PlotlyPlotter {
-    static plotIndividualData(plotDivId, potentials, rawCurrents, smoothedCurrents, regressionLine, adjustedPotentials, aucVertices, selectedOptions) {
+    static plotIndividualData(plotDivId, potentials, rawCurrents, smoothedCurrents, regressionLine, adjustedPotentials, aucVertices, selectedOptions, peakInfo = null, peakBaselineLine = null) {
         const traces = [];
 
         traces.push({
@@ -17,8 +17,73 @@ export class PlotlyPlotter {
         if (regressionLine && adjustedPotentials) {
             traces.push({
                 x: adjustedPotentials, y: regressionLine, mode: 'lines',
-                name: 'Regression Line', line: {color: 'green', dash: 'dash', width: 1}
+                name: 'Baseline', line: {color: 'green', dash: 'dash', width: 1}
             });
+        }
+
+        // Add peak-to-baseline line visualization
+        if (peakBaselineLine && peakBaselineLine.length === 2 && selectedOptions === "Peak Height Extraction") {
+            const peakX = peakBaselineLine.map(point => point.potential);
+            const peakY = peakBaselineLine.map(point => point.current);
+
+            traces.push({
+                x: peakX,
+                y: peakY,
+                mode: 'lines+markers',
+                name: 'Peak Height',
+                line: {color: 'purple', width: 3, dash: 'dot'},
+                marker: {
+                    color: ['green', 'red'], // baseline point green, peak point red
+                    size: [8, 10],
+                    symbol: ['circle', 'diamond']
+                },
+                hovertemplate: '<b>%{fullData.name}</b><br>' +
+                             'Potential: %{x:.4f} V<br>' +
+                             'Current: %{y:.4f} µA<br>' +
+                             '<extra></extra>'
+            });
+        }
+
+        // Add peak marker and annotation
+        if (peakInfo && peakInfo.peak_potential !== undefined && selectedOptions === "Peak Height Extraction") {
+            traces.push({
+                x: [peakInfo.peak_potential],
+                y: [peakInfo.peak_current],
+                mode: 'markers',
+                name: 'Peak',
+                marker: {
+                    color: 'red',
+                    size: 12,
+                    symbol: 'star',
+                    line: {color: 'darkred', width: 2}
+                },
+                hovertemplate: '<b>Peak Detection</b><br>' +
+                             'Peak Potential: ' + peakInfo.peak_potential.toFixed(4) + ' V<br>' +
+                             'Peak Current: ' + peakInfo.peak_current.toFixed(4) + ' µA<br>' +
+                             'Baseline Current: ' + peakInfo.baseline_current.toFixed(4) + ' µA<br>' +
+                             'Peak Height: ' + peakInfo.peak_height.toFixed(4) + ' µA<br>' +
+                             '<extra></extra>'
+            });
+
+            // Add baseline points if available
+            if (peakInfo.baseline_left && peakInfo.baseline_right) {
+                traces.push({
+                    x: [peakInfo.baseline_left.potential, peakInfo.baseline_right.potential],
+                    y: [peakInfo.baseline_left.current, peakInfo.baseline_right.current],
+                    mode: 'markers',
+                    name: 'Baseline Points',
+                    marker: {
+                        color: 'green',
+                        size: 8,
+                        symbol: 'circle',
+                        line: {color: 'darkgreen', width: 1}
+                    },
+                    hovertemplate: '<b>Baseline Point</b><br>' +
+                                 'Potential: %{x:.4f} V<br>' +
+                                 'Current: %{y:.4f} µA<br>' +
+                                 '<extra></extra>'
+                });
+            }
         }
 
         if (selectedOptions === "Area Under the Curve" && aucVertices && aucVertices.length > 0) {

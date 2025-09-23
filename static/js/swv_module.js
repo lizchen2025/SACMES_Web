@@ -493,8 +493,18 @@ export class SWVModule {
             const peakHeightEl = document.getElementById(`peakHeightDisplay-${freq}`);
 
             if (document.getElementById(plotDivId) && fileNumEl && peakHeightEl) {
-                PlotlyPlotter.plotIndividualData(plotDivId, individual_analysis.potentials, individual_analysis.raw_currents, individual_analysis.smoothed_currents,
-                                                individual_analysis.regression_line, individual_analysis.adjusted_potentials, individual_analysis.auc_vertices, this.dom.settings.selectedOptionsInput.value);
+                PlotlyPlotter.plotIndividualData(
+                    plotDivId,
+                    individual_analysis.potentials,
+                    individual_analysis.raw_currents,
+                    individual_analysis.smoothed_currents,
+                    individual_analysis.regression_line,
+                    individual_analysis.adjusted_potentials,
+                    individual_analysis.auc_vertices,
+                    this.dom.settings.selectedOptionsInput.value,
+                    individual_analysis.peak_info,  // NEW: Peak detection info
+                    individual_analysis.peak_baseline_line  // NEW: Peak-to-baseline line
+                );
                 fileNumEl.textContent = fileNum;
                 peakHeightEl.textContent = individual_analysis.peak_value !== null ? individual_analysis.peak_value.toFixed(4) : "N/A";
             }
@@ -525,8 +535,18 @@ export class SWVModule {
             const peakHeightEl = document.getElementById(`peakHeightDisplay-${freq}`);
 
             if (document.getElementById(plotDivId) && fileNumEl && peakHeightEl && latestData) {
-                PlotlyPlotter.plotIndividualData(plotDivId, latestData.potentials, latestData.raw_currents, latestData.smoothed_currents,
-                                                latestData.regression_line, latestData.adjusted_potentials, latestData.auc_vertices, this.dom.settings.selectedOptionsInput.value);
+                PlotlyPlotter.plotIndividualData(
+                    plotDivId,
+                    latestData.potentials,
+                    latestData.raw_currents,
+                    latestData.smoothed_currents,
+                    latestData.regression_line,
+                    latestData.adjusted_potentials,
+                    latestData.auc_vertices,
+                    this.dom.settings.selectedOptionsInput.value,
+                    latestData.peak_info,  // NEW: Peak detection info
+                    latestData.peak_baseline_line  // NEW: Peak-to-baseline line
+                );
                 fileNumEl.textContent = latestFileNum;
                 peakHeightEl.textContent = latestData.peak_value !== null ? latestData.peak_value.toFixed(4) : "N/A";
             }

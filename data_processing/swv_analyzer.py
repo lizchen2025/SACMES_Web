@@ -525,6 +525,27 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
     elif baseline_warning_type:
         message += f" (Note: {baseline_warning_type})"
 
+    # Prepare peak-to-baseline visualization data
+    peak_baseline_line = []
+    peak_info = {}
+
+    if analysis_params['SelectedOptions'] == "Peak Height Extraction" and 'peak_potential' in locals() and 'baseline_at_peak' in locals():
+        peak_info = {
+            'peak_potential': peak_potential,
+            'peak_current': original_peak_current,
+            'baseline_current': baseline_at_peak,
+            'peak_height': peak_value,
+            'baseline_left': {'potential': V_left_baseline, 'current': I_left_baseline} if V_left_baseline is not None else None,
+            'baseline_right': {'potential': V_right_baseline, 'current': I_right_baseline} if V_right_baseline is not None else None
+        }
+
+        # Create vertical line from baseline to peak for visualization
+        if baseline_at_peak is not None:
+            peak_baseline_line = [
+                {'potential': peak_potential, 'current': baseline_at_peak},
+                {'potential': peak_potential, 'current': original_peak_current}
+            ]
+
     return {
         "status": status, "message": message, "warning_type": baseline_warning_type,
         "potentials": adjusted_potentials,  # Return sorted, ranged data
@@ -534,6 +555,8 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
         "adjusted_potentials": adjusted_potentials,  # This is somewhat redundant, but kept for consistency
         "peak_value": peak_value,
         "auc_vertices": auc_vertices,
+        "peak_info": peak_info,  # NEW: Peak detection details for visualization
+        "peak_baseline_line": peak_baseline_line,  # NEW: Line from baseline to peak
         "filter_params": filter_params if 'filter_params' in locals() else {},
         "qc_metrics": qc_metrics if 'qc_metrics' in locals() else {}
     }
