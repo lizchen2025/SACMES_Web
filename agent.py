@@ -331,24 +331,45 @@ def send_file_to_server(file_path):
 def monitor_directory_loop(directory):
     global processed_files
     app.log(f"--- Started monitoring folder: '{directory}' ---")
+    app.log(f"Current filters: {current_filters}")
+
     while is_monitoring_active:
         try:
-            new_matching_files = [f for f in os.listdir(directory) if
+            # List all files in directory
+            all_files = os.listdir(directory)
+            app.log(f"📁 Found {len(all_files)} total files in directory")
+
+            # Filter matching files
+            new_matching_files = [f for f in all_files if
                                   file_matches_filters(f) and f not in processed_files]
+
             if new_matching_files:
                 files_by_number = defaultdict(list)
                 for filename in new_matching_files:
                     match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
                     if match: files_by_number[int(match.group(2))].append(filename)
-                app.log(f"Found {len(new_matching_files)} new file(s) to process...")
+                app.log(f"✓ Found {len(new_matching_files)} new matching file(s) to process...")
                 for num in sorted(files_by_number.keys()):
                     for filename in sorted(files_by_number[num]):
                         if not is_monitoring_active:
                             app.log("Monitoring stopped, aborting file sending.")
                             return
+                        app.log(f"📤 Sending file: {filename}")
                         send_file_to_server(os.path.join(directory, filename))
                         processed_files.add(filename)
-                        time.sleep(SEND_DELAY_SECONDS)
+            else:
+                # Show a few example files to help with debugging
+                if len(all_files) > 0:
+                    sample_files = all_files[:3]
+                    app.log(f"🔍 No matching files found. Sample files: {sample_files}")
+                    # Check one sample file against filters
+                    if sample_files:
+                        sample_file = sample_files[0]
+                        matches = file_matches_filters(sample_file)
+                        app.log(f"📝 Sample file '{sample_file}' matches filters: {matches}")
+                else:
+                    app.log("📂 Directory is empty")
+
             time.sleep(POLLING_INTERVAL_SECONDS)
         except FileNotFoundError:
             app.log(f"[FATAL] Monitored directory '{directory}' no longer exists. Stopping.")
@@ -382,17 +403,29 @@ def disconnect():
 @sio.on('set_filters')
 def on_set_filters(data):
     global current_filters, processed_files, agent_thread, is_monitoring_active
-    app.log(f"<-- Received new filter instructions from server: {data}")
+    app.log(f"✓ Received filter instructions from server: {data}")
     current_filters.clear()
     current_filters.update(data)
     processed_files = set()
+    app.log(f"✓ Updated current filters: {current_filters}")
+    app.log(f"✓ Monitor directory: {app.watch_directory.get()}")
+
     if agent_thread and agent_thread.is_alive():
+        app.log("Stopping previous monitoring thread...")
         is_monitoring_active = False
         agent_thread.join()
+
     is_monitoring_active = True
     directory = app.watch_directory.get()
+
+    if directory == "No folder selected":
+        app.log("⚠ ERROR: No folder selected for monitoring!")
+        return
+
+    app.log(f"✓ Starting file monitoring in directory: {directory}")
     agent_thread = threading.Thread(target=monitor_directory_loop, args=(directory,), daemon=True)
     agent_thread.start()
+    app.log("✓ File monitoring thread started successfully")
 
 
 @sio.on('file_processing_complete')

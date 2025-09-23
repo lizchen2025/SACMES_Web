@@ -869,14 +869,29 @@ def handle_start_analysis_session(data):
         set_session_data(session_id, 'validation_error_sent', False)
         logger.info(f"Analysis session started for session {session_id}. Params set and trend data reset.")
 
-    agent_sid = get_session_agent_sid(session_id)
+    # Find agent across all sessions (temporary fix for session mismatch)
+    agent_sid = None
+    if redis_client:
+        try:
+            session_keys = redis_client.keys("session:*")
+            for session_key in session_keys:
+                agent_sid_data = redis_client.hget(session_key, 'agent_sid')
+                if agent_sid_data and agent_sid_data != 'null':
+                    agent_sid = agent_sid_data
+                    logger.info(f"Found agent {agent_sid} in session {session_key}")
+                    break
+        except Exception as e:
+            logger.error(f"Error finding agent across sessions: {e}")
+
     if 'filters' in data and agent_sid:
         live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
         filters = data['filters']
         filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
+        logger.info(f"Sending filters to agent {agent_sid}: {filters}")
         emit('set_filters', filters, to=agent_sid)
         emit('ack_start_session', {'status': 'success', 'message': 'Instructions sent.'})
     elif not agent_sid:
+        logger.warning("No agent found across any session")
         emit('ack_start_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
 
 
@@ -890,14 +905,29 @@ def handle_start_cv_analysis_session(data):
         set_session_data(session_id, 'validation_error_sent', False)
         logger.info(f"CV Analysis session started for session {session_id}. Params set and CV data reset.")
 
-    agent_sid = get_session_agent_sid(session_id)
+    # Find agent across all sessions (temporary fix for session mismatch)
+    agent_sid = None
+    if redis_client:
+        try:
+            session_keys = redis_client.keys("session:*")
+            for session_key in session_keys:
+                agent_sid_data = redis_client.hget(session_key, 'agent_sid')
+                if agent_sid_data and agent_sid_data != 'null':
+                    agent_sid = agent_sid_data
+                    logger.info(f"Found agent {agent_sid} in session {session_key} for CV analysis")
+                    break
+        except Exception as e:
+            logger.error(f"Error finding agent across sessions for CV: {e}")
+
     if 'filters' in data and agent_sid:
-        live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
+        live_analysis_params = get_session_data(session_id, 'cv_live_analysis_params', {})
         filters = data['filters']
         filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
+        logger.info(f"Sending CV filters to agent {agent_sid}: {filters}")
         emit('set_filters', filters, to=agent_sid)
         emit('ack_start_cv_session', {'status': 'success', 'message': 'CV Instructions sent.'})
     elif not agent_sid:
+        logger.warning("No agent found across any session for CV analysis")
         emit('ack_start_cv_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
 
 
