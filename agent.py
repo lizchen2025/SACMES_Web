@@ -6,7 +6,9 @@ import re
 import time
 import socketio
 import threading
+import uuid
 from collections import defaultdict
+from datetime import datetime
 
 # --- GUI (using Python's built-in library) ---
 import tkinter as tk
@@ -17,6 +19,165 @@ from tkinter import filedialog, scrolledtext, messagebox
 AUTH_TOKEN = "your_super_secret_token_here"
 POLLING_INTERVAL_SECONDS = 2
 SEND_DELAY_SECONDS = 0.05
+
+# --- Consent Dialog Class ---
+class ConsentDialog:
+    def __init__(self, parent_window):
+        self.parent = parent_window
+        self.consent_given = False
+        self.user_id = str(uuid.uuid4())
+        self.consent_text = self.load_consent_text()
+
+    def load_consent_text(self):
+        """Return hardcoded consent text"""
+        return """SACMES Data Access Consent
+
+By using this SACMES ( Software for the Analysis and Continuous Monitoring of Electrochemical Systems) agent, you acknowledge and agree to the following terms:
+
+DATA ACCESS SCOPE:
+• This agent will access ALL files within your selected folder and its subdirectories
+• The agent monitors for new files continuously while active
+• File contents are read and transmitted to the SACMES web server for analysis
+
+DATA HANDLING:
+• Your electrochemical data files are processed by our analysis algorithms
+• Data is temporarily stored on our servers during analysis sessions
+• We do not permanently retain your raw data files after session completion
+• Analysis results and processed data may be temporarily cached for session continuity
+
+SECURITY CONSIDERATIONS:
+• Ensure your selected folder contains only data you consent to share
+• Do not include sensitive, confidential, or proprietary files in the monitored folder
+• This agent operates with the same file access privileges as your user account
+• Network transmission occurs over HTTPS with standard encryption
+
+USER RESPONSIBILITIES:
+• You are responsible for ensuring you have proper authorization to share the data
+• Verify that sharing this data complies with your institutional policies
+• Remove any sensitive files from the monitored folder before starting the agent
+• You may stop monitoring at any time by clicking the "Stop" button
+
+TECHNICAL OPERATION:
+• The agent scans for files matching specific naming patterns related to electrochemical data
+• Only files matching the analysis filters will be processed and transmitted
+• The agent requires an active internet connection to communicate with SACMES servers
+• Session data is associated with a unique identifier for your analysis session
+
+DATA RETENTION:
+• Raw data files are not permanently stored on our servers
+• Analysis results are retained only for the duration of your active session
+• You are responsible for downloading/exporting your results before closing the application
+• We do not backup or archive user data for long-term storage
+
+CONSENT WITHDRAWAL:
+• You may withdraw consent and stop data transmission at any time
+• Stopping the agent immediately ceases all file monitoring and data transmission
+• Previously transmitted data may remain in temporary server storage until session cleanup
+
+By clicking "I Accept" below, you confirm that:
+1. You have read and understood these terms
+2. You authorize this agent to access files in your selected folder
+3. You consent to the transmission and processing of your data as described
+4. You have appropriate authorization to share this data
+5. You understand the security implications and technical operation of this agent
+
+If you do not agree to these terms, click "Cancel" to exit without starting the monitoring process."""
+
+    def show_consent_dialog(self):
+        """Show consent dialog and return True if accepted, False if declined"""
+        dialog = tk.Toplevel(self.parent)
+        dialog.title("SACMES Data Access Consent")
+        dialog.geometry("650x550")
+        dialog.resizable(True, True)
+
+        # Make dialog modal
+        dialog.transient(self.parent)
+        dialog.grab_set()
+        dialog.focus_set()
+
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (650 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (550 // 2)
+        dialog.geometry(f"650x550+{x}+{y}")
+
+        # Title
+        title_label = tk.Label(dialog, text="Data Access Consent Required",
+                              font=("Arial", 14, "bold"), fg="#DC2626")
+        title_label.pack(pady=15)
+
+        # Instruction text
+        instruction = tk.Label(dialog,
+                              text="Please read the following terms carefully before proceeding:",
+                              font=("Arial", 10), fg="#374151")
+        instruction.pack(pady=(0, 10))
+
+        # Scrollable text area for consent
+        text_frame = tk.Frame(dialog)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        consent_text_widget = scrolledtext.ScrolledText(
+            text_frame,
+            wrap=tk.WORD,
+            width=70,
+            height=20,
+            font=("Arial", 10),
+            bg="#F9FAFB",
+            relief=tk.SOLID,
+            borderwidth=1
+        )
+        consent_text_widget.pack(fill=tk.BOTH, expand=True)
+        consent_text_widget.insert(tk.END, self.consent_text)
+        consent_text_widget.config(state=tk.DISABLED)
+
+        # Warning text
+        warning_label = tk.Label(dialog,
+                                text="  This agent will access ALL files in your selected folder",
+                                font=("Arial", 10, "bold"), fg="#DC2626")
+        warning_label.pack(pady=(10, 5))
+
+        # Button frame
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(pady=15)
+
+        # Button handlers
+        def on_accept():
+            self.consent_given = True
+            dialog.destroy()
+
+        def on_decline():
+            self.consent_given = False
+            dialog.destroy()
+
+        def on_window_close():
+            self.consent_given = False
+            dialog.destroy()
+
+        # Buttons
+        decline_btn = tk.Button(button_frame, text="Cancel",
+                               command=on_decline,
+                               bg="#6B7280", fg="white",
+                               font=("Arial", 11, "bold"),
+                               width=12, height=2,
+                               relief=tk.FLAT)
+        decline_btn.pack(side=tk.LEFT, padx=15)
+
+        accept_btn = tk.Button(button_frame, text="I Accept",
+                              command=on_accept,
+                              bg="#16A34A", fg="white",
+                              font=("Arial", 11, "bold"),
+                              width=12, height=2,
+                              relief=tk.FLAT)
+        accept_btn.pack(side=tk.LEFT, padx=15)
+
+        # Handle window close
+        dialog.protocol("WM_DELETE_WINDOW", on_window_close)
+
+        # Show dialog and wait
+        dialog.wait_window()
+
+        return self.consent_given
+
 
 # --- Agent's Internal State ---
 current_filters = {}
@@ -234,27 +395,59 @@ class AgentApp:
             messagebox.showerror("Error", "Please select a folder to monitor first.")
             return
 
+        # Show consent dialog before proceeding
+        self.log("Requesting user consent for data access...")
+        consent_dialog = ConsentDialog(self.root)
+
+        if not consent_dialog.show_consent_dialog():
+            messagebox.showinfo("Analysis Cancelled",
+                              "You must accept the data access terms to proceed with monitoring.\n\n"
+                              "The agent requires explicit consent to access files in your selected folder.")
+            self.log("User declined consent - monitoring cancelled.")
+            return
+
+        # Log consent acceptance
+        self.log(f"User consent obtained (ID: {consent_dialog.user_id})")
+
+        # Proceed with monitoring immediately (skip blocking consent logging to server)
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
         self.select_button.config(state=tk.DISABLED)
         self.url_entry.config(state=tk.DISABLED)  # Disable URL entry while running
+
+        # Store consent data for later logging through main connection
+        self.consent_data = {
+            'user_id': consent_dialog.user_id,
+            'timestamp': datetime.now().isoformat(),
+            'agent_version': '1.0'
+        }
 
         connection_thread = threading.Thread(target=self.run_connection_logic, daemon=True)
         connection_thread.start()
 
     def run_connection_logic(self):
         try:
-            if sio.connected:
-                self.log("Already connected. Waiting for filter instructions...")
-                return
-
             server_url_to_connect = self.server_url.get()
             self.log("--- SACMES Local Agent ---")
             self.update_status("Connecting...", "orange")
             self.log(f"Attempting to connect to server at {server_url_to_connect}...")
-            headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
 
+            # Always try to connect, even if already connected (to ensure fresh connection)
+            if sio.connected:
+                self.log("Disconnecting from previous connection...")
+                sio.disconnect()
+                time.sleep(0.5)  # Reduced wait time
+
+            headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
             sio.connect(server_url_to_connect, headers=headers, socketio_path='socket.io', transports=['polling'])
+
+            # Log consent to server after successful connection (non-blocking)
+            if hasattr(self, 'consent_data'):
+                try:
+                    sio.emit('agent_consent', self.consent_data)
+                    self.log("Consent logged to server successfully.")
+                except Exception as e:
+                    self.log(f"Could not log consent to server: {e}")
 
             self.log("Agent is now running and waiting for analysis instructions from the server...")
         except socketio.exceptions.ConnectionError as e:

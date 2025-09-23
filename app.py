@@ -174,6 +174,40 @@ def clear_session_data(session_id):
         else:
             fallback_data[key] = None
 
+def log_consent(user_id, user_ip=None):
+    """Log user consent with user ID and timestamp"""
+    try:
+        timestamp = datetime.now().isoformat()
+        consent_record = {
+            'user_id': user_id,
+            'timestamp': timestamp,
+            'user_ip': user_ip or 'unknown'
+        }
+
+        # Store in Redis if available
+        if redis_client:
+            try:
+                redis_client.lpush('consent_log', json.dumps(consent_record))
+                redis_client.ltrim('consent_log', 0, 9999)  # Keep last 10,000 records
+                logger.info(f"Consent logged for user {user_id}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to log consent to Redis: {e}")
+
+        # Fallback to file logging
+        try:
+            with open('consent_log.txt', 'a', encoding='utf-8') as f:
+                f.write(f"{timestamp},{user_id},{user_ip}\n")
+            logger.info(f"Consent logged to file for user {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to log consent to file: {e}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Error logging consent: {e}")
+        return False
+
 def get_session_agent_sid(session_id):
     """Get agent SID for a session"""
     return get_session_data(session_id, 'agent_sid')
@@ -998,12 +1032,40 @@ def handle_electrode_warnings_request(data):
             'electrode_index': electrode_index
         })
 
+@socketio.on('agent_consent')
+def handle_agent_consent(data):
+    """Handle consent logging from local agent"""
+    # This will be called by the local agent when user gives consent
+    user_id = data.get('user_id', 'unknown')
+    user_ip = request.remote_addr
+
+    logger.info(f"Received consent from agent for user {user_id}, IP: {user_ip}")
+
+    success = log_consent(user_id, user_ip)
+
+    emit('consent_logged', {
+        'status': 'success' if success else 'error',
+        'user_id': user_id
+    })
+
 
 
 # --- HTTP Routes ---
 @app.route('/')
 def index():
     return send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/consent.txt')
+def get_consent():
+    """Serve the consent text"""
+    try:
+        with open('consent.txt', 'r', encoding='utf-8') as f:
+            return f.read(), 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    except FileNotFoundError:
+        return 'Consent text not found', 404
+    except Exception as e:
+        logger.error(f"Error reading consent file: {e}")
+        return 'Error loading consent text', 500
 
 @app.route('/cleanup-session', methods=['POST'])
 def cleanup_session():
