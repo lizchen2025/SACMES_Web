@@ -53,8 +53,8 @@ export class PlotlyPlotter {
                 name: 'Peak',
                 marker: {
                     color: 'red',
-                    size: 12,
-                    symbol: 'star',
+                    size: 10,
+                    symbol: 'circle',
                     line: {color: 'darkred', width: 2}
                 },
                 hovertemplate: '<b>Peak Detection</b><br>' +
