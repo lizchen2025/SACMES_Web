@@ -363,19 +363,20 @@ def monitor_directory_loop(directory):
 @sio.event
 def connect():
     app.update_status("Connected", "green")
-    app.log(f"Successfully connected to server: {app.server_url.get()}")
+    app.log(f"✓ Successfully connected to server: {app.server_url.get()}")
 
 
 @sio.event
 def connect_error(data):
     app.update_status("Connection Failed", "red")
-    app.log(f"Connection failed! Please check if the server is running at {app.server_url.get()}.")
+    app.log(f"✗ Connection failed! Server issue at {app.server_url.get()}")
+    app.log(f"Error details: {data}")
 
 
 @sio.event
 def disconnect():
     app.update_status("Disconnected", "red")
-    app.log("Disconnected from server.")
+    app.log("⚠ Disconnected from server.")
 
 
 @sio.on('set_filters')
@@ -418,9 +419,9 @@ def on_consent_logged(data):
     status = data.get('status', 'unknown')
     user_id = data.get('user_id', 'unknown')
     if status == 'success':
-        app.log(f"✓ Server confirmed consent logged for user: {user_id}")
+        app.log(f"Server confirmed consent logged for user: {user_id}")
     else:
-        app.log(f"✗ Server failed to log consent for user: {user_id}")
+        app.log(f"Server failed to log consent for user: {user_id}")
 
 
 # --- GUI Application Class ---
@@ -534,27 +535,37 @@ class AgentApp:
                 sio.disconnect()
                 time.sleep(0.5)  # Reduced wait time
 
+            self.log("Preparing connection with authentication...")
             headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
+            self.log("Initiating Socket.IO connection...")
             sio.connect(server_url_to_connect, headers=headers, socketio_path='socket.io', transports=['polling'])
+            self.log("Socket.IO connection established!")
+
+            # Wait a moment for connection to stabilize
+            time.sleep(0.5)
 
             # Log consent to server after successful connection (non-blocking)
             if hasattr(self, 'consent_data'):
                 try:
-                    self.log(f"Sending consent data to server: {self.consent_data}")
+                    self.log(f"Sending consent data: {self.consent_data}")
                     sio.emit('agent_consent', self.consent_data)
-                    self.log("✓ Consent data sent to server successfully.")
+                    self.log("Consent data sent to server successfully.")
                 except Exception as e:
-                    self.log(f"✗ Could not log consent to server: {e}")
+                    self.log(f"Could not log consent to server: {e}")
             else:
-                self.log("⚠ No consent data found to send to server")
+                self.log("No consent data found to send.")
 
             self.log("Agent is now running and waiting for analysis instructions from the server...")
         except socketio.exceptions.ConnectionError as e:
             self.log(f"[FATAL] Could not connect to the server. Is it running? Details: {e}")
+            self.log(f"Attempted URL: {server_url_to_connect}")
+            self.log("Please check: 1) Internet connection, 2) Server URL, 3) Server status")
             self.update_status("Connection Failed", "red")
             self.stop_monitoring_logic()
         except Exception as e:
             self.log(f"[FATAL] An unexpected error occurred: {e}")
+            self.log(f"Error type: {type(e).__name__}")
+            self.log(f"Attempted URL: {server_url_to_connect}")
             self.update_status("Error", "red")
             self.stop_monitoring_logic()
 
