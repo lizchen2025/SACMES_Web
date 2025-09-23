@@ -413,6 +413,16 @@ def on_file_validation_error(data):
     app.log(f"[SECURITY] Reason: {error_message}")
 
 
+@sio.on('consent_logged')
+def on_consent_logged(data):
+    status = data.get('status', 'unknown')
+    user_id = data.get('user_id', 'unknown')
+    if status == 'success':
+        app.log(f"✓ Server confirmed consent logged for user: {user_id}")
+    else:
+        app.log(f"✗ Server failed to log consent for user: {user_id}")
+
+
 # --- GUI Application Class ---
 class AgentApp:
     def __init__(self, root):
@@ -530,10 +540,13 @@ class AgentApp:
             # Log consent to server after successful connection (non-blocking)
             if hasattr(self, 'consent_data'):
                 try:
+                    self.log(f"Sending consent data to server: {self.consent_data}")
                     sio.emit('agent_consent', self.consent_data)
-                    self.log("Consent logged to server successfully.")
+                    self.log("✓ Consent data sent to server successfully.")
                 except Exception as e:
-                    self.log(f"Could not log consent to server: {e}")
+                    self.log(f"✗ Could not log consent to server: {e}")
+            else:
+                self.log("⚠ No consent data found to send to server")
 
             self.log("Agent is now running and waiting for analysis instructions from the server...")
         except socketio.exceptions.ConnectionError as e:

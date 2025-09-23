@@ -273,24 +273,38 @@ def log_consent(user_id, user_ip=None, session_id=None):
             'user_ip': user_ip or 'unknown'
         }
 
+        logger.info(f"LOGGING CONSENT RECORD: {consent_record}")
+
         # Store in Redis if available
         if redis_client:
             try:
+                logger.info("Attempting to write to Redis...")
                 redis_client.lpush('consent_log', json.dumps(consent_record))
                 redis_client.ltrim('consent_log', 0, 9999)  # Keep last 10,000 records
-                logger.info(f"Consent logged for user {user_id}")
+                logger.info(f"✓ Successfully logged consent to Redis for user {user_id}")
+
+                # Verify the data was stored
+                list_length = redis_client.llen('consent_log')
+                logger.info(f"✓ Redis consent_log now has {list_length} entries")
+
+                # Debug: Show the latest entry to verify it was stored correctly
+                if list_length > 0:
+                    latest_entry = redis_client.lindex('consent_log', 0)
+                    logger.info(f"Latest consent entry: {latest_entry}")
+
                 return True
             except Exception as e:
-                logger.error(f"Failed to log consent to Redis: {e}")
+                logger.error(f"✗ Failed to log consent to Redis: {e}")
 
         # Fallback to file logging
+        logger.info("Redis not available, using file logging...")
         try:
             with open('consent_log.txt', 'a', encoding='utf-8') as f:
-                f.write(f"{timestamp},{user_id},{user_ip}\n")
-            logger.info(f"Consent logged to file for user {user_id}")
+                f.write(f"{json.dumps(consent_record)}\n")
+            logger.info(f"✓ Consent logged to file for user {user_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to log consent to file: {e}")
+            logger.error(f"✗ Failed to log consent to file: {e}")
             return False
 
     except Exception as e:
@@ -1170,14 +1184,19 @@ def handle_electrode_warnings_request(data):
 @socketio.on('agent_consent')
 def handle_agent_consent(data):
     """Handle consent logging from local agent"""
+    logger.info(f"CONSENT HANDLER CALLED with data: {data}")
+
     # This will be called by the local agent when user gives consent
     user_id = data.get('user_id', 'unknown')
     session_id = data.get('session_id', 'unknown')
     user_ip = get_real_client_ip()
 
-    logger.info(f"Received consent from agent for user {user_id}, session {session_id}, real IP: {user_ip}")
+    logger.info(f"Processing consent - User: {user_id}, Session: {session_id}, IP: {user_ip}")
+    logger.info(f"Redis client available: {redis_client is not None}")
 
     success = log_consent(user_id, user_ip, session_id)
+
+    logger.info(f"Consent logging result: {success}")
 
     emit('consent_logged', {
         'status': 'success' if success else 'error',
@@ -1216,6 +1235,38 @@ def cleanup_session():
         return {'status': 'error', 'message': 'No session_id provided'}, 400
     except Exception as e:
         logger.error(f"Error cleaning up session: {e}")
+        return {'status': 'error', 'message': str(e)}, 500
+
+
+@app.route('/debug/consent-logs', methods=['GET'])
+def debug_consent_logs():
+    """Debug endpoint to check consent logs in Redis"""
+    try:
+        if not redis_client:
+            return {'status': 'error', 'message': 'Redis not available', 'fallback_file_exists': os.path.exists('consent_log.txt')}, 500
+
+        # Get Redis info
+        list_length = redis_client.llen('consent_log')
+        logs = []
+
+        if list_length > 0:
+            # Get the last 10 entries
+            raw_logs = redis_client.lrange('consent_log', 0, 9)
+            for log_entry in raw_logs:
+                try:
+                    logs.append(json.loads(log_entry))
+                except json.JSONDecodeError:
+                    logs.append({'error': 'Invalid JSON', 'raw': log_entry})
+
+        return {
+            'status': 'success',
+            'redis_available': True,
+            'total_logs': list_length,
+            'recent_logs': logs
+        }, 200
+
+    except Exception as e:
+        logger.error(f"Error checking consent logs: {e}")
         return {'status': 'error', 'message': str(e)}, 500
 
 
