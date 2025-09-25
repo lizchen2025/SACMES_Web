@@ -4,10 +4,12 @@ import { PlotlyPlotter } from './plot_utils.js';
 
 export class CVModule {
     constructor(socketManager, uiManager) {
-        this.socketManager = socketManager;
-        this.uiManager = uiManager;
+        console.log('CV: Initializing CV Module');
+        try {
+            this.socketManager = socketManager;
+            this.uiManager = uiManager;
 
-        this.dom = {
+            this.dom = {
             cvBtn: document.getElementById('cvBtn'),
             backToWelcomeBtn: document.getElementById('backToWelcomeFromCV'),
             backToCVSettingsBtn: document.getElementById('backToCVSettingsBtn'),
@@ -58,6 +60,17 @@ export class CVModule {
 
         this._setupEventListeners();
         this._setupSocketHandlers();
+
+            // Debug: Check if SACMES elements are found
+            console.log('CV: DOM elements check:');
+            console.log('pheMethodInput:', !!this.dom.params.pheMethodInput);
+            console.log('sgWindowInput:', !!this.dom.params.sgWindowInput);
+            console.log('polyfitDegreeInput:', !!this.dom.params.polyfitDegreeInput);
+            console.log('CV: Module initialization completed successfully');
+        } catch (error) {
+            console.error('CV: Error during module initialization:', error);
+            alert('CV Module failed to initialize: ' + error.message);
+        }
     }
 
     _setupEventListeners() {
@@ -79,6 +92,20 @@ export class CVModule {
         this.dom.nextToVisualizationBtn.addEventListener('click', this._handleNextToVisualization.bind(this));
         this.dom.startAnalysisBtn.addEventListener('click', this._handleStartAnalysis.bind(this));
         this.dom.detectSegmentsBtn.addEventListener('click', this._handleDetectSegments.bind(this));
+
+        // Add validation for SACMES parameters
+        if (this.dom.params.sgWindowInput) {
+            this.dom.params.sgWindowInput.addEventListener('input', this._validateSgWindow.bind(this));
+            console.log('CV: Added SG window validation listener');
+        } else {
+            console.warn('CV: sgWindowInput element not found');
+        }
+        if (this.dom.params.applyPolynomialRegressionInput) {
+            this.dom.params.applyPolynomialRegressionInput.addEventListener('change', this._togglePolynomialParams.bind(this));
+            console.log('CV: Added polynomial regression toggle listener');
+        } else {
+            console.warn('CV: applyPolynomialRegressionInput element not found');
+        }
     }
 
     _setupSocketHandlers() {
@@ -164,33 +191,50 @@ export class CVModule {
     }
 
     _handleNextToVisualization() {
-        // Validate basic parameters first
-        const numFiles = parseInt(this.dom.params.numFilesInput.value);
-        if (isNaN(numFiles) || numFiles < 1) {
-            alert("Please enter a valid number of files.");
-            return;
+        console.log('CV: _handleNextToVisualization called');
+        try {
+            // Validate basic parameters first
+            const numFiles = parseInt(this.dom.params.numFilesInput.value);
+            if (isNaN(numFiles) || numFiles < 1) {
+                alert("Please enter a valid number of files.");
+                return;
+            }
+
+            console.log('CV: Switching to visualization screen');
+            this.state.currentScreen = 'visualization';
+            this.uiManager.showScreen('cvVisualizationScreen');
+
+            // Request a preview file from the agent
+            this._requestPreviewFile();
+        } catch (error) {
+            console.error('CV: Error in _handleNextToVisualization:', error);
+            alert('Error switching to visualization screen: ' + error.message);
         }
-
-        this.state.currentScreen = 'visualization';
-        this.uiManager.showScreen('cvVisualizationScreen');
-
-        // Request a preview file from the agent
-        this._requestPreviewFile();
     }
 
     _requestPreviewFile() {
-        const analysisParams = this._collectAnalysisParams();
-        const filters = {
-            handle: this.dom.params.fileHandleInput.value.trim(),
-            range_start: 1,
-            range_end: 1 // Just get the first file for preview
-        };
+        try {
+            console.log('CV: Requesting preview file');
+            const analysisParams = this._collectAnalysisParams();
+            const filters = {
+                handle: this.dom.params.fileHandleInput.value.trim(),
+                range_start: 1,
+                range_end: 1 // Just get the first file for preview
+            };
 
-        this.dom.segmentStatus.textContent = 'Loading CV preview...';
-        this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
+            console.log('CV: Analysis params:', analysisParams);
+            console.log('CV: Filters:', filters);
 
-        // Request the first file for preview
-        this.socketManager.emit('get_cv_preview', { filters, analysisParams });
+            if (this.dom.segmentStatus) {
+                this.dom.segmentStatus.textContent = 'Loading CV preview...';
+                this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
+            }
+
+            // Request the first file for preview
+            this.socketManager.emit('get_cv_preview', { filters, analysisParams });
+        } catch (error) {
+            console.error('CV: Error in _requestPreviewFile:', error);
+        }
     }
 
     _handleDetectSegments() {
@@ -232,34 +276,43 @@ export class CVModule {
     }
 
     _collectAnalysisParams() {
-        return {
-            num_files: parseInt(this.dom.params.numFilesInput.value),
-            num_electrodes: this._autoDetectNumElectrodes(),
-            scan_rate: parseFloat(this.dom.params.scanRateInput.value),
-            forward_segment: parseInt(this.dom.visualization.forwardSegmentInput.value) || null,
-            reverse_segment: parseInt(this.dom.visualization.reverseSegmentInput.value) || null,
-            low_voltage: parseFloat(this.dom.params.lowVoltageInput.value),
-            high_voltage: parseFloat(this.dom.params.highVoltageInput.value),
-            mass_transport: this.dom.params.massTransportInput.value,
-            SelectedOptions: this.dom.params.analysisOptionsInput.value,
+        try {
+            console.log('CV: Collecting analysis parameters');
+            const params = {
+                num_files: parseInt(this.dom.params.numFilesInput.value),
+                num_electrodes: this._autoDetectNumElectrodes(),
+                scan_rate: parseFloat(this.dom.params.scanRateInput.value),
+                forward_segment: parseInt(this.dom.visualization.forwardSegmentInput.value) || null,
+                reverse_segment: parseInt(this.dom.visualization.reverseSegmentInput.value) || null,
+                low_voltage: parseFloat(this.dom.params.lowVoltageInput.value),
+                high_voltage: parseFloat(this.dom.params.highVoltageInput.value),
+                mass_transport: this.dom.params.massTransportInput.value,
+                SelectedOptions: this.dom.params.analysisOptionsInput.value,
 
-            // SACMES enhancement parameters
-            phe_method: this.dom.params.pheMethodInput?.value || 'Abs',
-            sg_window: parseInt(this.dom.params.sgWindowInput?.value) || 5,
-            sg_degree: parseInt(this.dom.params.sgDegreeInput?.value) || 1,
-            polyfit_deg: parseInt(this.dom.params.polyfitDegreeInput?.value) || 15,
-            apply_polynomial_regression: this.dom.params.applyPolynomialRegressionInput?.checked || false,
+                // SACMES enhancement parameters
+                phe_method: this.dom.params.pheMethodInput?.value || 'Abs',
+                sg_window: parseInt(this.dom.params.sgWindowInput?.value) || 5,
+                sg_degree: parseInt(this.dom.params.sgDegreeInput?.value) || 1,
+                polyfit_deg: parseInt(this.dom.params.polyfitDegreeInput?.value) || 15,
+                apply_polynomial_regression: this.dom.params.applyPolynomialRegressionInput?.checked || false,
 
-            voltage_column: parseInt(this.dom.settings.voltageColumnInput.value),
-            current_column: parseInt(this.dom.settings.currentColumnInput.value),
-            spacing_index: parseInt(this.dom.settings.spacingIndexInput.value),
-            delimiter: parseInt(this.dom.settings.delimiterInput.value),
-            file_extension: this.dom.settings.fileExtensionInput.value,
-            byte_limit: parseInt(this.dom.settings.byteLimitInput.value),
-            sample_rate: parseFloat(this.dom.settings.sampleRateInput.value),
-            analysis_interval: parseInt(this.dom.settings.analysisIntervalInput.value),
-            resize_interval: parseInt(this.dom.settings.resizeIntervalInput.value),
-        };
+                voltage_column: parseInt(this.dom.settings.voltageColumnInput.value),
+                current_column: parseInt(this.dom.settings.currentColumnInput.value),
+                spacing_index: parseInt(this.dom.settings.spacingIndexInput.value),
+                delimiter: parseInt(this.dom.settings.delimiterInput.value),
+                file_extension: this.dom.settings.fileExtensionInput.value,
+                byte_limit: parseInt(this.dom.settings.byteLimitInput.value),
+                sample_rate: parseFloat(this.dom.settings.sampleRateInput.value),
+                analysis_interval: parseInt(this.dom.settings.analysisIntervalInput.value),
+                resize_interval: parseInt(this.dom.settings.resizeIntervalInput.value),
+            };
+
+            console.log('CV: Collected params:', params);
+            return params;
+        } catch (error) {
+            console.error('CV: Error collecting analysis params:', error);
+            throw error;
+        }
     }
 
     _handleStartAnalysis() {
