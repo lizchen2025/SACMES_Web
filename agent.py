@@ -276,13 +276,28 @@ def file_matches_filters(filename):
     required_keys = ['handle', 'frequencies', 'range_start', 'range_end', 'file_extension']
     if not all(k in current_filters for k in required_keys): return False
     if not filename.endswith(current_filters['file_extension']): return False
-    if not filename.startswith(current_filters['handle']): return False
-    try:
-        match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
-        if not match: return False
-        freq, num = int(match.group(1)), int(match.group(2))
-    except (ValueError, IndexError):
-        return False
+    # Support CV file format (CV_60Hz_1.txt) and SWV format (handle_60Hz_1.txt)
+    # For CV files, we don't require the handle prefix
+    cv_pattern = re.match(r'CV_(\d+)Hz_(\d+)\.', filename, re.IGNORECASE)
+    if cv_pattern:
+        # CV file format: CV_60Hz_1.txt
+        try:
+            freq, num = int(cv_pattern.group(1)), int(cv_pattern.group(2))
+            app.log(f"Matched CV pattern: {filename} -> freq={freq}Hz, num={num}")
+        except (ValueError, IndexError) as e:
+            app.log(f"Error parsing CV filename {filename}: {e}")
+            return False
+    else:
+        # Check SWV format with handle prefix
+        if not filename.startswith(current_filters['handle']): return False
+        try:
+            match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
+            if not match: return False
+            freq, num = int(match.group(1)), int(match.group(2))
+            app.log(f"Matched SWV pattern: {filename} -> freq={freq}Hz, num={num}")
+        except (ValueError, IndexError) as e:
+            app.log(f"Error parsing SWV filename {filename}: {e}")
+            return False
     if freq not in current_filters['frequencies']: return False
     if not (current_filters['range_start'] <= num <= current_filters['range_end']): return False
     return True

@@ -436,12 +436,23 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
 
         if analysis_result and analysis_result.get('status') == 'success':
             # Store CV results differently - not in trend data but as individual results
-            match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE) or re.search(r'_(\d+)\.', original_filename, re.IGNORECASE)
-            if match:
-                if len(match.groups()) == 2:
-                    parsed_frequency, parsed_filenum = int(match.group(1)), int(match.group(2))
+            # Support CV file format (CV_60Hz_1.txt) and SWV format (handle_60Hz_1.txt)
+            cv_match = re.search(r'CV_(\d+)Hz_(\d+)\.', original_filename, re.IGNORECASE)
+            if cv_match:
+                parsed_frequency, parsed_filenum = int(cv_match.group(1)), int(cv_match.group(2))
+                logger.info(f"CV Background: Parsed CV filename: {original_filename} -> freq={parsed_frequency}Hz, num={parsed_filenum}")
+            else:
+                # Try SWV format
+                match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE) or re.search(r'_(\d+)\.', original_filename, re.IGNORECASE)
+                if match:
+                    if len(match.groups()) == 2:
+                        parsed_frequency, parsed_filenum = int(match.group(1)), int(match.group(2))
+                    else:
+                        parsed_frequency, parsed_filenum = 0, int(match.group(1))  # No frequency in filename
+                    logger.info(f"CV Background: Parsed SWV filename: {original_filename} -> freq={parsed_frequency}Hz, num={parsed_filenum}")
                 else:
-                    parsed_frequency, parsed_filenum = 0, int(match.group(1))  # No frequency in filename
+                    logger.warning(f"CV Background: Could not parse filename: {original_filename}")
+                    return
 
                 electrode_key = str(selected_electrode) if selected_electrode is not None else 'averaged'
 
@@ -549,9 +560,21 @@ def process_file_in_background(original_filename, content, params_for_this_file,
         if analysis_result and analysis_result.get('status') in ['success', 'warning']:
             # Extract from original filename (without electrode suffix)
             base_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename
-            match = re.search(r'_(\d+)Hz_?_?(\d+)\.', base_filename, re.IGNORECASE)
-            if match:
-                parsed_frequency, parsed_filenum = int(match.group(1)), int(match.group(2))
+
+            # Support CV file format (CV_60Hz_1.txt) and SWV format (handle_60Hz_1.txt)
+            cv_match = re.search(r'CV_(\d+)Hz_(\d+)\.', base_filename, re.IGNORECASE)
+            if cv_match:
+                parsed_frequency, parsed_filenum = int(cv_match.group(1)), int(cv_match.group(2))
+                logger.info(f"Background: Parsed CV filename: {base_filename} -> freq={parsed_frequency}Hz, num={parsed_filenum}")
+            else:
+                # Try SWV format
+                match = re.search(r'_(\d+)Hz_?_?(\d+)\.', base_filename, re.IGNORECASE)
+                if match:
+                    parsed_frequency, parsed_filenum = int(match.group(1)), int(match.group(2))
+                    logger.info(f"Background: Parsed SWV filename: {base_filename} -> freq={parsed_frequency}Hz, num={parsed_filenum}")
+                else:
+                    logger.warning(f"Background: Could not parse filename: {base_filename}")
+                    return
                 peak = analysis_result.get('peak_value')
                 # Store data per electrode
                 electrode_key = str(selected_electrode) if selected_electrode is not None else 'averaged'
@@ -1101,7 +1124,7 @@ def handle_instrument_data(data):
         # Process each selected electrode in parallel
         for electrode_idx in selected_electrodes:
             params_for_this_file = live_analysis_params.copy()
-            params_for_this_file['frequency'] = int(match.group(1))
+            params_for_this_file['frequency'] = frequency_hz
             params_for_this_file['selected_electrode'] = electrode_idx
             params_for_this_file.setdefault('low_xstart', None)
             params_for_this_file.setdefault('low_xend', None)
@@ -1116,7 +1139,7 @@ def handle_instrument_data(data):
     else:
         # Original averaging behavior
         params_for_this_file = live_analysis_params.copy()
-        params_for_this_file['frequency'] = int(match.group(1))
+        params_for_this_file['frequency'] = frequency_hz
         params_for_this_file.setdefault('low_xstart', None)
         params_for_this_file.setdefault('low_xend', None)
         params_for_this_file.setdefault('high_xstart', None)
