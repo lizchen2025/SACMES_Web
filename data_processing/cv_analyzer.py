@@ -4,6 +4,8 @@
 
 import numpy as np
 import logging
+from scipy import signal
+from scipy.integrate import simps
 from .data_reader import ReadData as GeneralReadData  # Keep the original reader for multichannel handling
 
 logger = logging.getLogger(__name__)
@@ -123,17 +125,96 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
     return potentials, currents, segment_dictionary
 
 
-def _baseline_surface_bound(potentials, currents):
-    """Calculates a linear baseline for surface-bound species."""
+def _apply_savgol_filter(currents, sg_window=5, sg_degree=1):
+    """Apply Savitzky-Golay filter for signal smoothing."""
+    if len(currents) < sg_window:
+        return currents  # Not enough points for filtering
+
+    # Ensure window size is odd
+    if sg_window % 2 == 0:
+        sg_window += 1
+
+    # Apply Savitzky-Golay filter
+    try:
+        filtered_currents = signal.savgol_filter(currents, sg_window, sg_degree)
+        return filtered_currents.tolist()
+    except Exception as e:
+        logger.warning(f"Savitzky-Golay filter failed: {e}")
+        return currents
+
+
+def _apply_polynomial_regression(potentials, currents, polyfit_deg=15):
+    """Apply polynomial regression for further smoothing."""
+    try:
+        if len(potentials) < polyfit_deg + 1:
+            polyfit_deg = max(1, len(potentials) - 2)
+
+        coeffs = np.polyfit(potentials, currents, polyfit_deg)
+        smoothed_currents = np.polyval(coeffs, potentials)
+        return smoothed_currents.tolist()
+    except Exception as e:
+        logger.warning(f"Polynomial regression failed: {e}")
+        return currents
+
+
+def _extract_peak_vertices(potentials, currents, peak_idx, sign_type="cathodic"):
+    """Extract vertex currents before and after the peak (SACMES algorithm)."""
+    try:
+        if sign_type == "cathodic":
+            # For cathodic peaks, find minimum currents on either side
+            if peak_idx > 0:
+                vertex1 = min(currents[:peak_idx])
+            else:
+                vertex1 = currents[0]
+
+            if peak_idx < len(currents) - 1:
+                vertex2 = min(currents[peak_idx:])
+            else:
+                vertex2 = currents[-1]
+        else:  # anodic
+            # For anodic peaks, find maximum currents on either side
+            if peak_idx > 0:
+                vertex1 = max(currents[:peak_idx])
+            else:
+                vertex1 = currents[0]
+
+            if peak_idx < len(currents) - 1:
+                vertex2 = max(currents[peak_idx:])
+            else:
+                vertex2 = currents[-1]
+
+        return vertex1, vertex2
+    except Exception as e:
+        logger.warning(f"Vertex extraction failed: {e}")
+        return currents[0], currents[-1]
+
+
+def _baseline_surface_bound(potentials, currents, use_vertices=True):
+    """Enhanced baseline calculation for surface-bound species using SACMES algorithm."""
     peak_idx = np.argmax(np.abs(currents))
 
-    # Find vertices on either side of the peak
-    vertex1_idx = np.argmin(currents[:peak_idx]) if peak_idx > 0 else 0
-    vertex2_idx_rel = np.argmin(currents[peak_idx:]) if peak_idx < len(currents) - 1 else -1
-    vertex2_idx = peak_idx + vertex2_idx_rel
+    if use_vertices:
+        # Determine if peak is cathodic or anodic
+        sign_type = "cathodic" if currents[peak_idx] > 0 else "anodic"
 
-    v1_potential, v1_current = potentials[vertex1_idx], currents[vertex1_idx]
-    v2_potential, v2_current = potentials[vertex2_idx], currents[vertex2_idx]
+        # Extract vertex currents
+        vertex1, vertex2 = _extract_peak_vertices(potentials, currents, peak_idx, sign_type)
+
+        # Find corresponding potentials for vertices
+        vertex1_indices = [i for i, c in enumerate(currents) if c == vertex1]
+        vertex2_indices = [i for i, c in enumerate(currents) if c == vertex2]
+
+        # Use the vertex closest to the peak
+        v1_idx = vertex1_indices[0] if vertex1_indices else 0
+        v2_idx = vertex2_indices[-1] if vertex2_indices else len(currents) - 1
+    else:
+        # Original method - find minima on either side
+        v1_idx = np.argmin(currents[:peak_idx]) if peak_idx > 0 else 0
+        v2_idx_rel = np.argmin(currents[peak_idx:]) if peak_idx < len(currents) - 1 else -1
+        v2_idx = peak_idx + v2_idx_rel
+
+    v1_potential, v1_current = potentials[v1_idx], currents[v1_idx]
+    v2_potential, v2_current = potentials[v2_idx], currents[v2_idx]
 
     # Create linear baseline
     if v1_potential == v2_potential:  # Avoid division by zero
@@ -245,25 +326,49 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
             if len(p_adj) < 3:
                 continue  # Not enough data in range
 
-            # Calculate baseline
+            # Step 1: Apply signal processing (SACMES algorithm)
+            sg_window = params.get('sg_window', 5)
+            sg_degree = params.get('sg_degree', 1)
+            polyfit_deg = params.get('polyfit_deg', 15)
+            phe_method = params.get('phe_method', 'Abs')  # 'Abs' or 'Rel'
+
+            # Apply Savitzky-Golay filter for smoothing
+            i_smoothed = _apply_savgol_filter(i_adj, sg_window, sg_degree)
+
+            # Apply polynomial regression if requested
+            if params.get('apply_polynomial_regression', False):
+                i_smoothed = _apply_polynomial_regression(p_adj, i_smoothed, polyfit_deg)
+
+            # Step 2: Calculate baseline
             if params['mass_transport'] == 'surface':
-                baseline = _baseline_surface_bound(p_adj, i_adj)
+                baseline = _baseline_surface_bound(p_adj, i_smoothed, use_vertices=True)
             else:  # solution
-                baseline = _baseline_solution_phase(p_adj, i_adj)
+                baseline = _baseline_solution_phase(p_adj, i_smoothed)
 
-            i_corrected = np.array(i_adj) - np.array(baseline)
+            i_corrected = np.array(i_smoothed) - np.array(baseline)
 
-            # Find peak
-            peak_idx = np.argmax(np.abs(i_corrected))
+            # Step 3: Peak extraction using PHE method
+            if phe_method == 'Abs':
+                # Absolute method: difference between absolute max/min
+                peak_idx = np.argmax(np.abs(i_corrected))
+                peak_current = i_corrected[peak_idx]  # This is the peak height
+            else:  # Relative method
+                # Relative method: peak relative to baseline
+                peak_idx = np.argmax(np.abs(i_corrected))
+                peak_current = abs(i_corrected[peak_idx])  # Always positive for relative
+
             peak_potential = p_adj[peak_idx]
-            peak_current = i_corrected[peak_idx]  # This is the peak height
 
-            # Calculate area under curve (charge)
+            # Step 4: Calculate area under curve (charge) with enhanced integration
             scan_rate = params.get('scan_rate', 0.1)
             if scan_rate <= 0:
                 scan_rate = 0.1  # Default scan rate
 
-            charge = np.trapz(np.abs(i_corrected), x=p_adj) / scan_rate  # Convert to charge
+            # Use Simpson's rule for more accurate integration
+            try:
+                charge = simps(np.abs(i_corrected), x=p_adj) / scan_rate
+            except:
+                charge = np.trapz(np.abs(i_corrected), x=p_adj) / scan_rate  # Fallback to trapezoidal
 
             # Calculate additional CV metrics
             peak_width = None
@@ -277,10 +382,23 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
                     peak_width = abs(p_adj[half_peak_indices[-1]] - p_adj[half_peak_indices[0]])
                     half_peak_potential = (p_adj[half_peak_indices[-1]] + p_adj[half_peak_indices[0]]) / 2
 
-            # Store results for this segment
+            # Step 5: Calculate additional SACMES metrics
+            sign_type = "cathodic" if peak_current > 0 else "anodic"
+
+            # Extract vertex information
+            vertex1, vertex2 = _extract_peak_vertices(p_adj, i_corrected.tolist(), peak_idx, sign_type)
+
+            # Calculate peak-to-vertex ratio
+            if phe_method == 'Abs':
+                peak_to_vertex_ratio = abs(peak_current) / max(abs(vertex1), abs(vertex2)) if max(abs(vertex1), abs(vertex2)) > 0 else 1
+            else:
+                peak_to_vertex_ratio = peak_current / max(vertex1, vertex2) if max(vertex1, vertex2) > 0 else 1
+
+            # Store results for this segment with enhanced SACMES data
             results[scan_type] = {
                 'potentials': p_adj,
                 'currents': i_adj,
+                'smoothed_currents': i_smoothed,
                 'baseline': baseline,
                 'corrected_currents': i_corrected.tolist(),
                 'peak_potential': peak_potential,
@@ -288,6 +406,16 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
                 'charge': charge,
                 'peak_width': peak_width,
                 'half_peak_potential': half_peak_potential,
+                'sign_type': sign_type,
+                'vertex1': vertex1,
+                'vertex2': vertex2,
+                'peak_to_vertex_ratio': peak_to_vertex_ratio,
+                'phe_method': phe_method,
+                'filtering_params': {
+                    'sg_window': sg_window,
+                    'sg_degree': sg_degree,
+                    'polyfit_deg': polyfit_deg if params.get('apply_polynomial_regression', False) else None
+                },
                 'auc_vertices': list(zip(p_adj, np.maximum(0, i_corrected)))  # For shading
             }
 
@@ -297,8 +425,95 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
             results["peak_separation"] = abs(
                 results["forward"]["peak_potential"] - results["reverse"]["peak_potential"])
 
+        # Step 6: Enhanced CV metrics calculations
+        if results["forward"].get("peak_potential") is not None and results["reverse"].get("peak_potential") is not None:
+            # Calculate formal potential (midpoint potential)
+            formal_potential = (results["forward"]["peak_potential"] + results["reverse"]["peak_potential"]) / 2
+            results["formal_potential"] = formal_potential
+
+            # Calculate peak current ratio (reversibility indicator)
+            forward_peak = abs(results["forward"]["peak_current"])
+            reverse_peak = abs(results["reverse"]["peak_current"])
+            peak_current_ratio = forward_peak / reverse_peak if reverse_peak > 0 else 1
+            results["peak_current_ratio"] = peak_current_ratio
+
+            # Reversibility assessment
+            if 0.85 <= peak_current_ratio <= 1.15 and results["peak_separation"] <= 0.059:  # ~59mV at 25°C
+                results["reversibility"] = "reversible"
+            elif results["peak_separation"] > 0.2:
+                results["reversibility"] = "irreversible"
+            else:
+                results["reversibility"] = "quasi_reversible"
+
         return results
 
     except Exception as e:
         logger.error(f"Critical error in CV analysis for {file_path}: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+def analyze_cv_batch(file_paths, params, selected_electrode=None):
+    """
+    Performs batch analysis of multiple CV data files (SACMES-style batch processing).
+
+    Args:
+        file_paths (list): List of file paths to analyze.
+        params (dict): Analysis parameters.
+        selected_electrode (int): Index of specific electrode to analyze.
+
+    Returns:
+        dict: Batch analysis results with statistics.
+    """
+    try:
+        batch_results = {
+            "files": {},
+            "statistics": {},
+            "status": "success"
+        }
+
+        valid_results = []
+
+        for file_path in file_paths:
+            result = analyze_cv_data(file_path, params, selected_electrode)
+            batch_results["files"][file_path] = result
+
+            if result.get("status") == "success":
+                valid_results.append(result)
+
+        if valid_results:
+            # Calculate batch statistics
+            forward_potentials = [r["forward"].get("peak_potential") for r in valid_results if "forward" in r and r["forward"].get("peak_potential") is not None]
+            reverse_potentials = [r["reverse"].get("peak_potential") for r in valid_results if "reverse" in r and r["reverse"].get("peak_potential") is not None]
+            formal_potentials = [r.get("formal_potential") for r in valid_results if r.get("formal_potential") is not None]
+            peak_separations = [r.get("peak_separation") for r in valid_results if r.get("peak_separation") is not None]
+
+            batch_results["statistics"] = {
+                "total_files": len(file_paths),
+                "successful_analyses": len(valid_results),
+                "forward_peak_potential": {
+                    "mean": np.mean(forward_potentials) if forward_potentials else None,
+                    "std": np.std(forward_potentials) if forward_potentials else None,
+                    "count": len(forward_potentials)
+                },
+                "reverse_peak_potential": {
+                    "mean": np.mean(reverse_potentials) if reverse_potentials else None,
+                    "std": np.std(reverse_potentials) if reverse_potentials else None,
+                    "count": len(reverse_potentials)
+                },
+                "formal_potential": {
+                    "mean": np.mean(formal_potentials) if formal_potentials else None,
+                    "std": np.std(formal_potentials) if formal_potentials else None,
+                    "count": len(formal_potentials)
+                },
+                "peak_separation": {
+                    "mean": np.mean(peak_separations) if peak_separations else None,
+                    "std": np.std(peak_separations) if peak_separations else None,
+                    "count": len(peak_separations)
+                }
+            }
+
+        return batch_results
+
+    except Exception as e:
+        logger.error(f"Critical error in CV batch analysis: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}

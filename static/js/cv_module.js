@@ -242,6 +242,14 @@ export class CVModule {
             high_voltage: parseFloat(this.dom.params.highVoltageInput.value),
             mass_transport: this.dom.params.massTransportInput.value,
             SelectedOptions: this.dom.params.analysisOptionsInput.value,
+
+            // SACMES enhancement parameters
+            phe_method: this.dom.params.pheMethodInput?.value || 'Abs',
+            sg_window: parseInt(this.dom.params.sgWindowInput?.value) || 5,
+            sg_degree: parseInt(this.dom.params.sgDegreeInput?.value) || 1,
+            polyfit_deg: parseInt(this.dom.params.polyfitDegreeInput?.value) || 15,
+            apply_polynomial_regression: this.dom.params.applyPolynomialRegressionInput?.checked || false,
+
             voltage_column: parseInt(this.dom.settings.voltageColumnInput.value),
             current_column: parseInt(this.dom.settings.currentColumnInput.value),
             spacing_index: parseInt(this.dom.settings.spacingIndexInput.value),
@@ -351,6 +359,29 @@ export class CVModule {
         this.state.isAnalysisRunning = false;
         this.dom.startAnalysisBtn.disabled = false;
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
+    }
+
+    _validateSgWindow() {
+        if (!this.dom.params.sgWindowInput) return;
+        const value = parseInt(this.dom.params.sgWindowInput.value);
+        if (value % 2 === 0 && value > 0) {
+            // Make it odd
+            this.dom.params.sgWindowInput.value = value + 1;
+        }
+        if (value < 3) {
+            this.dom.params.sgWindowInput.value = 3;
+        }
+    }
+
+    _togglePolynomialParams() {
+        if (!this.dom.params.applyPolynomialRegressionInput || !this.dom.params.polyfitDegreeInput) return;
+        const isEnabled = this.dom.params.applyPolynomialRegressionInput.checked;
+        this.dom.params.polyfitDegreeInput.disabled = !isEnabled;
+        if (isEnabled) {
+            this.dom.params.polyfitDegreeInput.style.opacity = '1';
+        } else {
+            this.dom.params.polyfitDegreeInput.style.opacity = '0.5';
+        }
     }
 
     _autoDetectNumElectrodes() {

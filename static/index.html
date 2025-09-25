@@ -941,6 +941,45 @@
                                 <option value="Area Under the Curve">Area Under the Curve</option>
                             </select>
                         </div>
+
+                        <!-- SACMES CV Enhancement Parameters -->
+                        <div class="border-t pt-4 mt-4">
+                            <h4 class="text-md font-semibold text-gray-700 mb-2">SACMES Enhancement Parameters:</h4>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label for="cvPheMethodInput" class="block text-gray-700 text-sm font-bold mb-1">PHE Method:</label>
+                                    <select id="cvPheMethodInput" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                        <option value="Abs">Absolute (Max/Min)</option>
+                                        <option value="Rel">Relative to Baseline</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="cvSgWindowInput" class="block text-gray-700 text-sm font-bold mb-1">Savitzky-Golay Window:</label>
+                                    <input type="number" id="cvSgWindowInput" value="5" min="3" step="2"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"
+                                           title="Must be odd number"/>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4 mt-4">
+                                <div>
+                                    <label for="cvSgDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">Savitzky-Golay Degree:</label>
+                                    <input type="number" id="cvSgDegreeInput" value="1" min="1" max="5"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                                <div>
+                                    <label for="cvPolyfitDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">Polynomial Fit Degree:</label>
+                                    <input type="number" id="cvPolyfitDegreeInput" value="15" min="1" max="50"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                            </div>
+                            <div class="mt-4">
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="cvApplyPolynomialRegressionInput" class="form-checkbox h-5 w-5 text-blue-600">
+                                    <span class="ml-2 text-gray-700 text-sm font-bold">Apply Polynomial Regression</span>
+                                </label>
+                                <p class="text-xs text-gray-500 mt-1">Additional smoothing using polynomial regression after Savitzky-Golay filter</p>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="flex justify-end pt-4">
@@ -994,9 +1033,11 @@
                         </div>
                     </div>
 
-                    <div>
-                        <label for="cvByteLimitInput" class="block text-gray-700 text-sm font-bold mb-1">Byte Limit for Read (bytes):</label>
-                        <input type="number" id="cvByteLimitInput" value="3000" min="1"
+                    <div class="border-b pb-4">
+                        <h4 class="text-md font-semibold text-gray-700 mb-2">Performance Settings:</h4>
+                        <div>
+                            <label for="cvByteLimitInput" class="block text-gray-700 text-sm font-bold mb-1">Byte Limit for Read (bytes):</label>
+                            <input type="number" id="cvByteLimitInput" value="3000" min="1"
                                class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
                     </div>
 
