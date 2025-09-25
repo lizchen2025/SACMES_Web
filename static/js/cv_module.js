@@ -29,6 +29,12 @@ export class CVModule {
                 highVoltageInput: document.getElementById('cvHighVoltageInput'),
                 massTransportInput: document.getElementById('cvMassTransportInput'),
                 analysisOptionsInput: document.getElementById('cvAnalysisOptionsInput'),
+                // SACMES enhancement parameters
+                pheMethodInput: document.getElementById('cvPheMethodInput'),
+                sgWindowInput: document.getElementById('cvSgWindowInput'),
+                sgDegreeInput: document.getElementById('cvSgDegreeInput'),
+                polyfitDegreeInput: document.getElementById('cvPolyfitDegreeInput'),
+                applyPolynomialRegressionInput: document.getElementById('cvApplyPolynomialRegressionInput'),
             },
             visualization: {
                 forwardSegmentInput: document.getElementById('cvForwardSegmentInput'),
@@ -61,11 +67,6 @@ export class CVModule {
         this._setupEventListeners();
         this._setupSocketHandlers();
 
-            // Debug: Check if SACMES elements are found
-            console.log('CV: DOM elements check:');
-            console.log('pheMethodInput:', !!this.dom.params.pheMethodInput);
-            console.log('sgWindowInput:', !!this.dom.params.sgWindowInput);
-            console.log('polyfitDegreeInput:', !!this.dom.params.polyfitDegreeInput);
             console.log('CV: Module initialization completed successfully');
         } catch (error) {
             console.error('CV: Error during module initialization:', error);
@@ -93,19 +94,8 @@ export class CVModule {
         this.dom.startAnalysisBtn.addEventListener('click', this._handleStartAnalysis.bind(this));
         this.dom.detectSegmentsBtn.addEventListener('click', this._handleDetectSegments.bind(this));
 
-        // Add validation for SACMES parameters
-        if (this.dom.params.sgWindowInput) {
-            this.dom.params.sgWindowInput.addEventListener('input', this._validateSgWindow.bind(this));
-            console.log('CV: Added SG window validation listener');
-        } else {
-            console.warn('CV: sgWindowInput element not found');
-        }
-        if (this.dom.params.applyPolynomialRegressionInput) {
-            this.dom.params.applyPolynomialRegressionInput.addEventListener('change', this._togglePolynomialParams.bind(this));
-            console.log('CV: Added polynomial regression toggle listener');
-        } else {
-            console.warn('CV: applyPolynomialRegressionInput element not found');
-        }
+        // Add validation for SACMES parameters (check if elements exist)
+        setTimeout(() => this._setupSACMESValidation(), 100); // Defer to ensure DOM is ready
     }
 
     _setupSocketHandlers() {
@@ -202,7 +192,15 @@ export class CVModule {
 
             console.log('CV: Switching to visualization screen');
             this.state.currentScreen = 'visualization';
-            this.uiManager.showScreen('cvVisualizationScreen');
+
+            // Make sure the UI manager exists and the screen switch works
+            if (this.uiManager && typeof this.uiManager.showScreen === 'function') {
+                this.uiManager.showScreen('cvVisualizationScreen');
+                console.log('CV: Screen switched successfully');
+            } else {
+                console.error('CV: UIManager not available or showScreen method missing');
+                return;
+            }
 
             // Request a preview file from the agent
             this._requestPreviewFile();
@@ -216,6 +214,12 @@ export class CVModule {
         try {
             console.log('CV: Requesting preview file');
             const analysisParams = this._collectAnalysisParams();
+
+            if (!analysisParams) {
+                console.error('CV: Failed to collect analysis parameters');
+                return;
+            }
+
             const filters = {
                 handle: this.dom.params.fileHandleInput.value.trim(),
                 range_start: 1,
@@ -234,6 +238,10 @@ export class CVModule {
             this.socketManager.emit('get_cv_preview', { filters, analysisParams });
         } catch (error) {
             console.error('CV: Error in _requestPreviewFile:', error);
+            if (this.dom.segmentStatus) {
+                this.dom.segmentStatus.textContent = 'Error requesting preview: ' + error.message;
+                this.dom.segmentStatus.className = 'text-sm text-red-600 mt-2';
+            }
         }
     }
 
@@ -289,12 +297,12 @@ export class CVModule {
                 mass_transport: this.dom.params.massTransportInput.value,
                 SelectedOptions: this.dom.params.analysisOptionsInput.value,
 
-                // SACMES enhancement parameters
+                // SACMES enhancement parameters (with safe defaults)
                 phe_method: this.dom.params.pheMethodInput?.value || 'Abs',
-                sg_window: parseInt(this.dom.params.sgWindowInput?.value) || 5,
-                sg_degree: parseInt(this.dom.params.sgDegreeInput?.value) || 1,
-                polyfit_deg: parseInt(this.dom.params.polyfitDegreeInput?.value) || 15,
-                apply_polynomial_regression: this.dom.params.applyPolynomialRegressionInput?.checked || false,
+                sg_window: this.dom.params.sgWindowInput ? parseInt(this.dom.params.sgWindowInput.value) || 5 : 5,
+                sg_degree: this.dom.params.sgDegreeInput ? parseInt(this.dom.params.sgDegreeInput.value) || 1 : 1,
+                polyfit_deg: this.dom.params.polyfitDegreeInput ? parseInt(this.dom.params.polyfitDegreeInput.value) || 15 : 15,
+                apply_polynomial_regression: this.dom.params.applyPolynomialRegressionInput ? this.dom.params.applyPolynomialRegressionInput.checked : false,
 
                 voltage_column: parseInt(this.dom.settings.voltageColumnInput.value),
                 current_column: parseInt(this.dom.settings.currentColumnInput.value),
@@ -311,7 +319,33 @@ export class CVModule {
             return params;
         } catch (error) {
             console.error('CV: Error collecting analysis params:', error);
-            throw error;
+            // Return a safe default instead of throwing
+            return {
+                num_files: 1,
+                num_electrodes: 16,
+                scan_rate: 0.1,
+                forward_segment: 1,
+                reverse_segment: 2,
+                low_voltage: -0.5,
+                high_voltage: 0.5,
+                mass_transport: 'surface',
+                SelectedOptions: 'Peak Height Extraction',
+                voltage_column: 1,
+                current_column: 2,
+                spacing_index: 1,
+                delimiter: 1,
+                file_extension: '.txt',
+                byte_limit: 3000,
+                sample_rate: 20,
+                analysis_interval: 1,
+                resize_interval: 5,
+                // SACMES defaults
+                phe_method: 'Abs',
+                sg_window: 5,
+                sg_degree: 1,
+                polyfit_deg: 15,
+                apply_polynomial_regression: false
+            };
         }
     }
 
@@ -412,6 +446,25 @@ export class CVModule {
         this.state.isAnalysisRunning = false;
         this.dom.startAnalysisBtn.disabled = false;
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
+    }
+
+    _setupSACMESValidation() {
+        // Setup SACMES parameter validation with existence checks
+        console.log('CV: Setting up SACMES validation');
+
+        if (this.dom.params.sgWindowInput) {
+            this.dom.params.sgWindowInput.addEventListener('input', this._validateSgWindow.bind(this));
+            console.log('CV: Added SG window validation listener');
+        } else {
+            console.log('CV: sgWindowInput element not ready yet');
+        }
+
+        if (this.dom.params.applyPolynomialRegressionInput) {
+            this.dom.params.applyPolynomialRegressionInput.addEventListener('change', this._togglePolynomialParams.bind(this));
+            console.log('CV: Added polynomial regression toggle listener');
+        } else {
+            console.log('CV: applyPolynomialRegressionInput element not ready yet');
+        }
     }
 
     _validateSgWindow() {
