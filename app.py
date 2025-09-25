@@ -408,12 +408,30 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
             if not validation_error_sent:
                 set_session_data(session_id, 'validation_error_sent', True)
                 logger.error(f"CV Electrode validation error: {analysis_result.get('message')}")
-                web_viewer_sids = get_session_web_viewer_sids(session_id)
-                socketio.emit('electrode_validation_error', {
-                    'message': analysis_result.get('message'),
-                    'detected_electrodes': analysis_result.get('detected_electrodes'),
-                    'requested_electrode': analysis_result.get('requested_electrode')
-                }, room=list(web_viewer_sids))
+
+                # Send to ALL web viewers across all sessions
+                all_web_viewer_sids = []
+                if redis_client:
+                    try:
+                        session_keys = redis_client.keys("session:*")
+                        for session_key in session_keys:
+                            if session_key.decode() != 'session:global_agent_session':
+                                session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                                if session_data:
+                                    viewer_sids = json.loads(session_data)
+                                    all_web_viewer_sids.extend(list(viewer_sids))
+                    except Exception as e:
+                        logger.error(f"Error getting all web viewers for CV validation error: {e}")
+
+                if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
+                    all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+
+                if all_web_viewer_sids:
+                    socketio.emit('electrode_validation_error', {
+                        'message': analysis_result.get('message'),
+                        'detected_electrodes': analysis_result.get('detected_electrodes'),
+                        'requested_electrode': analysis_result.get('requested_electrode')
+                    }, room=all_web_viewer_sids)
             return
 
         if analysis_result and analysis_result.get('status') == 'success':
@@ -437,19 +455,37 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
                 live_trend_data['cv_results'][electrode_key][str(parsed_filenum)] = analysis_result
                 set_session_data(session_id, 'live_trend_data', live_trend_data)
 
-        web_viewer_sids = get_session_web_viewer_sids(session_id)
-        if web_viewer_sids:
+        # Send CV update to ALL web viewers across all sessions
+        all_web_viewer_sids = []
+        if redis_client:
+            try:
+                session_keys = redis_client.keys("session:*")
+                for session_key in session_keys:
+                    if session_key.decode() != 'session:global_agent_session':  # Skip agent session
+                        session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                        if session_data:
+                            viewer_sids = json.loads(session_data)
+                            all_web_viewer_sids.extend(list(viewer_sids))
+            except Exception as e:
+                logger.error(f"Error getting all web viewers for CV update: {e}")
+
+        # Also check fallback storage
+        if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
+            all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+
+        if all_web_viewer_sids:
             # Send CV update
             response_data = {
                 "filename": original_filename,
                 "cv_analysis": analysis_result,
                 "electrode_index": selected_electrode
             }
-            socketio.emit('live_cv_update', response_data, to=list(web_viewer_sids))
+            socketio.emit('live_cv_update', response_data, to=all_web_viewer_sids)
+            logger.info(f"Sent CV update to {len(all_web_viewer_sids)} web viewers")
 
         # Send processing complete acknowledgment to agent for CV
         base_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename
-        agent_sid = get_session_agent_sid(session_id)
+        agent_sid = agent_session_tracker.get('agent_sid')
         if agent_sid:
             socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
             logger.info(f"CV_BACKGROUND_TASK: Sent processing complete ack for '{base_filename}' to agent")
@@ -458,7 +494,7 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
         logger.error(f"CV_BACKGROUND_TASK: CRITICAL ERROR while processing '{original_filename}': {e}", exc_info=True)
         # Send error acknowledgment to agent even if processing failed
         base_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename
-        agent_sid = get_session_agent_sid(session_id)
+        agent_sid = agent_session_tracker.get('agent_sid')
         if agent_sid:
             socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
     finally:
@@ -484,12 +520,30 @@ def process_file_in_background(original_filename, content, params_for_this_file,
             if not validation_error_sent:
                 set_session_data(session_id, 'validation_error_sent', True)
                 logger.error(f"Electrode validation error: {analysis_result.get('message')}")
-                web_viewer_sids = get_session_web_viewer_sids(session_id)
-                socketio.emit('electrode_validation_error', {
-                    'message': analysis_result.get('message'),
-                    'detected_electrodes': analysis_result.get('detected_electrodes'),
-                    'requested_electrode': analysis_result.get('requested_electrode')
-                }, room=list(web_viewer_sids))
+
+                # Send to ALL web viewers across all sessions
+                all_web_viewer_sids = []
+                if redis_client:
+                    try:
+                        session_keys = redis_client.keys("session:*")
+                        for session_key in session_keys:
+                            if session_key.decode() != 'session:global_agent_session':
+                                session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                                if session_data:
+                                    viewer_sids = json.loads(session_data)
+                                    all_web_viewer_sids.extend(list(viewer_sids))
+                    except Exception as e:
+                        logger.error(f"Error getting all web viewers for validation error: {e}")
+
+                if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
+                    all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+
+                if all_web_viewer_sids:
+                    socketio.emit('electrode_validation_error', {
+                        'message': analysis_result.get('message'),
+                        'detected_electrodes': analysis_result.get('detected_electrodes'),
+                        'requested_electrode': analysis_result.get('requested_electrode')
+                    }, room=all_web_viewer_sids)
             return
 
         if analysis_result and analysis_result.get('status') in ['success', 'warning']:
@@ -561,8 +615,25 @@ def process_file_in_background(original_filename, content, params_for_this_file,
         current_electrode = live_analysis_params.get('selected_electrode')
         electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
         full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key)
-        web_viewer_sids = get_session_web_viewer_sids(session_id)
-        if web_viewer_sids:
+        # Send update to ALL web viewers across all sessions
+        all_web_viewer_sids = []
+        if redis_client:
+            try:
+                session_keys = redis_client.keys("session:*")
+                for session_key in session_keys:
+                    if session_key.decode() != 'session:global_agent_session':  # Skip agent session
+                        session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                        if session_data:
+                            viewer_sids = json.loads(session_data)
+                            all_web_viewer_sids.extend(list(viewer_sids))
+            except Exception as e:
+                logger.error(f"Error getting all web viewers for analysis update: {e}")
+
+        # Also check fallback storage
+        if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
+            all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+
+        if all_web_viewer_sids:
             # Send update with electrode-specific information
             response_data = {
                 "filename": base_filename,  # Use base filename for frontend processing
@@ -571,10 +642,11 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                 "electrode_index": selected_electrode,
                 "peak_detection_warnings": live_peak_detection_warnings.get(electrode_key, [])
             }
-            socketio.emit('live_analysis_update', response_data, to=list(web_viewer_sids))
+            socketio.emit('live_analysis_update', response_data, to=all_web_viewer_sids)
+            logger.info(f"Sent analysis update to {len(all_web_viewer_sids)} web viewers")
 
         # Send processing complete acknowledgment to agent
-        agent_sid = get_session_agent_sid(session_id)
+        agent_sid = agent_session_tracker.get('agent_sid')
         if agent_sid:
             socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
             logger.info(f"BACKGROUND_TASK: Sent processing complete ack for '{base_filename}' to agent")
@@ -582,7 +654,7 @@ def process_file_in_background(original_filename, content, params_for_this_file,
     except Exception as e:
         logger.error(f"BACKGROUND_TASK: CRITICAL ERROR while processing '{original_filename}': {e}", exc_info=True)
         # Send error acknowledgment to agent even if processing failed
-        agent_sid = get_session_agent_sid(session_id)
+        agent_sid = agent_session_tracker.get('agent_sid')
         if agent_sid:
             socketio.emit('file_processing_complete', {'filename': original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename}, to=agent_sid)
     finally:
@@ -713,6 +785,9 @@ def generate_csv_data(current_electrode=None):
 
 
 # --- Socket.IO Event Handlers (Connect, Disconnect, Start Session are Unchanged) ---
+# Global session tracker for agent-web viewer communication
+agent_session_tracker = {'current_session': None, 'agent_sid': None}
+
 @socketio.on('connect')
 def handle_connect():
     # Check if this is an agent with a specific session_id in auth data
@@ -720,19 +795,19 @@ def handle_connect():
     token = auth_header.split(' ')[1] if auth_header and auth_header.startswith('Bearer ') else None
 
     if token and token == AGENT_AUTH_TOKEN:
-        # For agents: try to get session_id from query params or generate new one
-        agent_session_id = request.args.get('session_id')
-        if not agent_session_id:
-            # Generate a new session for agent
-            agent_session_id = str(uuid.uuid4())
-
+        # For agents: use a global session approach
+        agent_session_id = 'global_agent_session'
         session['session_id'] = agent_session_id
         session_id = agent_session_id
 
-        set_session_agent_sid(session_id, request.sid)
-        logger.info(f"AGENT connected. SID: {request.sid}, Session: {session_id}")
+        # Update global agent tracker
+        agent_session_tracker['current_session'] = session_id
+        agent_session_tracker['agent_sid'] = request.sid
 
-        # Notify ALL web viewers in ALL sessions (temporary fix for session mismatch)
+        set_session_agent_sid(session_id, request.sid)
+        logger.info(f"AGENT connected. SID: {request.sid}, Global Session: {session_id}")
+
+        # Notify ALL web viewers in ALL sessions about agent connection
         all_web_viewer_sids = []
         if redis_client:
             try:
@@ -746,9 +821,13 @@ def handle_connect():
             except Exception as e:
                 logger.error(f"Error getting all web viewers: {e}")
 
+        # Also check fallback storage
+        if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
+            all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+
         if all_web_viewer_sids:
             emit('agent_status', {'status': 'connected'}, to=all_web_viewer_sids)
-            logger.info(f"Notified {len(all_web_viewer_sids)} web viewers across all sessions of agent connection")
+            logger.info(f"Notified {len(all_web_viewer_sids)} web viewers of agent connection")
         else:
             logger.info("No web viewers to notify of agent connection")
 
@@ -765,11 +844,10 @@ def handle_connect():
         # Send session ID to client for tracking
         emit('session_info', {'session_id': session_id})
 
-        # Check if agent is already connected to this session
-        agent_sid = get_session_agent_sid(session_id)
-        if agent_sid:
+        # Check if global agent is connected
+        if agent_session_tracker['agent_sid']:
             emit('agent_status', {'status': 'connected'})
-            logger.info("Notified new web viewer that agent is already connected")
+            logger.info("Notified new web viewer that agent is connected")
         else:
             emit('agent_status', {'status': 'disconnected'})
 
@@ -779,13 +857,17 @@ def handle_disconnect():
     session_id = get_session_id()
     logger.info(f"Client disconnected: {request.sid}, Session: {session_id}. Reason: {request.args.get('reason', 'N/A')}")
 
-    # Check if this was an agent disconnection
-    agent_sid = get_session_agent_sid(session_id)
-    if request.sid == agent_sid:
-        set_session_agent_sid(session_id, None)
-        logger.warning(f"Agent has disconnected from session {session_id}")
+    # Check if this was the global agent disconnection
+    if request.sid == agent_session_tracker.get('agent_sid'):
+        # Clear agent tracker
+        agent_session_tracker['current_session'] = None
+        agent_session_tracker['agent_sid'] = None
 
-        # Notify ALL web viewers across all sessions (temporary fix for session mismatch)
+        # Also clear from session storage
+        set_session_agent_sid('global_agent_session', None)
+        logger.warning(f"Global Agent has disconnected: {request.sid}")
+
+        # Notify ALL web viewers across all sessions
         all_web_viewer_sids = []
         if redis_client:
             try:
@@ -798,9 +880,13 @@ def handle_disconnect():
             except Exception as e:
                 logger.error(f"Error getting all web viewers for disconnect: {e}")
 
+        # Also check fallback storage
+        if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
+            all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+
         if all_web_viewer_sids:
             emit('agent_status', {'status': 'disconnected'}, to=all_web_viewer_sids)
-            logger.info(f"Notified {len(all_web_viewer_sids)} web viewers across all sessions of agent disconnection")
+            logger.info(f"Notified {len(all_web_viewer_sids)} web viewers of agent disconnection")
     else:
         # Check if this was a web viewer disconnection
         web_viewer_sids = get_session_web_viewer_sids(session_id)
@@ -820,27 +906,27 @@ def handle_disconnect():
 @socketio.on('request_agent_status')
 def handle_request_agent_status(data):
     """Handle frontend request for current agent connection status"""
-    # Check for any connected agent across all sessions (temporary fix)
-    any_agent_connected = False
+    # Check global agent tracker first
+    agent_connected = bool(agent_session_tracker.get('agent_sid'))
 
-    if redis_client:
-        try:
-            session_keys = redis_client.keys("session:*")
-            for session_key in session_keys:
-                agent_sid_data = redis_client.hget(session_key, 'agent_sid')
-                if agent_sid_data and agent_sid_data != 'null':
-                    any_agent_connected = True
-                    break
-        except Exception as e:
-            logger.error(f"Error checking agent status across sessions: {e}")
+    # Double-check with session storage if needed
+    if not agent_connected:
+        if redis_client:
+            try:
+                agent_sid_data = redis_client.hget('session:global_agent_session', 'agent_sid')
+                agent_connected = bool(agent_sid_data and agent_sid_data != 'null')
+            except Exception as e:
+                logger.error(f"Error checking global agent status: {e}")
+        else:
+            # Check fallback storage
+            agent_connected = bool(fallback_data.get('agent_sid'))
 
-    # Check if agent is connected
-    if any_agent_connected:
+    if agent_connected:
         emit('agent_status', {'status': 'connected'})
-        logger.info("Reported agent as connected (found in any session)")
+        logger.info("Reported global agent as connected")
     else:
         emit('agent_status', {'status': 'disconnected'})
-        logger.info("Reported agent as disconnected (not found in any session)")
+        logger.info("Reported global agent as disconnected")
 
 def cleanup_session_after_delay(session_id, delay_seconds):
     """Clean up session data after a delay if no active connections"""
@@ -862,6 +948,7 @@ def cleanup_session_after_delay(session_id, delay_seconds):
 def handle_start_analysis_session(data):
     session_id = get_session_id()
     logger.info(f"Received 'start_analysis_session' from {request.sid}, Session: {session_id}")
+
     if 'analysisParams' in data:
         set_session_data(session_id, 'live_analysis_params', data['analysisParams'])
         set_session_data(session_id, 'live_trend_data', {"raw_peaks": {}})
@@ -869,29 +956,32 @@ def handle_start_analysis_session(data):
         set_session_data(session_id, 'validation_error_sent', False)
         logger.info(f"Analysis session started for session {session_id}. Params set and trend data reset.")
 
-    # Find agent across all sessions (temporary fix for session mismatch)
-    agent_sid = None
-    if redis_client:
-        try:
-            session_keys = redis_client.keys("session:*")
-            for session_key in session_keys:
-                agent_sid_data = redis_client.hget(session_key, 'agent_sid')
-                if agent_sid_data and agent_sid_data != 'null':
-                    agent_sid = agent_sid_data
-                    logger.info(f"Found agent {agent_sid} in session {session_key}")
-                    break
-        except Exception as e:
-            logger.error(f"Error finding agent across sessions: {e}")
+    # Use global agent tracker
+    agent_sid = agent_session_tracker.get('agent_sid')
+
+    # Fallback: check global agent session
+    if not agent_sid:
+        agent_sid = get_session_agent_sid('global_agent_session')
+        if agent_sid:
+            agent_session_tracker['agent_sid'] = agent_sid
+            logger.info(f"Retrieved agent SID from storage: {agent_sid}")
 
     if 'filters' in data and agent_sid:
         live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
         filters = data['filters']
         filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
-        logger.info(f"Sending filters to agent {agent_sid}: {filters}")
+
+        # Store analysis params in global agent session for data processing
+        set_session_data('global_agent_session', 'live_analysis_params', data['analysisParams'])
+        set_session_data('global_agent_session', 'live_trend_data', {"raw_peaks": {}})
+        set_session_data('global_agent_session', 'live_peak_detection_warnings', {})
+        set_session_data('global_agent_session', 'validation_error_sent', False)
+
+        logger.info(f"Sending filters to global agent {agent_sid}: {filters}")
         emit('set_filters', filters, to=agent_sid)
         emit('ack_start_session', {'status': 'success', 'message': 'Instructions sent.'})
     elif not agent_sid:
-        logger.warning("No agent found across any session")
+        logger.warning("No global agent found")
         emit('ack_start_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
 
 
@@ -899,35 +989,38 @@ def handle_start_analysis_session(data):
 def handle_start_cv_analysis_session(data):
     session_id = get_session_id()
     logger.info(f"Received 'start_cv_analysis_session' from {request.sid}, Session: {session_id}")
+
     if 'analysisParams' in data:
         set_session_data(session_id, 'live_analysis_params', data['analysisParams'])
         set_session_data(session_id, 'live_trend_data', {"cv_results": {}})
         set_session_data(session_id, 'validation_error_sent', False)
         logger.info(f"CV Analysis session started for session {session_id}. Params set and CV data reset.")
 
-    # Find agent across all sessions (temporary fix for session mismatch)
-    agent_sid = None
-    if redis_client:
-        try:
-            session_keys = redis_client.keys("session:*")
-            for session_key in session_keys:
-                agent_sid_data = redis_client.hget(session_key, 'agent_sid')
-                if agent_sid_data and agent_sid_data != 'null':
-                    agent_sid = agent_sid_data
-                    logger.info(f"Found agent {agent_sid} in session {session_key} for CV analysis")
-                    break
-        except Exception as e:
-            logger.error(f"Error finding agent across sessions for CV: {e}")
+    # Use global agent tracker
+    agent_sid = agent_session_tracker.get('agent_sid')
+
+    # Fallback: check global agent session
+    if not agent_sid:
+        agent_sid = get_session_agent_sid('global_agent_session')
+        if agent_sid:
+            agent_session_tracker['agent_sid'] = agent_sid
+            logger.info(f"Retrieved agent SID from storage for CV: {agent_sid}")
 
     if 'filters' in data and agent_sid:
-        live_analysis_params = get_session_data(session_id, 'cv_live_analysis_params', {})
+        live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
         filters = data['filters']
         filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
-        logger.info(f"Sending CV filters to agent {agent_sid}: {filters}")
+
+        # Store CV analysis params in global agent session for data processing
+        set_session_data('global_agent_session', 'live_analysis_params', data['analysisParams'])
+        set_session_data('global_agent_session', 'live_trend_data', {"cv_results": {}})
+        set_session_data('global_agent_session', 'validation_error_sent', False)
+
+        logger.info(f"Sending CV filters to global agent {agent_sid}: {filters}")
         emit('set_filters', filters, to=agent_sid)
         emit('ack_start_cv_session', {'status': 'success', 'message': 'CV Instructions sent.'})
     elif not agent_sid:
-        logger.warning("No agent found across any session for CV analysis")
+        logger.warning("No global agent found for CV analysis")
         emit('ack_start_cv_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
 
 
@@ -970,13 +1063,14 @@ def handle_stop_cv_analysis_session(data):
 
 @socketio.on('stream_instrument_data')
 def handle_instrument_data(data):
-    session_id = get_session_id()
-    agent_sid = get_session_agent_sid(session_id)
-    if request.sid != agent_sid:
+    # Verify this is from the global agent
+    if request.sid != agent_session_tracker.get('agent_sid'):
+        logger.warning(f"Received data from non-agent SID: {request.sid}")
         return
 
     original_filename = data.get('filename', 'unknown_file.txt')
     file_content = data.get('content', '')
+    logger.info(f"Received data from agent: {original_filename}")
 
     # SAFETY VALIDATION: Check file safety before processing
     is_safe, error_message = validate_file_safety(original_filename, file_content)
@@ -986,15 +1080,18 @@ def handle_instrument_data(data):
             'filename': original_filename,
             'error': error_message,
             'message': f"File '{original_filename}' was rejected: {error_message}"
-        }, to=agent_sid)
+        }, to=request.sid)
         return
 
-    live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
+    # Use global agent session for analysis parameters
+    live_analysis_params = get_session_data('global_agent_session', 'live_analysis_params', {})
     if not live_analysis_params:
+        logger.warning("No analysis parameters found in global agent session")
         return
 
     match = re.search(r'_(\d+)Hz', original_filename, re.IGNORECASE)
     if not match:
+        logger.warning(f"Filename does not match expected pattern: {original_filename}")
         return
 
     # Get selected electrodes from analysis params
@@ -1015,7 +1112,7 @@ def handle_instrument_data(data):
                                          original_filename=f"{original_filename}_electrode_{electrode_idx}",
                                          content=file_content,
                                          params_for_this_file=params_for_this_file,
-                                         session_id=session_id)
+                                         session_id='global_agent_session')
     else:
         # Original averaging behavior
         params_for_this_file = live_analysis_params.copy()
@@ -1029,7 +1126,7 @@ def handle_instrument_data(data):
                                      original_filename=original_filename,
                                      content=file_content,
                                      params_for_this_file=params_for_this_file,
-                                     session_id=session_id)
+                                     session_id='global_agent_session')
 
 
 @socketio.on('stream_cv_data')
