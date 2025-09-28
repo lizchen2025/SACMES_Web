@@ -275,10 +275,13 @@ sio = socketio.Client(reconnection_attempts=5, reconnection_delay=5, logger=True
 def file_matches_filters(filename):
     required_keys = ['handle', 'frequencies', 'range_start', 'range_end', 'file_extension']
     if not all(k in current_filters for k in required_keys): return False
-    if not filename.endswith(current_filters['file_extension']): return False
+    # Allow files without extension if file_extension is empty, or check extension normally
+    file_ext = current_filters['file_extension']
+    if file_ext and not filename.endswith(file_ext): return False
     if not filename.startswith(current_filters['handle']): return False
     try:
-        match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
+        # Support both old format (_60Hz_1.) and new format (_60Hz_1 or CV_60Hz_1)
+        match = re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', filename, re.IGNORECASE)
         if not match: return False
         freq, num = int(match.group(1)), int(match.group(2))
     except (ValueError, IndexError):
@@ -346,7 +349,8 @@ def monitor_directory_loop(directory):
             if new_matching_files:
                 files_by_number = defaultdict(list)
                 for filename in new_matching_files:
-                    match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
+                    # Support both old format (_60Hz_1.) and new format (_60Hz_1 or CV_60Hz_1)
+                    match = re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', filename, re.IGNORECASE)
                     if match: files_by_number[int(match.group(2))].append(filename)
                 app.log(f"✓ Found {len(new_matching_files)} new matching file(s) to process...")
                 for num in sorted(files_by_number.keys()):

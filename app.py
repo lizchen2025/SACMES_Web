@@ -436,7 +436,8 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
 
         if analysis_result and analysis_result.get('status') == 'success':
             # Store CV results differently - not in trend data but as individual results
-            match = re.search(r'_(\d+)Hz_?_?(\d+)\.', original_filename, re.IGNORECASE) or re.search(r'_(\d+)\.', original_filename, re.IGNORECASE)
+            # Support both old format (_60Hz_1.) and new format (_60Hz_1 or CV_60Hz_1)
+            match = re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', original_filename, re.IGNORECASE) or re.search(r'_(\d+)(?:\.|$)', original_filename, re.IGNORECASE)
             if match:
                 if len(match.groups()) == 2:
                     parsed_frequency, parsed_filenum = int(match.group(1)), int(match.group(2))
@@ -549,7 +550,8 @@ def process_file_in_background(original_filename, content, params_for_this_file,
         if analysis_result and analysis_result.get('status') in ['success', 'warning']:
             # Extract from original filename (without electrode suffix)
             base_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename
-            match = re.search(r'_(\d+)Hz_?_?(\d+)\.', base_filename, re.IGNORECASE)
+            # Support both old format (_60Hz_1.) and new format (_60Hz_1 or CV_60Hz_1)
+            match = re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', base_filename, re.IGNORECASE)
             if match:
                 parsed_frequency, parsed_filenum = int(match.group(1)), int(match.group(2))
                 peak = analysis_result.get('peak_value')
@@ -1089,6 +1091,7 @@ def handle_instrument_data(data):
         logger.warning("No analysis parameters found in global agent session")
         return
 
+    # Support both old format (_60Hz_1.) and new format (_60Hz_1 or CV_60Hz_1)
     match = re.search(r'_(\d+)Hz', original_filename, re.IGNORECASE)
     if not match:
         logger.warning(f"Filename does not match expected pattern: {original_filename}")
