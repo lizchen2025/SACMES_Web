@@ -11,6 +11,46 @@ logger = logging.getLogger(__name__)
 
 # --- Helper Functions ---
 
+def convert_units(value, from_unit, to_unit='base'):
+    """
+    Convert units for voltage and current measurements.
+
+    Args:
+        value: Numeric value to convert
+        from_unit: Source unit (V, mV, μV, nV, A, mA, μA, nA)
+        to_unit: Target unit ('base' for V/A, or specific unit)
+
+    Returns:
+        Converted value
+    """
+    # Voltage units to base (V)
+    voltage_factors = {
+        'V': 1.0,
+        'mV': 1e-3,
+        'μV': 1e-6,
+        'uV': 1e-6,  # Alternative spelling
+        'nV': 1e-9
+    }
+
+    # Current units to base (A)
+    current_factors = {
+        'A': 1.0,
+        'mA': 1e-3,
+        'μA': 1e-6,
+        'uA': 1e-6,  # Alternative spelling
+        'nA': 1e-9
+    }
+
+    # Get conversion factor
+    factors = {**voltage_factors, **current_factors}
+    factor = factors.get(from_unit, 1.0)
+
+    if to_unit == 'base':
+        return value * factor
+    else:
+        to_factor = factors.get(to_unit, 1.0)
+        return value * factor / to_factor
+
 def _read_and_segment_data(file_path, params, selected_electrode=None):
     """
     Reads CV data from a file and identifies the scanning segments.
@@ -79,6 +119,16 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
 
     if not potentials or not currents:
         return [], [], {}
+
+    # Apply unit conversions if specified
+    voltage_units = params.get('voltage_units', 'V')
+    current_units = params.get('current_units', 'A')
+
+    # Convert to base units (V and A) for internal calculations
+    if voltage_units != 'V':
+        potentials = [convert_units(v, voltage_units, 'base') for v in potentials]
+    if current_units != 'A':
+        currents = [convert_units(c, current_units, 'base') for c in currents]
 
     # --- Segment Detection Logic ---
     segment_dictionary = {}
@@ -237,9 +287,19 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
 
             segment = segment_dictionary[segment_num]
 
-            # Filter by user-defined voltage range
+            # Filter by user-defined voltage range (convert range limits to base units if needed)
             p_raw, i_raw = np.array(segment['potentials']), np.array(segment['currents'])
-            voltage_mask = (p_raw >= params['low_voltage']) & (p_raw <= params['high_voltage'])
+
+            # Convert voltage range limits to base units
+            voltage_units = params.get('voltage_units', 'V')
+            low_voltage = params['low_voltage']
+            high_voltage = params['high_voltage']
+
+            if voltage_units != 'V':
+                low_voltage = convert_units(low_voltage, voltage_units, 'base')
+                high_voltage = convert_units(high_voltage, voltage_units, 'base')
+
+            voltage_mask = (p_raw >= low_voltage) & (p_raw <= high_voltage)
             p_adj, i_adj = p_raw[voltage_mask].tolist(), i_raw[voltage_mask].tolist()
 
             if len(p_adj) < 3:

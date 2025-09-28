@@ -198,6 +198,47 @@ def evaluate_qc_metrics(snr_improvement, peak_retention, residual_metric):
         return 'fail'
 
 
+def convert_units(value, from_unit, to_unit='base'):
+    """
+    Convert units for voltage and current measurements.
+
+    Args:
+        value: Numeric value to convert
+        from_unit: Source unit (V, mV, μV, nV, A, mA, μA, nA)
+        to_unit: Target unit ('base' for V/A, or specific unit)
+
+    Returns:
+        Converted value
+    """
+    # Voltage units to base (V)
+    voltage_factors = {
+        'V': 1.0,
+        'mV': 1e-3,
+        'μV': 1e-6,
+        'uV': 1e-6,  # Alternative spelling
+        'nV': 1e-9
+    }
+
+    # Current units to base (A)
+    current_factors = {
+        'A': 1.0,
+        'mA': 1e-3,
+        'μA': 1e-6,
+        'uA': 1e-6,  # Alternative spelling
+        'nA': 1e-9
+    }
+
+    # Get conversion factor
+    factors = {**voltage_factors, **current_factors}
+    factor = factors.get(from_unit, 1.0)
+
+    if to_unit == 'base':
+        return value * factor
+    else:
+        to_factor = factors.get(to_unit, 1.0)
+        return value * factor / to_factor
+
+
 def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
     """
     Analyzes a single SWV data file based on provided parameters.
@@ -257,6 +298,16 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
                 "raw_currents": [], "smoothed_currents": [], "regression_line": [], "adjusted_potentials": [],
                 "peak_value": 0, "normalized_currents_data": [], "auc_vertices": []}
 
+    # Apply unit conversions if specified
+    voltage_units = analysis_params.get('voltage_units', 'V')
+    current_units = analysis_params.get('current_units', 'A')
+
+    # Convert to base units (V and A) for internal calculations
+    if voltage_units != 'V':
+        potentials = [convert_units(v, voltage_units, 'base') for v in potentials]
+    if current_units != 'A':
+        currents = [convert_units(c, current_units, 'base') for c in currents]
+
     min_potential, max_potential = min(potentials), max(potentials)
     current_freq = analysis_params['frequency']
 
@@ -272,9 +323,33 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
     sorted_potentials = [p for p, c in data_pairs]
     sorted_currents = [c for p, c in data_pairs]
 
+    # Apply peak detection range filtering if specified (user-defined range for excluding noise peaks)
+    peak_min_voltage = analysis_params.get('peak_min_voltage')
+    peak_max_voltage = analysis_params.get('peak_max_voltage')
+
+    # Convert peak range limits to base units if specified
+    if peak_min_voltage is not None and voltage_units != 'V':
+        peak_min_voltage = convert_units(peak_min_voltage, voltage_units, 'base')
+    if peak_max_voltage is not None and voltage_units != 'V':
+        peak_max_voltage = convert_units(peak_max_voltage, voltage_units, 'base')
+
     # Apply potential range filtering on sorted data
+    # First apply the original scanning range
     range_indices = [i for i, p in enumerate(sorted_potentials) if
                      min(xend_val, xstart_val) <= p <= max(xend_val, xstart_val)]
+
+    # Then apply user-defined peak detection range if specified
+    if peak_min_voltage is not None or peak_max_voltage is not None:
+        peak_range_indices = []
+        for i in range_indices:
+            p = sorted_potentials[i]
+            if peak_min_voltage is not None and p < peak_min_voltage:
+                continue
+            if peak_max_voltage is not None and p > peak_max_voltage:
+                continue
+            peak_range_indices.append(i)
+        range_indices = peak_range_indices
+
     if not range_indices:
         return {"status": "warning", "message": "No data in specified potential range.",
                 "warning_type": "no_data_in_range", "potentials": [], "raw_currents": [], "smoothed_currents": [],
