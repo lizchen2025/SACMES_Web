@@ -489,16 +489,28 @@ export class CVModule {
         const electrodeResults = this.state.cvResults[electrodeKey];
         const hasResults = electrodeResults && Object.keys(electrodeResults).length > 0;
 
-        // Clear individual plots container and show CV summary
+        // Clear individual plots container and show CV visualization
         const individualPlotsContainer = document.getElementById('individualPlotsContainer');
         if (individualPlotsContainer) {
             if (hasResults) {
+                // Get the most recent analysis result for visualization
+                const fileNumbers = Object.keys(electrodeResults).map(Number).sort((a, b) => b - a);
+                const latestFileNum = fileNumbers[0];
+                const latestResult = electrodeResults[latestFileNum];
+
+                if (latestResult && latestResult.status === 'success') {
+                    // Display CV plots
+                    this._updateCVVisualization(latestResult);
+                }
+
+                // Also show summary
                 individualPlotsContainer.innerHTML = `
-                    <div class="border rounded-lg p-4 bg-gray-50">
+                    <div class="border rounded-lg p-4 bg-gray-50 mt-4">
                         <h4 class="text-lg font-semibold text-gray-700 mb-2">CV Analysis Summary</h4>
                         <div class="text-sm text-gray-600">
                             <p>Files analyzed: ${Object.keys(electrodeResults).length}</p>
                             <p>Electrode: ${currentElectrode !== null ? currentElectrode + 1 : 'Averaged'}</p>
+                            ${latestResult && latestResult.peak_separation ? `<p>Peak Separation: ${latestResult.peak_separation.toFixed(3)} V</p>` : ''}
                             <p>Analysis complete!</p>
                         </div>
                     </div>
@@ -625,12 +637,14 @@ export class CVModule {
         const processedFiles = Object.keys(electrodeResults).length;
         const totalFiles = this.state.currentNumFiles;
 
-        // If we've processed at least 3 files or 20% of total files (whichever is smaller),
-        // or if we've processed all files, switch to visualization
-        const minFilesForVisualization = Math.min(3, Math.ceil(totalFiles * 0.2));
+        // For CV analysis, wait for all files to be processed or at least 80% completion
+        const minFilesForVisualization = Math.max(Math.ceil(totalFiles * 0.8), totalFiles - 5);
 
-        if (processedFiles >= minFilesForVisualization || processedFiles >= totalFiles) {
-            console.log(`CV analysis progress: ${processedFiles}/${totalFiles} files processed. Switching to visualization.`);
+        if (processedFiles >= totalFiles) {
+            console.log(`CV analysis complete: ${processedFiles}/${totalFiles} files processed. Switching to visualization.`);
+            this._completeCVAnalysis('complete');
+        } else if (processedFiles >= minFilesForVisualization) {
+            console.log(`CV analysis near complete: ${processedFiles}/${totalFiles} files processed. Switching to visualization.`);
             this._completeCVAnalysis('sufficient_data');
         }
     }
@@ -668,15 +682,125 @@ export class CVModule {
     }
 
     _updateCVVisualization(analysisResult) {
-        // This would update CV-specific plots
-        // For now, just log the results
         console.log('CV Analysis Result:', analysisResult);
 
-        // TODO: Implement CV-specific visualization
-        // - Forward sweep plot
-        // - Reverse sweep plot
-        // - Peak separation display
-        // - Charge/AUC display
+        if (!analysisResult || !analysisResult.forward && !analysisResult.reverse) {
+            console.log('No CV data to visualize');
+            return;
+        }
+
+        // Create CV visualization plots
+        this._createCVPlots(analysisResult);
+        this._displayCVSummary(analysisResult);
+    }
+
+    _createCVPlots(analysisResult) {
+        // Find or create plot containers
+        const visualizationArea = document.getElementById('visualizationArea');
+        if (!visualizationArea) return;
+
+        // Clear existing plots
+        const existingPlots = visualizationArea.querySelectorAll('.cv-plot-container');
+        existingPlots.forEach(plot => plot.remove());
+
+        // Create plot containers
+        const plotContainer = document.createElement('div');
+        plotContainer.className = 'cv-plot-container grid grid-cols-1 md:grid-cols-2 gap-4 mt-4';
+
+        // Forward sweep plot
+        if (analysisResult.forward && analysisResult.forward.potentials) {
+            const forwardPlot = this._createSingleCVPlot(
+                analysisResult.forward,
+                'Forward Sweep',
+                'cv-forward-plot'
+            );
+            plotContainer.appendChild(forwardPlot);
+        }
+
+        // Reverse sweep plot
+        if (analysisResult.reverse && analysisResult.reverse.potentials) {
+            const reversePlot = this._createSingleCVPlot(
+                analysisResult.reverse,
+                'Reverse Sweep',
+                'cv-reverse-plot'
+            );
+            plotContainer.appendChild(reversePlot);
+        }
+
+        // Insert plots before summary
+        const summaryElement = visualizationArea.querySelector('.analysis-summary') || visualizationArea.lastElementChild;
+        visualizationArea.insertBefore(plotContainer, summaryElement);
+    }
+
+    _createSingleCVPlot(sweepData, title, plotId) {
+        const plotDiv = document.createElement('div');
+        plotDiv.className = 'bg-white p-4 rounded-lg shadow';
+        plotDiv.innerHTML = `
+            <h3 class="text-lg font-semibold mb-2">${title}</h3>
+            <div id="${plotId}" style="height: 400px;"></div>
+        `;
+
+        // Use setTimeout to ensure DOM is ready
+        setTimeout(() => {
+            const plotElement = document.getElementById(plotId);
+            if (plotElement && window.Plotly) {
+                const traces = [
+                    {
+                        x: sweepData.potentials,
+                        y: sweepData.currents,
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: 'Raw Data',
+                        line: { color: 'blue', width: 2 }
+                    }
+                ];
+
+                // Add corrected data if available
+                if (sweepData.corrected_currents) {
+                    traces.push({
+                        x: sweepData.potentials,
+                        y: sweepData.corrected_currents,
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: 'Baseline Corrected',
+                        line: { color: 'red', width: 2 }
+                    });
+                }
+
+                // Add baseline if available
+                if (sweepData.baseline) {
+                    traces.push({
+                        x: sweepData.potentials,
+                        y: sweepData.baseline,
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: 'Baseline',
+                        line: { color: 'gray', width: 1, dash: 'dash' }
+                    });
+                }
+
+                const layout = {
+                    xaxis: { title: 'Potential (V)' },
+                    yaxis: { title: 'Current (A)' },
+                    showlegend: true,
+                    margin: { l: 50, r: 30, t: 30, b: 50 }
+                };
+
+                Plotly.newPlot(plotElement, traces, layout, { responsive: true });
+            }
+        }, 100);
+
+        return plotDiv;
+    }
+
+    _displayCVSummary(analysisResult) {
+        // This function would display CV analysis summary
+        // For now, keep the existing summary display logic
+        console.log('CV Summary:', {
+            forward_peak: analysisResult.forward?.peak_potential,
+            reverse_peak: analysisResult.reverse?.peak_potential,
+            peak_separation: analysisResult.peak_separation
+        });
     }
 
     _displayCVPreview(cvData) {
