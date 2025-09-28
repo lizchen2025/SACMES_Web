@@ -509,93 +509,33 @@ export class CVModule {
         const electrodeResults = this.state.cvResults[electrodeKey];
         const hasResults = electrodeResults && Object.keys(electrodeResults).length > 0;
 
-        // Clear individual plots container and show CV visualization
-        const individualPlotsContainer = document.getElementById('individualPlotsContainer');
-        if (individualPlotsContainer) {
-            if (hasResults) {
-                // Get the most recent analysis result for visualization
-                const fileNumbers = Object.keys(electrodeResults).map(Number).sort((a, b) => b - a);
-                const latestFileNum = fileNumbers[0];
-                const latestResult = electrodeResults[latestFileNum];
+        if (hasResults) {
+            // Get the most recent analysis result for visualization
+            const fileNumbers = Object.keys(electrodeResults).map(Number).sort((a, b) => b - a);
+            const latestFileNum = fileNumbers[0];
+            const latestResult = electrodeResults[latestFileNum];
 
-                if (latestResult && latestResult.status === 'success') {
-                    // Display CV plots
-                    this._updateCVVisualization(latestResult);
-                }
-
-                // Also show summary
-                individualPlotsContainer.innerHTML = `
-                    <div class="border rounded-lg p-4 bg-gray-50 mt-4">
-                        <h4 class="text-lg font-semibold text-gray-700 mb-2">CV Analysis Summary</h4>
-                        <div class="text-sm text-gray-600">
-                            <p>Files analyzed: ${Object.keys(electrodeResults).length}</p>
-                            <p>Electrode: ${currentElectrode !== null ? currentElectrode + 1 : 'Averaged'}</p>
-                            ${latestResult && latestResult.peak_separation ? `<p>Peak Separation: ${latestResult.peak_separation.toFixed(3)} V</p>` : ''}
-                            <p>Analysis complete!</p>
-                        </div>
-                    </div>
-                `;
-            } else {
-                individualPlotsContainer.innerHTML = `
-                    <div class="border rounded-lg p-4 bg-yellow-50 border-yellow-200">
-                        <h4 class="text-lg font-semibold text-yellow-700 mb-2">No CV Data Received</h4>
-                        <div class="text-sm text-yellow-600">
-                            <p>No CV analysis results were received.</p>
-                            <p><strong>Possible causes:</strong></p>
-                            <ul class="list-disc list-inside mt-2 space-y-1">
-                                <li>Incorrect file handle (check that files start with "${this.dom.params.fileHandleInput.value || 'your_handle'}")</li>
-                                <li>No matching files in the monitored directory</li>
-                                <li>Agent connection issues</li>
-                                <li>File format incompatibility</li>
-                            </ul>
-                            <p class="mt-2"><strong>Please check:</strong></p>
-                            <ul class="list-disc list-inside mt-1 space-y-1">
-                                <li>Agent is running and connected</li>
-                                <li>File handle matches your file names</li>
-                                <li>Files are in the monitored directory</li>
-                            </ul>
-                        </div>
-                    </div>
-                `;
+            if (latestResult && latestResult.status === 'success') {
+                // Display the latest CV plots with all peaks/AUC intact
+                this._updateCVVisualization(latestResult);
+                // Update comprehensive analysis
+                this._updateCVSummaryPlots();
             }
         }
 
-        // Hide trend plots as they are SWV-specific
+        // Remove any text summaries and CV text-based result containers
+        const textSummaries = document.querySelectorAll('.analysis-summary, #individualPlotsContainer .border');
+        textSummaries.forEach(summary => summary.remove());
+
+        // Hide SWV trend plots container since we use our own CV layout
         const trendPlotsContainer = document.getElementById('trendPlotsContainer');
         if (trendPlotsContainer) {
-            if (hasResults) {
-                trendPlotsContainer.innerHTML = `
-                    <div class="border rounded-lg p-4 bg-gray-50">
-                        <h4 class="text-lg font-semibold text-gray-700 mb-2">CV Results</h4>
-                        <div class="text-sm text-gray-600">
-                            <p>CV analysis results are available.</p>
-                            <p>Individual file analysis details have been processed.</p>
-                            <p><strong>Note:</strong> CV-specific trend visualization will be implemented in future updates.</p>
-                        </div>
-                    </div>
-                `;
-            } else {
-                trendPlotsContainer.innerHTML = `
-                    <div class="border rounded-lg p-4 bg-blue-50 border-blue-200">
-                        <h4 class="text-lg font-semibold text-blue-700 mb-2">Troubleshooting CV Analysis</h4>
-                        <div class="text-sm text-blue-600">
-                            <p><strong>File Naming Example:</strong></p>
-                            <p>For handle "CV_60Hz", files should be named:</p>
-                            <ul class="list-disc list-inside mt-1 space-y-1">
-                                <li>CV_60Hz_1.txt</li>
-                                <li>CV_60Hz_2.txt</li>
-                                <li>CV_60Hz_3.txt, etc.</li>
-                            </ul>
-                            <p class="mt-2"><strong>Current Settings:</strong></p>
-                            <ul class="list-disc list-inside mt-1">
-                                <li>Handle: ${this.dom.params.fileHandleInput.value || 'Not set'}</li>
-                                <li>Number of files: ${this.state.currentNumFiles || 'Not set'}</li>
-                            </ul>
-                        </div>
-                    </div>
-                `;
-            }
+            trendPlotsContainer.style.display = 'none';
         }
+
+        // Remove any remaining text-based CV summaries
+        const cvTextSummaries = document.querySelectorAll('.cv-text-summary, .cv-analysis-summary');
+        cvTextSummaries.forEach(summary => summary.remove());
     }
 
     _setupCVAnalysisTimeout() {
@@ -708,9 +648,24 @@ export class CVModule {
             return;
         }
 
-        // Create CV visualization plots
-        this._createCVPlots(analysisResult);
-        this._displayCVSummary(analysisResult);
+        // Check if the new layout already exists
+        const mainContainer = document.querySelector('.cv-main-container');
+        if (!mainContainer) {
+            // Create the layout structure first
+            this._createCVSummaryPlots();
+        }
+
+        // Update individual plot elements with preserved peak markers and AUC areas
+        const forwardPlotElement = document.getElementById('cv-forward-plot');
+        const reversePlotElement = document.getElementById('cv-reverse-plot');
+
+        if (analysisResult.forward && forwardPlotElement) {
+            this._updateSingleCVPlot(forwardPlotElement, analysisResult.forward, 'Forward Sweep');
+        }
+
+        if (analysisResult.reverse && reversePlotElement) {
+            this._updateSingleCVPlot(reversePlotElement, analysisResult.reverse, 'Reverse Sweep');
+        }
     }
 
     _updateCVVisualizationRealTime(analysisResult, fileNum) {
@@ -863,9 +818,20 @@ export class CVModule {
         const forwardPlotElement = document.getElementById('cv-forward-plot');
         const reversePlotElement = document.getElementById('cv-reverse-plot');
 
-        // If plots don't exist yet, create them
+        // If plots don't exist yet, create the new layout
         if (!forwardPlotElement || !reversePlotElement) {
-            this._createCVPlots(analysisResult);
+            this._createCVSummaryPlots();
+            // Get the plot elements again after creating the layout
+            const newForwardPlotElement = document.getElementById('cv-forward-plot');
+            const newReversePlotElement = document.getElementById('cv-reverse-plot');
+
+            // Update the plots with the current data
+            if (analysisResult.forward && newForwardPlotElement) {
+                this._updateSingleCVPlot(newForwardPlotElement, analysisResult.forward, `Forward Sweep (File ${fileNum})`);
+            }
+            if (analysisResult.reverse && newReversePlotElement) {
+                this._updateSingleCVPlot(newReversePlotElement, analysisResult.reverse, `Reverse Sweep (File ${fileNum})`);
+            }
             return;
         }
 
@@ -975,32 +941,59 @@ export class CVModule {
     }
 
     _createCVSummaryPlots() {
-        // Create comprehensive CV analysis plots
+        // Create comprehensive CV analysis plots with new layout
         const visualizationArea = document.getElementById('visualizationArea');
         if (!visualizationArea) return;
 
-        // Remove existing summary plots
-        const existingSummary = visualizationArea.querySelector('.cv-summary-plots');
-        if (existingSummary) existingSummary.remove();
+        // Check if the new layout already exists
+        const existingMainContainer = visualizationArea.querySelector('.cv-main-container');
+        if (existingMainContainer) {
+            // Layout already exists, no need to recreate
+            return;
+        }
 
-        // Create summary plots container
-        const summaryContainer = document.createElement('div');
-        summaryContainer.className = 'cv-summary-plots mt-6';
-        summaryContainer.innerHTML = `
-            <h3 class="text-lg font-semibold mb-4">CV Comprehensive Analysis</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="bg-white p-4 rounded-lg shadow">
-                    <h4 class="text-md font-semibold mb-2">Peak Separation Trend</h4>
-                    <div id="cv-peak-separation-plot" style="height: 300px;"></div>
+        // Remove old layout elements and text summaries only
+        const oldPlots = visualizationArea.querySelectorAll('.cv-plot-container, .cv-summary-plots');
+        oldPlots.forEach(plot => plot.remove());
+
+        // Remove text summaries
+        const textSummaries = visualizationArea.querySelectorAll('.analysis-summary, .border');
+        textSummaries.forEach(summary => summary.remove());
+
+        // Create new layout: left side segments, right side comprehensive analysis
+        const mainContainer = document.createElement('div');
+        mainContainer.className = 'cv-main-container flex gap-4 mt-4';
+        mainContainer.innerHTML = `
+            <!-- Left side: CV Segments (30% width) -->
+            <div class="cv-segments-side w-1/3">
+                <div class="space-y-4">
+                    <div class="bg-white p-3 rounded-lg shadow">
+                        <h4 class="text-sm font-semibold mb-2">Forward Sweep</h4>
+                        <div id="cv-forward-plot" style="height: 250px;"></div>
+                    </div>
+                    <div class="bg-white p-3 rounded-lg shadow">
+                        <h4 class="text-sm font-semibold mb-2">Reverse Sweep</h4>
+                        <div id="cv-reverse-plot" style="height: 250px;"></div>
+                    </div>
                 </div>
-                <div class="bg-white p-4 rounded-lg shadow">
-                    <h4 class="text-md font-semibold mb-2">AUC Trend</h4>
-                    <div id="cv-auc-plot" style="height: 300px;"></div>
+            </div>
+
+            <!-- Right side: Comprehensive Analysis (70% width) -->
+            <div class="cv-analysis-side w-2/3">
+                <div class="space-y-4">
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h4 class="text-md font-semibold mb-2">Peak Separation Trend</h4>
+                        <div id="cv-peak-separation-plot" style="height: 240px;"></div>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h4 class="text-md font-semibold mb-2">AUC Trend</h4>
+                        <div id="cv-auc-plot" style="height: 240px;"></div>
+                    </div>
                 </div>
             </div>
         `;
 
-        visualizationArea.appendChild(summaryContainer);
+        visualizationArea.appendChild(mainContainer);
     }
 
     _updateCVSummaryPlots() {
