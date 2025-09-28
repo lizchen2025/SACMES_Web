@@ -120,26 +120,37 @@ export class CVModule {
 
         this.socketManager.on('cv_preview_response', (data) => {
             console.log('✅ CV Preview Response received:', data);
-            if (data.status === 'success') {
-                console.log('CV preview success, cv_data:', data.cv_data);
+            console.log('Response type:', typeof data, 'Keys:', Object.keys(data || {}));
+
+            if (data && data.status === 'success') {
+                console.log('CV preview success, checking cv_data:', data.cv_data);
                 console.log('Content length:', data.content ? data.content.length : 'No content');
-                this.state.previewFileContent = data.content;
-                this._displayCVPreview(data.cv_data);
-                this.dom.segmentStatus.textContent = 'CV preview loaded. Click "Detect Segments" to analyze.';
-                this.dom.segmentStatus.className = 'text-sm text-green-600 mt-2';
+
+                if (data.cv_data && data.cv_data.voltage && data.cv_data.current) {
+                    console.log('CV data looks valid, calling _displayCVPreview');
+                    this.state.previewFileContent = data.content;
+                    this._displayCVPreview(data.cv_data);
+                    this.dom.segmentStatus.textContent = 'CV preview loaded. Click "Detect Segments" to analyze.';
+                    this.dom.segmentStatus.className = 'text-sm text-green-600 mt-2';
+                } else {
+                    console.error('CV data missing or invalid:', data.cv_data);
+                    this.dom.segmentStatus.textContent = 'Error: Invalid CV data received';
+                    this.dom.segmentStatus.className = 'text-sm text-red-600 mt-2';
+                }
             } else {
-                console.error('CV preview error:', data.message);
-                this.dom.segmentStatus.textContent = `Error loading preview: ${data.message}`;
+                console.error('CV preview error:', data ? data.message : 'No data received');
+                this.dom.segmentStatus.textContent = `Error loading preview: ${data ? data.message : 'No response'}`;
                 this.dom.segmentStatus.className = 'text-sm text-red-600 mt-2';
             }
         });
 
-        // Add a catch-all listener to see all events
-        this.socketManager.onAny((eventName, ...args) => {
-            if (eventName.includes('cv') || eventName.includes('preview')) {
-                console.log(`🔍 Received CV-related event: ${eventName}`, args);
-            }
+        // Debug: Test if we can receive any events at all
+        this.socketManager.on('agent_status', (data) => {
+            console.log('🔍 Test: Received agent_status event:', data);
         });
+
+        // Debug: Note - onAny is not available in this SocketManager implementation
+        console.log('Note: Using simplified event listening for debugging');
 
         this.socketManager.on('cv_segments_response', (data) => {
             if (data.status === 'success') {
@@ -230,8 +241,8 @@ export class CVModule {
 
         // Request the first file for preview
         console.log('Emitting get_cv_preview event');
-        console.log('Socket connected:', this.socketManager.connected);
-        console.log('Socket ID:', this.socketManager.id);
+        console.log('Socket connected:', this.socketManager.socket.connected);
+        console.log('Socket ID:', this.socketManager.socket.id);
 
         this.socketManager.emit('get_cv_preview', { filters, analysisParams });
 
