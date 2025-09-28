@@ -52,6 +52,60 @@ def convert_units(value, from_unit, to_unit='base'):
         to_factor = factors.get(to_unit, 1.0)
         return value * factor / to_factor
 
+def _read_cv_data_simple(file_path, selected_electrode=None):
+    """
+    Simple CV data reader for the standard CV format.
+
+    CV files have a simple format:
+    - Column 1: Potential (V)
+    - Column 2-N: Current for each electrode (A)
+
+    Args:
+        file_path (str): Path to CV file
+        selected_electrode (int): Electrode index (0-based), None for averaged
+
+    Returns:
+        tuple: (potentials, currents) or ([], []) if failed
+    """
+    try:
+        logger.error(f"=== Simple CV Data Reading ===")
+        logger.error(f"File: {file_path}")
+        logger.error(f"Selected electrode: {selected_electrode}")
+
+        # Read all data as space-separated values
+        data = np.loadtxt(file_path, delimiter=' ')
+        logger.error(f"Data shape: {data.shape}")
+
+        # Extract potentials (first column)
+        potentials = data[:, 0].tolist()
+
+        # Extract currents
+        if selected_electrode is not None and selected_electrode >= 0:
+            # Specific electrode (1-based column indexing: electrode 0 = column 1, etc.)
+            electrode_column = selected_electrode + 1
+            if electrode_column < data.shape[1]:
+                currents = data[:, electrode_column].tolist()
+                logger.error(f"Using electrode {selected_electrode} (column {electrode_column})")
+            else:
+                logger.error(f"Electrode {selected_electrode} not available (only {data.shape[1]-1} electrodes)")
+                return [], []
+        else:
+            # Average all electrodes (columns 1 to end)
+            if data.shape[1] > 1:
+                currents = np.mean(data[:, 1:], axis=1).tolist()
+                logger.error(f"Using averaged data from {data.shape[1]-1} electrodes")
+            else:
+                logger.error("No current columns found")
+                return [], []
+
+        logger.error(f"Successfully read {len(potentials)} data points")
+        return potentials, currents
+
+    except Exception as e:
+        logger.error(f"Simple CV reader failed: {e}")
+        return [], []
+
+
 def _read_and_segment_data(file_path, params, selected_electrode=None):
     """
     Reads CV data from a file and identifies the scanning segments.
@@ -71,114 +125,15 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
             - segment_dictionary (dict): A dictionary mapping segment numbers to their data.
               e.g., {1: {'indices': [...], 'potentials': [...], 'currents': [...]}}
     """
-    logger.error(f"=== CV Data Reading Start ===")  # Use ERROR level to ensure it appears
-    logger.error(f"File path: {file_path}")
-    logger.error(f"Selected electrode: {selected_electrode}")
-    logger.error(f"Params available: {list(params.keys())}")
-    logger.error(f"Required params check:")
-    logger.error(f"  - voltage_column: {params.get('voltage_column', 'MISSING')}")
-    logger.error(f"  - current_column: {params.get('current_column', 'MISSING')}")
-    logger.error(f"  - delimiter: {params.get('delimiter', 'MISSING')}")
-
-    delimiter_map = {1: " ", 2: "\t", 3: ","}
-    delimiter_char = delimiter_map.get(params.get('delimiter', 1), " ")
-    logger.error(f"Using delimiter: '{delimiter_char}'")
-
-    # Determine electrode index to use
-    electrode_idx = selected_electrode if selected_electrode is not None else params.get('selected_electrode', 0)
-
-    # Read CV data using either multichannel reader or direct numpy loading
-    potentials, currents = [], []
-
-    if selected_electrode is not None:
-        # Use multichannel reader for specific electrode
-        from .data_reader import ReadData
-        electrodes_data = ReadData(
-            myfile=file_path,
-            voltage_column_index=params['voltage_column'] - 1,
-            current_column_start_index=params['current_column'] - 1,
-            spacing_index=params['spacing_index'],
-            num_electrodes=params['num_electrodes'],
-            delimiter_char=delimiter_char,
-            file_extension=params.get('file_extension', '.txt'),
-            selected_electrodes=[electrode_idx]
-        )
-
-        # Check electrode validation
-        detected_electrodes = electrodes_data.get('detected_electrodes', 0)
-        if electrode_idx >= detected_electrodes:
-            logger.error(f"Electrode validation failed: File contains {detected_electrodes} electrodes, but electrode {electrode_idx + 1} was requested.")
-            return [], [], {'error': f'electrode_validation_failed', 'detected_electrodes': detected_electrodes, 'requested_electrode': electrode_idx + 1}
-
-        if electrode_idx in electrodes_data:
-            electrode_data = electrodes_data[electrode_idx]
-            potentials = electrode_data['potentials']
-            currents = electrode_data['currents']
-        else:
-            logger.error(f"No data found for electrode {electrode_idx}")
-            return [], [], {}
-    else:
-        # Original single-electrode or averaged behavior
-        try:
-            logger.error(f"Attempting to read CV data using numpy.loadtxt")
-
-            # Check for required parameters and convert to int with defaults
-            required_params = ['voltage_column', 'current_column', 'spacing_index']
-            missing_params = [p for p in required_params if p not in params]
-            if missing_params:
-                logger.error(f"Missing required parameters: {missing_params}")
-                return [], [], {}
-
-            # Convert parameters to int and provide defaults for None values
-            try:
-                voltage_column = int(params['voltage_column']) if params['voltage_column'] is not None else 1
-                current_column = int(params['current_column']) if params['current_column'] is not None else 2
-                spacing_index = int(params['spacing_index']) if params['spacing_index'] is not None else 1
-            except (ValueError, TypeError) as ve:
-                logger.error(f"CV parameter conversion error: {ve}")
-                logger.error(f"Raw parameters: voltage_column={params['voltage_column']}, current_column={params['current_column']}, spacing_index={params['spacing_index']}")
-                return [], [], {}
-
-            logger.error(f"Parameters for reading:")
-            logger.error(f"  - voltage_column (0-based): {voltage_column - 1}")
-            logger.error(f"  - current_column (0-based): {current_column - 1 + electrode_idx * spacing_index}")
-            logger.error(f"  - electrode_idx: {electrode_idx}")
-            logger.error(f"  - spacing_index: {spacing_index}")
-
-            data = np.loadtxt(file_path, delimiter=delimiter_char, usecols=(
-            voltage_column - 1, current_column - 1 + electrode_idx * spacing_index))
-            potentials = data[:, 0].tolist()
-            currents = (data[:, 1] * 1e6).tolist()  # Convert to microAmps
-            logger.error(f"CV data read successfully: {len(potentials)} data points")
-        except KeyError as ke:
-            logger.error(f"CV Reader failed - missing parameter: {ke}")
-            return [], [], {}
-        except Exception as e:
-            logger.error(f"CV Reader failed for {file_path}: {e}")
-            logger.error(f"File exists: {os.path.exists(file_path)}")
-            if os.path.exists(file_path):
-                logger.error(f"File size: {os.path.getsize(file_path)} bytes")
-                # Try to read first few lines for debugging
-                try:
-                    with open(file_path, 'r') as f:
-                        first_lines = [f.readline().strip() for _ in range(3)]
-                    logger.error(f"First 3 lines of file: {first_lines}")
-                except Exception as read_err:
-                    logger.error(f"Could not read file for debugging: {read_err}")
-            return [], [], {}
+    # Use the simple CV reader instead of complex parameter-based reader
+    potentials, currents = _read_cv_data_simple(file_path, selected_electrode)
 
     if not potentials or not currents:
         return [], [], {}
 
-    # Apply unit conversions if specified
-    voltage_units = params.get('voltage_units', 'V')
-    current_units = params.get('current_units', 'A')
-
-    # Convert to base units (V and A) for internal calculations
-    if voltage_units != 'V':
-        potentials = [convert_units(v, voltage_units, 'base') for v in potentials]
-    if current_units != 'A':
-        currents = [convert_units(c, current_units, 'base') for c in currents]
+    # For CV data, assume correct units (V for potential, A for current)
+    # We'll convert current to microAmps for consistency with existing code
+    currents = [c * 1e6 for c in currents]  # Convert A to µA
 
     # --- Segment Detection Logic ---
     segment_dictionary = {}
