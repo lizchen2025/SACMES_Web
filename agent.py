@@ -285,10 +285,25 @@ def file_matches_filters(filename):
         # This will match both CV_60Hz_1.txt and older formats like _60Hz_1.
         if filename.startswith(current_filters['handle']):
             # For files starting with handle (like CV_60Hz_1.txt)
+            # Extract frequency from handle if present, otherwise use default
+            if '_' in current_filters['handle']:
+                # Try to extract frequency from handle (e.g., CV_60Hz -> 60)
+                handle_parts = current_filters['handle'].split('_')
+                freq = 60  # Default
+                for part in handle_parts:
+                    if part.endswith('Hz'):
+                        try:
+                            freq = int(part[:-2])  # Remove 'Hz' and convert to int
+                            break
+                        except ValueError:
+                            pass
+            else:
+                freq = 60  # Default frequency for CV files
+
+            # Extract file number
             remaining = filename[len(current_filters['handle']):]
             match = re.search(r'_(\d+)\.', remaining, re.IGNORECASE)
             if match:
-                freq = 60  # Default frequency for CV files
                 num = int(match.group(1))
             else:
                 return False
@@ -373,7 +388,8 @@ def monitor_directory_loop(directory):
                     else:
                         # For older format files like _60Hz_1.
                         match = re.search(r'(?:^|_)(\d+)Hz.*?_(\d+)(?:\.|$)', filename, re.IGNORECASE)
-                        if match: files_by_number[int(match.group(2))].append(filename)
+                        if match:
+                            files_by_number[int(match.group(2))].append(filename)
                 app.log(f"Found {len(new_matching_files)} new matching file(s) to process...")
                 for num in sorted(files_by_number.keys()):
                     for filename in sorted(files_by_number[num]):

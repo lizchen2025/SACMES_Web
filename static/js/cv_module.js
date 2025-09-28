@@ -387,7 +387,8 @@ export class CVModule {
         const filters = {
             handle: this.dom.params.fileHandleInput.value.trim(),
             range_start: 1,
-            range_end: numFiles
+            range_end: numFiles,
+            frequencies: [60]  // CV files use 60Hz by default
         };
 
         this.dom.startAnalysisBtn.textContent = 'CV Analysis Running...';
