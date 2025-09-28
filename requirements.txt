@@ -1,0 +1,8 @@
+Flask
+Flask-SocketIO
+eventlet
+numpy
+scipy
+gunicorn
+redis
+uuid
