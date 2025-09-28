@@ -436,8 +436,8 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
 
         if analysis_result and analysis_result.get('status') == 'success':
             # Store CV results differently - not in trend data but as individual results
-            # Support both old format (_60Hz_1.) and new format (_60Hz_1 or CV_60Hz_1)
-            match = re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', original_filename, re.IGNORECASE) or re.search(r'_(\d+)(?:\.|$)', original_filename, re.IGNORECASE)
+            # Support CV_60Hz_1.txt format and other formats
+            match = re.search(r'CV_(\d+)Hz_(\d+)(?:\.|$)', original_filename, re.IGNORECASE) or re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', original_filename, re.IGNORECASE) or re.search(r'_(\d+)(?:\.|$)', original_filename, re.IGNORECASE)
             if match:
                 if len(match.groups()) == 2:
                     parsed_frequency, parsed_filenum = int(match.group(1)), int(match.group(2))

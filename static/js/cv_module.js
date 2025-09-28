@@ -194,8 +194,8 @@ export class CVModule {
                     this.state.cvResults[electrodeKey] = {};
                 }
 
-                // Extract file number from filename
-                const match = data.filename.match(/_(\d+)\./);
+                // Extract file number from filename (support CV_60Hz_1.txt format and others)
+                const match = data.filename.match(/CV_\d+Hz_(\d+)\./) || data.filename.match(/_(\d+)\./);
                 if (match) {
                     const fileNum = match[1];
                     this.state.cvResults[electrodeKey][fileNum] = data.cv_analysis;
