@@ -1182,6 +1182,16 @@ def handle_cv_instrument_data(data):
 def handle_get_cv_preview(data):
     """Get CV preview file from agent for segment selection"""
     try:
+        # Get agent_sid from the global agent tracker
+        agent_sid = agent_session_tracker.get('agent_sid')
+
+        # Fallback: check global agent session
+        if not agent_sid:
+            agent_sid = get_session_agent_sid('global_agent_session')
+            if agent_sid:
+                agent_session_tracker['agent_sid'] = agent_sid
+                logger.info(f"Retrieved agent SID from storage for CV preview: {agent_sid}")
+
         if not agent_sid:
             emit('cv_preview_response', {'status': 'error', 'message': 'Agent not connected'})
             return
@@ -1237,6 +1247,8 @@ def handle_get_cv_segments(data):
 @socketio.on('cv_data_from_agent')
 def handle_cv_data_from_agent(data):
     """Handle CV data from agent - both preview and analysis modes"""
+    # Get agent_sid from the global agent tracker
+    agent_sid = agent_session_tracker.get('agent_sid')
     if request.sid != agent_sid:
         return
 
