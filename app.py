@@ -1207,8 +1207,12 @@ def handle_get_cv_preview(data):
         logger.info(f"CV Preview filters: {filters}")
         logger.info(f"CV Preview params: {analysis_params}")
 
+        # Store the requesting client's socket ID for response routing
+        analysis_params['requesting_client_sid'] = request.sid
+
         # Request first file from agent for preview
         logger.info(f"Sending get_cv_file_for_preview to agent {agent_sid}")
+        logger.info(f"Original request from client: {request.sid}")
         socketio.emit('get_cv_file_for_preview', {
             'filters': filters,
             'analysisParams': analysis_params,
@@ -1277,7 +1281,8 @@ def handle_cv_data_from_agent(data):
         if status == 'error':
             error_message = data.get('message', 'Unknown error')
             logger.error(f"Agent reported CV error: {error_message}")
-            emit('cv_preview_response', {'status': 'error', 'message': error_message})
+            requesting_client_sid = analysis_params.get('requesting_client_sid')
+            socketio.emit('cv_preview_response', {'status': 'error', 'message': error_message}, room=requesting_client_sid)
             return
 
         if preview_mode:
@@ -1329,38 +1334,45 @@ def handle_cv_data_from_agent(data):
                             logger.info(f"Voltage range: {min(voltage_data)} to {max(voltage_data)}")
                             logger.info(f"Current range: {min(current_data)} to {max(current_data)}")
 
+                            # Get the original requesting client's socket ID
+                            requesting_client_sid = analysis_params.get('requesting_client_sid')
+                            logger.info(f"Sending CV preview response to original client: {requesting_client_sid}")
+
                             # Send the CV data for preview visualization
-                            emit('cv_preview_response', {
+                            socketio.emit('cv_preview_response', {
                                 'status': 'success',
                                 'content': file_content,
                                 'cv_data': {
                                     'voltage': voltage_data,
                                     'current': current_data
                                 }
-                            })
-                            logger.info("Sent CV preview response to client")
+                            }, room=requesting_client_sid)
+                            logger.info(f"Sent CV preview response to client {requesting_client_sid}")
                         else:
                             logger.error(f"CV data missing required keys. Available keys: {list(data_result.keys()) if isinstance(data_result, dict) else 'Not a dict'}")
-                            emit('cv_preview_response', {
+                            requesting_client_sid = analysis_params.get('requesting_client_sid')
+                            socketio.emit('cv_preview_response', {
                                 'status': 'error',
                                 'message': 'CV data missing voltage or current information'
-                            })
+                            }, room=requesting_client_sid)
                     else:
                         logger.error("CV data parsing returned None or empty result")
-                        emit('cv_preview_response', {
+                        requesting_client_sid = analysis_params.get('requesting_client_sid')
+                        socketio.emit('cv_preview_response', {
                             'status': 'error',
                             'message': 'Could not parse CV data for preview'
-                        })
+                        }, room=requesting_client_sid)
 
                 finally:
                     import os
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
             else:
-                emit('cv_preview_response', {
+                requesting_client_sid = analysis_params.get('requesting_client_sid')
+                socketio.emit('cv_preview_response', {
                     'status': 'error',
                     'message': 'No file content received'
-                })
+                }, room=requesting_client_sid)
         else:
             # Regular analysis mode - use existing logic
             original_filename = data.get('filename', 'unknown_file.txt')
@@ -1391,7 +1403,9 @@ def handle_cv_data_from_agent(data):
     except Exception as e:
         logger.error(f"Error handling CV data from agent: {e}", exc_info=True)
         if data.get('preview_mode', False):
-            emit('cv_preview_response', {'status': 'error', 'message': str(e)})
+            analysis_params = data.get('analysisParams', {})
+            requesting_client_sid = analysis_params.get('requesting_client_sid')
+            socketio.emit('cv_preview_response', {'status': 'error', 'message': str(e)}, room=requesting_client_sid)
 
 
 # --- *** NEW *** SOCKET.IO EVENT HANDLER FOR EXPORTING DATA ---
