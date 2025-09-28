@@ -4,6 +4,7 @@
 
 import numpy as np
 import logging
+import os
 from .data_reader import ReadData as GeneralReadData  # Keep the original reader for multichannel handling
 
 logger = logging.getLogger(__name__)
@@ -70,8 +71,18 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
             - segment_dictionary (dict): A dictionary mapping segment numbers to their data.
               e.g., {1: {'indices': [...], 'potentials': [...], 'currents': [...]}}
     """
+    logger.info(f"=== CV Data Reading Start ===")
+    logger.info(f"File path: {file_path}")
+    logger.info(f"Selected electrode: {selected_electrode}")
+    logger.info(f"Params available: {list(params.keys())}")
+    logger.info(f"Required params check:")
+    logger.info(f"  - voltage_column: {params.get('voltage_column', 'MISSING')}")
+    logger.info(f"  - current_column: {params.get('current_column', 'MISSING')}")
+    logger.info(f"  - delimiter: {params.get('delimiter', 'MISSING')}")
+
     delimiter_map = {1: " ", 2: "\t", 3: ","}
     delimiter_char = delimiter_map.get(params.get('delimiter', 1), " ")
+    logger.info(f"Using delimiter: '{delimiter_char}'")
 
     # Determine electrode index to use
     electrode_idx = selected_electrode if selected_electrode is not None else params.get('selected_electrode', 0)
@@ -109,12 +120,41 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
     else:
         # Original single-electrode or averaged behavior
         try:
+            logger.info(f"Attempting to read CV data using numpy.loadtxt")
+
+            # Check for required parameters
+            required_params = ['voltage_column', 'current_column', 'spacing_index']
+            missing_params = [p for p in required_params if p not in params]
+            if missing_params:
+                logger.error(f"Missing required parameters: {missing_params}")
+                return [], [], {}
+
+            logger.info(f"Parameters for reading:")
+            logger.info(f"  - voltage_column (0-based): {params['voltage_column'] - 1}")
+            logger.info(f"  - current_column (0-based): {params['current_column'] - 1 + electrode_idx * params['spacing_index']}")
+            logger.info(f"  - electrode_idx: {electrode_idx}")
+            logger.info(f"  - spacing_index: {params['spacing_index']}")
+
             data = np.loadtxt(file_path, delimiter=delimiter_char, usecols=(
             params['voltage_column'] - 1, params['current_column'] - 1 + electrode_idx * params['spacing_index']))
             potentials = data[:, 0].tolist()
             currents = (data[:, 1] * 1e6).tolist()  # Convert to microAmps
+            logger.info(f"CV data read successfully: {len(potentials)} data points")
+        except KeyError as ke:
+            logger.error(f"CV Reader failed - missing parameter: {ke}")
+            return [], [], {}
         except Exception as e:
             logger.error(f"CV Reader failed for {file_path}: {e}")
+            logger.error(f"File exists: {os.path.exists(file_path)}")
+            if os.path.exists(file_path):
+                logger.error(f"File size: {os.path.getsize(file_path)} bytes")
+                # Try to read first few lines for debugging
+                try:
+                    with open(file_path, 'r') as f:
+                        first_lines = [f.readline().strip() for _ in range(3)]
+                    logger.error(f"First 3 lines of file: {first_lines}")
+                except Exception as read_err:
+                    logger.error(f"Could not read file for debugging: {read_err}")
             return [], [], {}
 
     if not potentials or not currents:
