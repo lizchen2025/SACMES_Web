@@ -1298,10 +1298,14 @@ def handle_cv_data_from_agent(data):
                     voltage_column = analysis_params.get('voltage_column', 1) - 1
                     current_column = analysis_params.get('current_column', 2) - 1
                     spacing_index = analysis_params.get('spacing_index', 1)
-                    delimiter = analysis_params.get('delimiter', 1)
+                    delimiter_num = analysis_params.get('delimiter', 1)
                     file_extension = analysis_params.get('file_extension', '.txt')
 
-                    logger.info(f"CV Preview parsing params: voltage_col={voltage_column}, current_col={current_column}, spacing={spacing_index}, delimiter={delimiter}")
+                    # Convert delimiter number to character string
+                    delimiter_map = {1: " ", 2: "\t", 3: ","}
+                    delimiter_char = delimiter_map.get(delimiter_num, " ")
+
+                    logger.info(f"CV Preview parsing params: voltage_col={voltage_column}, current_col={current_column}, spacing={spacing_index}, delimiter_num={delimiter_num}, delimiter_char='{delimiter_char}'")
 
                     # Read data for first electrode or averaged
                     data_result = ReadData(
@@ -1310,26 +1314,39 @@ def handle_cv_data_from_agent(data):
                         current_column_start_index=current_column,
                         spacing_index=spacing_index,
                         num_electrodes=1,
-                        delimiter_char=delimiter,
+                        delimiter_char=delimiter_char,
                         file_extension=file_extension,
                         selected_electrodes=None  # Use averaging for preview
                     )
 
                     logger.info(f"CV data parsing result: {type(data_result)}")
-                    if data_result and 'voltage' in data_result and 'current' in data_result:
-                        logger.info(f"CV data parsed successfully: voltage points={len(data_result['voltage'])}, current points={len(data_result['current'])}")
-                        # Send the CV data for preview visualization
-                        emit('cv_preview_response', {
-                            'status': 'success',
-                            'content': file_content,
-                            'cv_data': {
-                                'voltage': data_result['voltage'],
-                                'current': data_result['current']
-                            }
-                        })
-                        logger.info("Sent CV preview response to client")
+                    if data_result:
+                        logger.info(f"Data result keys: {list(data_result.keys()) if isinstance(data_result, dict) else 'Not a dict'}")
+                        if 'voltage' in data_result and 'current' in data_result:
+                            voltage_data = data_result['voltage']
+                            current_data = data_result['current']
+                            logger.info(f"CV data parsed successfully: voltage points={len(voltage_data)}, current points={len(current_data)}")
+                            logger.info(f"Voltage range: {min(voltage_data)} to {max(voltage_data)}")
+                            logger.info(f"Current range: {min(current_data)} to {max(current_data)}")
+
+                            # Send the CV data for preview visualization
+                            emit('cv_preview_response', {
+                                'status': 'success',
+                                'content': file_content,
+                                'cv_data': {
+                                    'voltage': voltage_data,
+                                    'current': current_data
+                                }
+                            })
+                            logger.info("Sent CV preview response to client")
+                        else:
+                            logger.error(f"CV data missing required keys. Available keys: {list(data_result.keys()) if isinstance(data_result, dict) else 'Not a dict'}")
+                            emit('cv_preview_response', {
+                                'status': 'error',
+                                'message': 'CV data missing voltage or current information'
+                            })
                     else:
-                        logger.error(f"CV data parsing failed: {data_result}")
+                        logger.error("CV data parsing returned None or empty result")
                         emit('cv_preview_response', {
                             'status': 'error',
                             'message': 'Could not parse CV data for preview'
