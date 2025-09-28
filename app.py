@@ -1379,7 +1379,7 @@ def handle_cv_data_from_agent(data):
 
             # Use global agent session for CV analysis parameters
             session_id = 'global_agent_session'
-            live_analysis_params = get_session_data(session_id, 'cv_live_analysis_params', {})
+            live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
             if not live_analysis_params:
                 logger.warning("No CV analysis parameters found in global agent session")
                 return
