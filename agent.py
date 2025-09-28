@@ -280,11 +280,23 @@ def file_matches_filters(filename):
     if file_ext and not filename.endswith(file_ext): return False
     if not filename.startswith(current_filters['handle']): return False
     try:
-        # Support multiple formats: _60Hz_1., _60Hz_1, CV_60Hz_1.txt, CV_60Hz_1
-        # Updated regex to handle CV prefix and be more flexible with separators
-        match = re.search(r'(?:^|_)(\d+)Hz.*?_(\d+)(?:\.|$)', filename, re.IGNORECASE)
-        if not match: return False
-        freq, num = int(match.group(1)), int(match.group(2))
+        # For CV files like CV_60Hz_1.txt, extract frequency and number
+        # Pattern: handle_frequency_number.extension
+        # This will match both CV_60Hz_1.txt and older formats like _60Hz_1.
+        if filename.startswith(current_filters['handle']):
+            # For files starting with handle (like CV_60Hz_1.txt)
+            remaining = filename[len(current_filters['handle']):]
+            match = re.search(r'_(\d+)\.', remaining, re.IGNORECASE)
+            if match:
+                freq = 60  # Default frequency for CV files
+                num = int(match.group(1))
+            else:
+                return False
+        else:
+            # For older format files like _60Hz_1.
+            match = re.search(r'_(\d+)Hz.*?_(\d+)(?:\.|$)', filename, re.IGNORECASE)
+            if not match: return False
+            freq, num = int(match.group(1)), int(match.group(2))
     except (ValueError, IndexError):
         return False
     if freq not in current_filters['frequencies']: return False
@@ -341,7 +353,7 @@ def monitor_directory_loop(directory):
         try:
             # List all files in directory
             all_files = os.listdir(directory)
-            app.log(f"📁 Found {len(all_files)} total files in directory")
+            app.log(f"Found {len(all_files)} total files in directory")
 
             # Filter matching files
             new_matching_files = [f for f in all_files if
@@ -350,28 +362,37 @@ def monitor_directory_loop(directory):
             if new_matching_files:
                 files_by_number = defaultdict(list)
                 for filename in new_matching_files:
-                    # Support multiple formats: _60Hz_1., _60Hz_1, CV_60Hz_1.txt, CV_60Hz_1
-                    match = re.search(r'(?:^|_)(\d+)Hz.*?_(\d+)(?:\.|$)', filename, re.IGNORECASE)
-                    if match: files_by_number[int(match.group(2))].append(filename)
-                app.log(f"✓ Found {len(new_matching_files)} new matching file(s) to process...")
+                    # Extract file number for grouping
+                    if filename.startswith(current_filters['handle']):
+                        # For files starting with handle (like CV_60Hz_1.txt)
+                        remaining = filename[len(current_filters['handle']):]
+                        match = re.search(r'_(\d+)\.', remaining, re.IGNORECASE)
+                        if match:
+                            num = int(match.group(1))
+                            files_by_number[num].append(filename)
+                    else:
+                        # For older format files like _60Hz_1.
+                        match = re.search(r'(?:^|_)(\d+)Hz.*?_(\d+)(?:\.|$)', filename, re.IGNORECASE)
+                        if match: files_by_number[int(match.group(2))].append(filename)
+                app.log(f"Found {len(new_matching_files)} new matching file(s) to process...")
                 for num in sorted(files_by_number.keys()):
                     for filename in sorted(files_by_number[num]):
                         if not is_monitoring_active:
                             app.log("Monitoring stopped, aborting file sending.")
                             return
-                        app.log(f"📤 Sending file: {filename}")
+                        app.log(f"Sending file: {filename}")
                         send_file_to_server(os.path.join(directory, filename))
                         processed_files.add(filename)
             else:
                 # Show a few example files to help with debugging
                 if len(all_files) > 0:
                     sample_files = all_files[:3]
-                    app.log(f"🔍 No matching files found. Sample files: {sample_files}")
+                    app.log(f"No matching files found. Sample files: {sample_files}")
                     # Check one sample file against filters
                     if sample_files:
                         sample_file = sample_files[0]
                         matches = file_matches_filters(sample_file)
-                        app.log(f"📝 Sample file '{sample_file}' matches filters: {matches}")
+                        app.log(f"Sample file '{sample_file}' matches filters: {matches}")
                 else:
                     app.log("📂 Directory is empty")
 
@@ -389,7 +410,7 @@ def monitor_directory_loop(directory):
 @sio.event
 def connect():
     app.update_status("Connected", "green")
-    app.log(f"✓ Successfully connected to server: {app.server_url.get()}")
+    app.log(f"Successfully connected to server: {app.server_url.get()}")
 
 
 @sio.event
@@ -402,18 +423,18 @@ def connect_error(data):
 @sio.event
 def disconnect():
     app.update_status("Disconnected", "red")
-    app.log("⚠ Disconnected from server.")
+    app.log("Disconnected from server.")
 
 
 @sio.on('set_filters')
 def on_set_filters(data):
     global current_filters, processed_files, agent_thread, is_monitoring_active
-    app.log(f"✓ Received filter instructions from server: {data}")
+    app.log(f"Received filter instructions from server: {data}")
     current_filters.clear()
     current_filters.update(data)
     processed_files = set()
-    app.log(f"✓ Updated current filters: {current_filters}")
-    app.log(f"✓ Monitor directory: {app.watch_directory.get()}")
+    app.log(f"Updated current filters: {current_filters}")
+    app.log(f"Monitor directory: {app.watch_directory.get()}")
 
     if agent_thread and agent_thread.is_alive():
         app.log("Stopping previous monitoring thread...")
@@ -424,13 +445,13 @@ def on_set_filters(data):
     directory = app.watch_directory.get()
 
     if directory == "No folder selected":
-        app.log("⚠ ERROR: No folder selected for monitoring!")
+        app.log("ERROR: No folder selected for monitoring!")
         return
 
-    app.log(f"✓ Starting file monitoring in directory: {directory}")
+    app.log(f"Starting file monitoring in directory: {directory}")
     agent_thread = threading.Thread(target=monitor_directory_loop, args=(directory,), daemon=True)
     agent_thread.start()
-    app.log("✓ File monitoring thread started successfully")
+    app.log("File monitoring thread started successfully")
 
 
 @sio.on('file_processing_complete')
@@ -456,18 +477,18 @@ def on_file_validation_error(data):
 def on_get_cv_file_for_preview(data):
     """Handle request for CV preview file from server"""
     global current_filters
-    app.log(f"✓ Received CV preview request from server: {data}")
+    app.log(f"Received CV preview request from server: {data}")
 
     filters = data.get('filters', {})
     analysis_params = data.get('analysisParams', {})
     preview_mode = data.get('preview_mode', True)
 
-    app.log(f"✓ CV Preview filters: {filters}")
+    app.log(f"CV Preview filters: {filters}")
 
     # Get directory and find the first matching file for preview
     directory = app.watch_directory.get()
     if directory == "No folder selected":
-        app.log("⚠ ERROR: No folder selected for monitoring!")
+        app.log("ERROR: No folder selected for monitoring!")
         sio.emit('cv_data_from_agent', {
             'status': 'error',
             'message': 'No folder selected',
@@ -478,15 +499,15 @@ def on_get_cv_file_for_preview(data):
     try:
         # Look for files matching the pattern in the directory
         handle = filters.get('handle', '')
-        app.log(f"🔍 Looking for CV files with handle: '{handle}'")
+        app.log(f"Looking for CV files with handle: '{handle}'")
 
         # Optimized: directly search for files starting with handle to avoid processing all files
         try:
             all_files = [f for f in os.listdir(directory)
                         if os.path.isfile(os.path.join(directory, f)) and f.startswith(handle)]
-            app.log(f"📁 Found {len(all_files)} files starting with handle '{handle}'")
+            app.log(f"Found {len(all_files)} files starting with handle '{handle}'")
         except Exception as e:
-            app.log(f"❌ Error reading directory: {e}")
+            app.log(f"Error reading directory: {e}")
             sio.emit('cv_data_from_agent', {
                 'status': 'error',
                 'message': f'Error reading directory: {e}',
@@ -497,21 +518,32 @@ def on_get_cv_file_for_preview(data):
         # Filter for CV files that match the pattern - optimized regex
         matching_files = []
         import re
-        # Updated regex pattern to match both CV_60Hz_1.txt and CV_60Hz_1 formats
-        cv_pattern = re.compile(r'^' + re.escape(handle) + r'.*?_(\d+)Hz.*?_(\d+)(?:\.|$)', re.IGNORECASE)
+
+        # Debug: show some example files
+        if all_files:
+            app.log(f"Sample files found: {all_files[:3]}")
+
+        # Pattern to match CV_60Hz_1.txt format
+        # For handle "CV_60Hz", this will match CV_60Hz_1.txt, CV_60Hz_2.txt, etc.
+        # The pattern is: handle + _ + number + .txt
+        cv_pattern = re.compile(r'^' + re.escape(handle) + r'_(\d+)\.txt$', re.IGNORECASE)
+        app.log(f"Using regex pattern: ^{re.escape(handle)}_(\d+)\.txt$")
 
         for filename in all_files:
+            app.log(f"Testing file: '{filename}' against pattern")
             match = cv_pattern.match(filename)
             if match:
                 matching_files.append(filename)
-                app.log(f"✓ Found matching CV file: {filename}")
+                app.log(f"Found matching CV file: {filename}")
                 # For preview, we only need the first file, so break early
                 break
+            else:
+                app.log(f"File '{filename}' does not match pattern")
 
         if not matching_files:
-            app.log(f"⚠ No CV files found matching handle '{handle}' in directory")
+            app.log(f"No CV files found matching handle '{handle}' in directory")
             sample_files = all_files[:3] if all_files else []
-            app.log(f"📝 Sample files in directory: {sample_files}")
+            app.log(f"Sample files in directory: {sample_files}")
             sio.emit('cv_data_from_agent', {
                 'status': 'error',
                 'message': f'No CV files found matching handle "{handle}"',
@@ -522,13 +554,13 @@ def on_get_cv_file_for_preview(data):
         # Use the first matching file for preview
         preview_file = matching_files[0]
         file_path = os.path.join(directory, preview_file)
-        app.log(f"📖 Reading CV preview file: {preview_file}")
+        app.log(f"Reading CV preview file: {preview_file}")
 
         # Read file content
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
 
-        app.log(f"✓ Successfully read CV preview file, content length: {len(content)} characters")
+        app.log(f"Successfully read CV preview file, content length: {len(content)} characters")
 
         # Send the content back to server for preview processing
         sio.emit('cv_data_from_agent', {
@@ -539,10 +571,10 @@ def on_get_cv_file_for_preview(data):
             'status': 'success'
         })
 
-        app.log(f"📤 Sent CV preview data to server: {preview_file}")
+        app.log(f"Sent CV preview data to server: {preview_file}")
 
     except Exception as e:
-        app.log(f"❌ Error getting CV preview file: {e}")
+        app.log(f"Error getting CV preview file: {e}")
         sio.emit('cv_data_from_agent', {
             'status': 'error',
             'message': str(e),
