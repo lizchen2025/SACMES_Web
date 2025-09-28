@@ -397,15 +397,39 @@ export class CVModule {
 
             const layout = {
                 title: 'CV Preview - Select Segments',
-                xaxis: { title: 'Voltage (V)' },
-                yaxis: { title: 'Current (A)' },
-                margin: { t: 50, r: 50, b: 50, l: 80 },
-                showlegend: false
+                xaxis: {
+                    title: 'Voltage (V)',
+                    showgrid: true,
+                    zeroline: true
+                },
+                yaxis: {
+                    title: 'Current (A)',
+                    showgrid: true,
+                    zeroline: true
+                },
+                margin: { t: 50, r: 20, b: 50, l: 60 },
+                showlegend: false,
+                autosize: true,
+                width: undefined,  // Let it auto-size
+                height: undefined  // Let it auto-size
             };
 
             console.log('About to call Plotly.newPlot with:', plotData, layout);
             try {
-                Plotly.newPlot(this.dom.cvPreviewPlot, plotData, layout, { responsive: true });
+                // Clear the container first
+                this.dom.cvPreviewPlot.innerHTML = '';
+
+                // Create the plot with proper configuration
+                Plotly.newPlot(this.dom.cvPreviewPlot, plotData, layout, {
+                    responsive: true,
+                    displayModeBar: false  // Hide the toolbar for cleaner look
+                });
+
+                // Ensure the plot resizes when container changes
+                setTimeout(() => {
+                    Plotly.Plots.resize(this.dom.cvPreviewPlot);
+                }, 100);
+
                 console.log('Plotly.newPlot completed successfully');
             } catch (error) {
                 console.error('Error calling Plotly.newPlot:', error);
