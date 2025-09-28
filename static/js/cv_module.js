@@ -184,10 +184,19 @@ export class CVModule {
         });
 
         this.socketManager.on('live_cv_update', (data) => {
+            console.log('=== CV Live Update Received ===');
+            console.log('Full data object:', data);
+            console.log('Analysis running:', this.state.isAnalysisRunning);
+
             if (!this.state.isAnalysisRunning) return;
 
             // Store CV results per electrode
             if (data.cv_analysis && data.electrode_index !== undefined) {
+                console.log('CV Analysis data structure:', data.cv_analysis);
+                console.log('CV Analysis keys:', Object.keys(data.cv_analysis));
+                console.log('Forward data:', data.cv_analysis.forward);
+                console.log('Reverse data:', data.cv_analysis.reverse);
+
                 const electrodeKey = data.electrode_index !== null ? data.electrode_index.toString() : 'averaged';
 
                 if (!this.state.cvResults[electrodeKey]) {
@@ -702,26 +711,44 @@ export class CVModule {
     }
 
     _updateCVVisualizationRealTime(analysisResult, fileNum) {
-        console.log(`CV Real-time Update: File ${fileNum}`, analysisResult);
+        console.log(`=== CV Real-time Visualization Update: File ${fileNum} ===`);
+        console.log('Analysis result full object:', analysisResult);
 
         // Always update progress display, even if there's no data to plot
         this._updateCVProgressDisplay(fileNum);
 
         if (!analysisResult) {
-            console.log('No analysis result for real-time update');
+            console.error('❌ No analysis result for real-time update');
             return;
         }
 
+        console.log('Analysis result status:', analysisResult.status);
+        console.log('Analysis result keys:', Object.keys(analysisResult));
+
         // Check if we have any CV data to visualize
+        console.log('🔍 Checking forward data...');
+        console.log('Forward object:', analysisResult.forward);
+        console.log('Forward is object:', typeof analysisResult.forward === 'object');
+        console.log('Forward keys:', analysisResult.forward ? Object.keys(analysisResult.forward) : 'null/undefined');
+
+        console.log('🔍 Checking reverse data...');
+        console.log('Reverse object:', analysisResult.reverse);
+        console.log('Reverse is object:', typeof analysisResult.reverse === 'object');
+        console.log('Reverse keys:', analysisResult.reverse ? Object.keys(analysisResult.reverse) : 'null/undefined');
+
         const hasForward = analysisResult.forward && Object.keys(analysisResult.forward).length > 0;
         const hasReverse = analysisResult.reverse && Object.keys(analysisResult.reverse).length > 0;
 
+        console.log('Has forward data:', hasForward);
+        console.log('Has reverse data:', hasReverse);
+
         if (!hasForward && !hasReverse) {
-            console.log('No CV forward/reverse data to visualize in real-time update');
-            console.log('Analysis result structure:', analysisResult);
+            console.error('❌ No CV forward/reverse data to visualize in real-time update');
+            console.log('📊 Analysis result structure:', JSON.stringify(analysisResult, null, 2));
             return;
         }
 
+        console.log('✅ CV data available, creating plots...');
         // Update or create plots in real-time
         this._createCVPlotsRealTime(analysisResult, fileNum);
     }

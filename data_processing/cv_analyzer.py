@@ -267,10 +267,18 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
         dict: A comprehensive dictionary with all analysis results.
     """
     try:
+        logger.info(f"Starting CV analysis for {file_path}")
+        logger.info(f"CV analysis params keys: {list(params.keys())}")
+
         # Step 1: Read and segment the entire file
         all_potentials, all_currents, segment_dictionary = _read_and_segment_data(file_path, params, selected_electrode)
+        logger.info(f"CV segmentation result: {len(segment_dictionary) if segment_dictionary else 0} segments found")
+
         if not segment_dictionary:
+            logger.error("CV segmentation failed - no segments found")
             return {"status": "error", "message": "Could not read or segment data file."}
+
+        logger.info(f"CV segments available: {list(segment_dictionary.keys())}")
 
         results = {
             "forward": {},
@@ -281,12 +289,17 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
 
         # Step 2: Analyze forward and reverse segments individually
         for scan_type in ["forward", "reverse"]:
+            logger.info(f"Processing {scan_type} segment...")
             segment_num = params.get(f'{scan_type}_segment')
+            logger.info(f"Initial {scan_type} segment from params: {segment_num}")
 
             # If no segment specified, try to auto-detect based on scan type
             if not segment_num or segment_num not in segment_dictionary:
                 available_segments = list(segment_dictionary.keys())
+                logger.info(f"No valid segment specified for {scan_type}, available segments: {available_segments}")
+
                 if not available_segments:
+                    logger.warning(f"No segments available for {scan_type} analysis")
                     continue
 
                 # Auto-assign segments: forward = 1st segment, reverse = 2nd segment (or 1st if only one)
@@ -302,6 +315,7 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
                     continue
 
             segment = segment_dictionary[segment_num]
+            logger.info(f"Using segment {segment_num} for {scan_type}, data points: {len(segment.get('potentials', []))}")
 
             # Filter by user-defined voltage range (convert range limits to base units if needed)
             p_raw, i_raw = np.array(segment['potentials']), np.array(segment['currents'])
@@ -386,11 +400,25 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
                 'auc_vertices': list(zip(p_adj, np.maximum(0, i_corrected)))  # For shading
             }
 
+            logger.info(f"CV {scan_type} analysis completed successfully:")
+            logger.info(f"  - Data points: {len(p_adj)}")
+            logger.info(f"  - Peak potential: {peak_potential}")
+            logger.info(f"  - Peak current: {peak_current}")
+            logger.info(f"  - Charge: {charge}")
+
         # Step 3: Calculate peak separation
         if results["forward"].get("peak_potential") is not None and results["reverse"].get(
                 "peak_potential") is not None:
             results["peak_separation"] = abs(
                 results["forward"]["peak_potential"] - results["reverse"]["peak_potential"])
+            logger.info(f"CV peak separation calculated: {results['peak_separation']}")
+
+        # Log final results summary
+        logger.info(f"CV analysis final results for {file_path}:")
+        logger.info(f"  - Forward data available: {bool(results['forward'])}")
+        logger.info(f"  - Reverse data available: {bool(results['reverse'])}")
+        logger.info(f"  - Peak separation: {results.get('peak_separation', 'N/A')}")
+        logger.info(f"  - Status: {results['status']}")
 
         return results
 
