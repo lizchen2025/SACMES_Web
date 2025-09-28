@@ -376,7 +376,8 @@ export class CVModule {
             currentElectrode: selectedElectrodes.length > 0 ? selectedElectrodes[0] : null,
             cvResults: {},
             uploadedFileContent: this.state.uploadedFileContent,
-            availableSegments: this.state.availableSegments
+            availableSegments: this.state.availableSegments,
+            analysisStartTime: Date.now()
         };
 
         const analysisParams = this._collectAnalysisParams();
@@ -394,9 +395,12 @@ export class CVModule {
         this.dom.folderStatus.textContent = "Sending CV instructions to server...";
 
         this.socketManager.emit('start_cv_analysis_session', { filters, analysisParams });
+
+        // Set up timeout to automatically switch to visualization if no data is received
+        this._setupCVAnalysisTimeout();
     }
 
-    _setupCVVisualization() {
+    _setupCVVisualization(reason = 'normal') {
         // Set up CV-specific visualization in the shared visualization area
         const visualizationArea = document.getElementById('visualizationArea');
         if (!visualizationArea) return;
@@ -404,7 +408,13 @@ export class CVModule {
         // Update the title for CV analysis
         const titleElement = visualizationArea.querySelector('h2');
         if (titleElement) {
-            titleElement.textContent = 'CV Data Visualization';
+            if (reason === 'timeout_no_data') {
+                titleElement.textContent = 'CV Analysis - No Data Received';
+            } else if (reason === 'timeout_with_data') {
+                titleElement.textContent = 'CV Analysis - Partial Results';
+            } else {
+                titleElement.textContent = 'CV Data Visualization';
+            }
         }
 
         // Hide SWV-specific controls and show basic visualization
@@ -476,41 +486,129 @@ export class CVModule {
         const currentElectrode = this.state.currentElectrode;
         const electrodeKey = currentElectrode !== null ? currentElectrode.toString() : 'averaged';
         const electrodeResults = this.state.cvResults[electrodeKey];
-
-        if (!electrodeResults) {
-            console.log('No CV results available for electrode:', electrodeKey);
-            return;
-        }
+        const hasResults = electrodeResults && Object.keys(electrodeResults).length > 0;
 
         // Clear individual plots container and show CV summary
         const individualPlotsContainer = document.getElementById('individualPlotsContainer');
         if (individualPlotsContainer) {
-            individualPlotsContainer.innerHTML = `
-                <div class="border rounded-lg p-4 bg-gray-50">
-                    <h4 class="text-lg font-semibold text-gray-700 mb-2">CV Analysis Summary</h4>
-                    <div class="text-sm text-gray-600">
-                        <p>Files analyzed: ${Object.keys(electrodeResults).length}</p>
-                        <p>Electrode: ${currentElectrode !== null ? currentElectrode + 1 : 'Averaged'}</p>
-                        <p>Analysis complete!</p>
+            if (hasResults) {
+                individualPlotsContainer.innerHTML = `
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">CV Analysis Summary</h4>
+                        <div class="text-sm text-gray-600">
+                            <p>Files analyzed: ${Object.keys(electrodeResults).length}</p>
+                            <p>Electrode: ${currentElectrode !== null ? currentElectrode + 1 : 'Averaged'}</p>
+                            <p>Analysis complete!</p>
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else {
+                individualPlotsContainer.innerHTML = `
+                    <div class="border rounded-lg p-4 bg-yellow-50 border-yellow-200">
+                        <h4 class="text-lg font-semibold text-yellow-700 mb-2">No CV Data Received</h4>
+                        <div class="text-sm text-yellow-600">
+                            <p>No CV analysis results were received.</p>
+                            <p><strong>Possible causes:</strong></p>
+                            <ul class="list-disc list-inside mt-2 space-y-1">
+                                <li>Incorrect file handle (check that files start with "${this.dom.params.fileHandleInput.value || 'your_handle'}")</li>
+                                <li>No matching files in the monitored directory</li>
+                                <li>Agent connection issues</li>
+                                <li>File format incompatibility</li>
+                            </ul>
+                            <p class="mt-2"><strong>Please check:</strong></p>
+                            <ul class="list-disc list-inside mt-1 space-y-1">
+                                <li>Agent is running and connected</li>
+                                <li>File handle matches your file names</li>
+                                <li>Files are in the monitored directory</li>
+                            </ul>
+                        </div>
+                    </div>
+                `;
+            }
         }
 
         // Hide trend plots as they are SWV-specific
         const trendPlotsContainer = document.getElementById('trendPlotsContainer');
         if (trendPlotsContainer) {
-            trendPlotsContainer.innerHTML = `
-                <div class="border rounded-lg p-4 bg-gray-50">
-                    <h4 class="text-lg font-semibold text-gray-700 mb-2">CV Results</h4>
-                    <div class="text-sm text-gray-600">
-                        <p>CV analysis results are available.</p>
-                        <p>Individual file analysis details have been processed.</p>
-                        <p><strong>Note:</strong> CV-specific trend visualization will be implemented in future updates.</p>
+            if (hasResults) {
+                trendPlotsContainer.innerHTML = `
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">CV Results</h4>
+                        <div class="text-sm text-gray-600">
+                            <p>CV analysis results are available.</p>
+                            <p>Individual file analysis details have been processed.</p>
+                            <p><strong>Note:</strong> CV-specific trend visualization will be implemented in future updates.</p>
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else {
+                trendPlotsContainer.innerHTML = `
+                    <div class="border rounded-lg p-4 bg-blue-50 border-blue-200">
+                        <h4 class="text-lg font-semibold text-blue-700 mb-2">Troubleshooting CV Analysis</h4>
+                        <div class="text-sm text-blue-600">
+                            <p><strong>File Naming Example:</strong></p>
+                            <p>For handle "CV_60Hz", files should be named:</p>
+                            <ul class="list-disc list-inside mt-1 space-y-1">
+                                <li>CV_60Hz_1.txt</li>
+                                <li>CV_60Hz_2.txt</li>
+                                <li>CV_60Hz_3.txt, etc.</li>
+                            </ul>
+                            <p class="mt-2"><strong>Current Settings:</strong></p>
+                            <ul class="list-disc list-inside mt-1">
+                                <li>Handle: ${this.dom.params.fileHandleInput.value || 'Not set'}</li>
+                                <li>Number of files: ${this.state.currentNumFiles || 'Not set'}</li>
+                            </ul>
+                        </div>
+                    </div>
+                `;
+            }
         }
+    }
+
+    _setupCVAnalysisTimeout() {
+        // Set up periodic checks and timeouts for CV analysis
+        const maxWaitTime = 30000; // 30 seconds maximum wait
+        const checkInterval = 2000; // Check every 2 seconds
+
+        let checkCount = 0;
+        const maxChecks = maxWaitTime / checkInterval;
+
+        const checkProgress = () => {
+            checkCount++;
+
+            if (!this.state.isAnalysisRunning) {
+                return; // Analysis already completed
+            }
+
+            // Check if we have any results
+            const hasAnyResults = Object.keys(this.state.cvResults).length > 0;
+            const timeElapsed = Date.now() - this.state.analysisStartTime;
+
+            // Force visualization switch if:
+            // 1. We have some results and 10 seconds have passed
+            // 2. 30 seconds have passed regardless of results
+            // 3. We've received data but no new data for 10 seconds
+            if (hasAnyResults && timeElapsed > 10000) {
+                console.log(`CV analysis: Force switching to visualization after ${timeElapsed}ms with results`);
+                this._completeCVAnalysis('timeout_with_data');
+                return;
+            } else if (timeElapsed > maxWaitTime) {
+                console.log(`CV analysis: Force switching to visualization after ${timeElapsed}ms timeout`);
+                this._completeCVAnalysis('timeout_no_data');
+                return;
+            }
+
+            // Check normal progress
+            this._checkCVAnalysisProgress();
+
+            // Continue checking if we haven't reached max checks
+            if (checkCount < maxChecks && this.state.isAnalysisRunning) {
+                setTimeout(checkProgress, checkInterval);
+            }
+        };
+
+        // Start checking after a brief delay
+        setTimeout(checkProgress, checkInterval);
     }
 
     _checkCVAnalysisProgress() {
@@ -532,21 +630,40 @@ export class CVModule {
 
         if (processedFiles >= minFilesForVisualization || processedFiles >= totalFiles) {
             console.log(`CV analysis progress: ${processedFiles}/${totalFiles} files processed. Switching to visualization.`);
-            this._completeCVAnalysis();
+            this._completeCVAnalysis('sufficient_data');
         }
     }
 
-    _completeCVAnalysis() {
+    _completeCVAnalysis(reason = 'normal') {
         if (!this.state.isAnalysisRunning) return;
 
         // Analysis completed, switch to visualization
         this.state.isAnalysisRunning = false;
-        this.dom.startAnalysisBtn.textContent = 'CV Analysis Complete';
+
+        // Update button text based on completion reason
+        switch (reason) {
+            case 'timeout_no_data':
+                this.dom.startAnalysisBtn.textContent = 'CV Analysis Timeout (No Data)';
+                this.dom.folderStatus.textContent = 'No CV data received. Check file handle and agent connection.';
+                break;
+            case 'timeout_with_data':
+                this.dom.startAnalysisBtn.textContent = 'CV Analysis Complete (Timeout)';
+                this.dom.folderStatus.textContent = 'CV analysis timeout reached. Showing available results.';
+                break;
+            case 'sufficient_data':
+                this.dom.startAnalysisBtn.textContent = 'CV Analysis Complete';
+                this.dom.folderStatus.textContent = 'CV analysis completed successfully.';
+                break;
+            default:
+                this.dom.startAnalysisBtn.textContent = 'CV Analysis Complete';
+                this.dom.folderStatus.textContent = 'CV analysis finished.';
+        }
+
         this.dom.startAnalysisBtn.disabled = false;
 
         // Switch to visualization area (reuse SWV's visualization area)
         this.uiManager.showScreen('visualizationArea');
-        this._setupCVVisualization();
+        this._setupCVVisualization(reason);
     }
 
     _updateCVVisualization(analysisResult) {

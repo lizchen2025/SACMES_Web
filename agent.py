@@ -280,8 +280,9 @@ def file_matches_filters(filename):
     if file_ext and not filename.endswith(file_ext): return False
     if not filename.startswith(current_filters['handle']): return False
     try:
-        # Support both old format (_60Hz_1.) and new format (_60Hz_1 or CV_60Hz_1)
-        match = re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', filename, re.IGNORECASE)
+        # Support multiple formats: _60Hz_1., _60Hz_1, CV_60Hz_1.txt, CV_60Hz_1
+        # Updated regex to handle CV prefix and be more flexible with separators
+        match = re.search(r'(?:^|_)(\d+)Hz.*?_(\d+)(?:\.|$)', filename, re.IGNORECASE)
         if not match: return False
         freq, num = int(match.group(1)), int(match.group(2))
     except (ValueError, IndexError):
@@ -349,8 +350,8 @@ def monitor_directory_loop(directory):
             if new_matching_files:
                 files_by_number = defaultdict(list)
                 for filename in new_matching_files:
-                    # Support both old format (_60Hz_1.) and new format (_60Hz_1 or CV_60Hz_1)
-                    match = re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', filename, re.IGNORECASE)
+                    # Support multiple formats: _60Hz_1., _60Hz_1, CV_60Hz_1.txt, CV_60Hz_1
+                    match = re.search(r'(?:^|_)(\d+)Hz.*?_(\d+)(?:\.|$)', filename, re.IGNORECASE)
                     if match: files_by_number[int(match.group(2))].append(filename)
                 app.log(f"✓ Found {len(new_matching_files)} new matching file(s) to process...")
                 for num in sorted(files_by_number.keys()):
@@ -476,33 +477,36 @@ def on_get_cv_file_for_preview(data):
 
     try:
         # Look for files matching the pattern in the directory
-        all_files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
-        app.log(f"📁 Found {len(all_files)} total files in directory for CV preview")
-
-        # Debug: show some example files
-        if all_files:
-            sample_files = all_files[:5]  # Show first 5 files
-            app.log(f"📝 Sample files in directory: {sample_files}")
-
-        # Filter for CV files that match the handle and have frequency pattern
         handle = filters.get('handle', '')
+        app.log(f"🔍 Looking for CV files with handle: '{handle}'")
+
+        # Optimized: directly search for files starting with handle to avoid processing all files
+        try:
+            all_files = [f for f in os.listdir(directory)
+                        if os.path.isfile(os.path.join(directory, f)) and f.startswith(handle)]
+            app.log(f"📁 Found {len(all_files)} files starting with handle '{handle}'")
+        except Exception as e:
+            app.log(f"❌ Error reading directory: {e}")
+            sio.emit('cv_data_from_agent', {
+                'status': 'error',
+                'message': f'Error reading directory: {e}',
+                'preview_mode': True
+            })
+            return
+
+        # Filter for CV files that match the pattern - optimized regex
         matching_files = []
+        import re
+        # Updated regex pattern to match both CV_60Hz_1.txt and CV_60Hz_1 formats
+        cv_pattern = re.compile(r'^' + re.escape(handle) + r'.*?_(\d+)Hz.*?_(\d+)(?:\.|$)', re.IGNORECASE)
 
         for filename in all_files:
-            app.log(f"🔍 Checking file: '{filename}' against handle: '{handle}'")
-            if filename.startswith(handle):
-                app.log(f"✓ File starts with handle: {filename}")
-                # Check if file matches CV pattern (handle_frequency_index)
-                import re
-                match = re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', filename, re.IGNORECASE)
-                app.log(f"🔍 Regex match result for '{filename}': {match}")
-                if match:
-                    matching_files.append(filename)
-                    app.log(f"✓ Found matching CV file for preview: {filename}")
-                else:
-                    app.log(f"✗ File '{filename}' doesn't match CV pattern")
-            else:
-                app.log(f"✗ File '{filename}' doesn't start with handle '{handle}'")
+            match = cv_pattern.match(filename)
+            if match:
+                matching_files.append(filename)
+                app.log(f"✓ Found matching CV file: {filename}")
+                # For preview, we only need the first file, so break early
+                break
 
         if not matching_files:
             app.log(f"⚠ No CV files found matching handle '{handle}' in directory")
