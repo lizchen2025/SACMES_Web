@@ -456,6 +456,9 @@ export class CVModule {
         // Set up electrode controls if needed
         this._setupCVElectrodeControls();
 
+        // Create comprehensive CV plots area
+        this._createCVSummaryPlots();
+
         // Display CV results
         this._displayCVResults();
     }
@@ -751,6 +754,9 @@ export class CVModule {
         console.log('✅ CV data available, creating plots...');
         // Update or create plots in real-time
         this._createCVPlotsRealTime(analysisResult, fileNum);
+
+        // Update summary plots with all data
+        this._updateCVSummaryPlots();
     }
 
     _createCVPlots(analysisResult) {
@@ -912,16 +918,47 @@ export class CVModule {
             });
         }
 
+        // Add peak marker if available
+        if (sweepData.peak_potential !== undefined && sweepData.peak_current !== undefined) {
+            traces.push({
+                x: [sweepData.peak_potential],
+                y: [sweepData.peak_current],
+                type: 'scatter',
+                mode: 'markers+text',
+                name: 'Peak',
+                marker: { color: 'red', size: 10, symbol: 'diamond' },
+                text: [`Peak: ${sweepData.peak_potential.toFixed(3)}V, ${sweepData.peak_current.toFixed(2)}µA`],
+                textposition: 'top center',
+                textfont: { size: 10 }
+            });
+        }
+
+        // Add AUC shading if available
+        if (sweepData.auc_vertices && sweepData.auc_vertices.length > 0) {
+            const aucX = sweepData.auc_vertices.map(v => v[0]);
+            const aucY = sweepData.auc_vertices.map(v => v[1]);
+            traces.push({
+                x: aucX,
+                y: aucY,
+                fill: 'tozeroy',
+                type: 'scatter',
+                mode: 'none',
+                name: 'AUC Area',
+                fillcolor: 'rgba(255, 0, 0, 0.2)',
+                line: { color: 'transparent' }
+            });
+        }
+
         const layout = {
             title: title,
             xaxis: { title: 'Potential (V)' },
-            yaxis: { title: 'Current (A)' },
+            yaxis: { title: 'Current (µA)' },
             showlegend: true,
             margin: { l: 50, r: 30, t: 50, b: 50 }
         };
 
-        // Use Plotly.redraw for real-time updates
-        Plotly.redraw(plotElement, traces, layout);
+        // Use Plotly.react for real-time updates (better than redraw)
+        Plotly.react(plotElement, traces, layout);
     }
 
     _updateCVProgressDisplay(fileNum) {
@@ -935,6 +972,134 @@ export class CVModule {
 
             titleElement.textContent = `CV Data Visualization - Processing: ${totalProcessed}/${totalFiles} files`;
         }
+    }
+
+    _createCVSummaryPlots() {
+        // Create comprehensive CV analysis plots
+        const visualizationArea = document.getElementById('visualizationArea');
+        if (!visualizationArea) return;
+
+        // Remove existing summary plots
+        const existingSummary = visualizationArea.querySelector('.cv-summary-plots');
+        if (existingSummary) existingSummary.remove();
+
+        // Create summary plots container
+        const summaryContainer = document.createElement('div');
+        summaryContainer.className = 'cv-summary-plots mt-6';
+        summaryContainer.innerHTML = `
+            <h3 class="text-lg font-semibold mb-4">CV Comprehensive Analysis</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-white p-4 rounded-lg shadow">
+                    <h4 class="text-md font-semibold mb-2">Peak Separation Trend</h4>
+                    <div id="cv-peak-separation-plot" style="height: 300px;"></div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow">
+                    <h4 class="text-md font-semibold mb-2">AUC Trend</h4>
+                    <div id="cv-auc-plot" style="height: 300px;"></div>
+                </div>
+            </div>
+        `;
+
+        visualizationArea.appendChild(summaryContainer);
+    }
+
+    _updateCVSummaryPlots() {
+        // Update summary plots with all processed data
+        const currentElectrode = this.state.currentElectrode;
+        const electrodeKey = currentElectrode !== null ? currentElectrode.toString() : 'averaged';
+        const electrodeResults = this.state.cvResults[electrodeKey];
+
+        if (!electrodeResults) return;
+
+        const fileNumbers = Object.keys(electrodeResults).map(Number).sort((a, b) => a - b);
+        const peakSeparations = [];
+        const forwardAUCs = [];
+        const reverseAUCs = [];
+
+        fileNumbers.forEach(fileNum => {
+            const result = electrodeResults[fileNum];
+            if (result && result.status === 'success') {
+                if (result.peak_separation !== undefined && result.peak_separation !== null) {
+                    peakSeparations.push({ x: fileNum, y: result.peak_separation });
+                }
+                if (result.forward && result.forward.charge !== undefined) {
+                    forwardAUCs.push({ x: fileNum, y: result.forward.charge });
+                }
+                if (result.reverse && result.reverse.charge !== undefined) {
+                    reverseAUCs.push({ x: fileNum, y: result.reverse.charge });
+                }
+            }
+        });
+
+        // Update peak separation plot
+        this._updatePeakSeparationPlot(peakSeparations);
+
+        // Update AUC plot
+        this._updateAUCPlot(forwardAUCs, reverseAUCs);
+    }
+
+    _updatePeakSeparationPlot(peakSeparations) {
+        const plotElement = document.getElementById('cv-peak-separation-plot');
+        if (!plotElement || !window.Plotly || peakSeparations.length === 0) return;
+
+        const trace = {
+            x: peakSeparations.map(p => p.x),
+            y: peakSeparations.map(p => p.y),
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: 'Peak Separation',
+            line: { color: 'blue', width: 2 },
+            marker: { size: 6 }
+        };
+
+        const layout = {
+            title: 'Peak Separation vs File Number',
+            xaxis: { title: 'File Number' },
+            yaxis: { title: 'Peak Separation (V)' },
+            margin: { l: 50, r: 30, t: 40, b: 50 }
+        };
+
+        Plotly.react(plotElement, [trace], layout);
+    }
+
+    _updateAUCPlot(forwardAUCs, reverseAUCs) {
+        const plotElement = document.getElementById('cv-auc-plot');
+        if (!plotElement || !window.Plotly) return;
+
+        const traces = [];
+
+        if (forwardAUCs.length > 0) {
+            traces.push({
+                x: forwardAUCs.map(p => p.x),
+                y: forwardAUCs.map(p => p.y),
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Forward AUC',
+                line: { color: 'red', width: 2 },
+                marker: { size: 6 }
+            });
+        }
+
+        if (reverseAUCs.length > 0) {
+            traces.push({
+                x: reverseAUCs.map(p => p.x),
+                y: reverseAUCs.map(p => p.y),
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Reverse AUC',
+                line: { color: 'green', width: 2 },
+                marker: { size: 6 }
+            });
+        }
+
+        const layout = {
+            title: 'AUC vs File Number',
+            xaxis: { title: 'File Number' },
+            yaxis: { title: 'Charge (µC)' },
+            margin: { l: 50, r: 30, t: 40, b: 50 }
+        };
+
+        Plotly.react(plotElement, traces, layout);
     }
 
     _displayCVSummary(analysisResult) {

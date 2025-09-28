@@ -179,56 +179,31 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
 
 
 def _baseline_surface_bound(potentials, currents):
-    """Calculates a linear baseline for surface-bound species."""
-    peak_idx = np.argmax(np.abs(currents))
+    """Calculates a linear baseline for surface-bound species using first-last point connection."""
+    # CV baseline: connect first and last points of the segment
+    if len(potentials) < 2:
+        return [0] * len(potentials)
 
-    # Find vertices on either side of the peak
-    vertex1_idx = np.argmin(currents[:peak_idx]) if peak_idx > 0 else 0
-    vertex2_idx_rel = np.argmin(currents[peak_idx:]) if peak_idx < len(currents) - 1 else -1
-    vertex2_idx = peak_idx + vertex2_idx_rel
+    first_potential, first_current = potentials[0], currents[0]
+    last_potential, last_current = potentials[-1], currents[-1]
 
-    v1_potential, v1_current = potentials[vertex1_idx], currents[vertex1_idx]
-    v2_potential, v2_current = potentials[vertex2_idx], currents[vertex2_idx]
-
-    # Create linear baseline
-    if v1_potential == v2_potential:  # Avoid division by zero
+    # Create linear baseline from first to last point
+    if first_potential == last_potential:  # Avoid division by zero
         slope = 0
     else:
-        slope = (v2_current - v1_current) / (v2_potential - v1_potential)
+        slope = (last_current - first_current) / (last_potential - first_potential)
 
-    intercept = v1_current - slope * v1_potential
+    intercept = first_current - slope * first_potential
     baseline_currents = [(slope * p + intercept) for p in potentials]
 
+    logger.error(f"CV baseline created: first({first_potential:.3f}V, {first_current:.3e}A) -> last({last_potential:.3f}V, {last_current:.3e}A)")
     return baseline_currents
 
 
 def _baseline_solution_phase(potentials, currents):
-    """Calculates a tangential baseline for solution-phase species."""
-    # This is a simplified version of the complex logic.
-    # It finds the point of minimum absolute current (foot of the wave)
-    # and calculates a tangent there.
-
-    foot_idx = np.argmin(np.abs(currents))
-
-    # Define a small range around the foot to calculate the slope
-    range_width = max(3, int(0.05 * len(potentials)))  # 5% of points or at least 3
-    start_idx = max(0, foot_idx - range_width // 2)
-    end_idx = min(len(potentials), foot_idx + range_width // 2)
-
-    if end_idx - start_idx < 2:  # Not enough points for slope
-        return [np.mean(currents)] * len(potentials)  # Return a flat average baseline
-
-    slope_potentials = potentials[start_idx:end_idx]
-    slope_currents = currents[start_idx:end_idx]
-
-    # Fit a line to this small section
-    coeffs = np.polyfit(slope_potentials, slope_currents, 1)
-    slope, intercept = coeffs[0], coeffs[1]
-
-    # Extrapolate this line across all potentials
-    baseline_currents = [(slope * p + intercept) for p in potentials]
-
-    return baseline_currents
+    """For solution-phase, also use first-last point connection for consistency."""
+    # For CV, both surface and solution use the same baseline approach
+    return _baseline_surface_bound(potentials, currents)
 
 
 # --- Main Public Functions ---
