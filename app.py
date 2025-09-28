@@ -1376,7 +1376,12 @@ def handle_cv_data_from_agent(data):
         else:
             # Regular analysis mode - use existing logic
             original_filename = data.get('filename', 'unknown_file.txt')
+
+            # Use global agent session for CV analysis parameters
+            session_id = 'global_agent_session'
+            live_analysis_params = get_session_data(session_id, 'cv_live_analysis_params', {})
             if not live_analysis_params:
+                logger.warning("No CV analysis parameters found in global agent session")
                 return
 
             # Get selected electrodes from analysis params
@@ -1391,14 +1396,16 @@ def handle_cv_data_from_agent(data):
                     socketio.start_background_task(target=process_cv_file_in_background,
                                                  original_filename=f"{original_filename}_electrode_{electrode_idx}",
                                                  content=file_content,
-                                                 params_for_this_file=params_for_this_file)
+                                                 params_for_this_file=params_for_this_file,
+                                                 session_id=session_id)
             else:
                 # Original averaging behavior for CV
                 params_for_this_file = live_analysis_params.copy()
                 socketio.start_background_task(target=process_cv_file_in_background,
                                              original_filename=original_filename,
                                              content=file_content,
-                                             params_for_this_file=params_for_this_file)
+                                             params_for_this_file=params_for_this_file,
+                                             session_id=session_id)
 
     except Exception as e:
         logger.error(f"Error handling CV data from agent: {e}", exc_info=True)

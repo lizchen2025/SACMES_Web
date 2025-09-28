@@ -332,8 +332,20 @@ def send_file_to_server(file_path):
             file_processing_complete = False
             pending_file_ack = filename
 
-            # Send file to server
-            sio.emit('stream_instrument_data', {'filename': filename, 'content': content})
+            # Determine if this is CV analysis based on filename pattern
+            is_cv_file = filename.startswith('CV_') or (current_filters.get('handle', '').startswith('CV_'))
+
+            if is_cv_file:
+                # Send CV file to CV handler
+                sio.emit('cv_data_from_agent', {
+                    'filename': filename,
+                    'content': content,
+                    'preview_mode': False,
+                    'status': 'success'
+                })
+            else:
+                # Send SWV file to SWV handler
+                sio.emit('stream_instrument_data', {'filename': filename, 'content': content})
 
             # Wait for server processing complete acknowledgment
             timeout_counter = 0

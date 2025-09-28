@@ -310,8 +310,9 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
 
     min_potential, max_potential = min(potentials), max(potentials)
     current_freq = analysis_params['frequency']
+    cutoff_frequency = analysis_params.get('cutoff_frequency', 500)  # Default to 500 Hz if not provided
 
-    if current_freq > analysis_params['cutoff_frequency']:
+    if current_freq > cutoff_frequency:
         xstart_val = analysis_params['high_xstart'] if analysis_params['high_xstart'] is not None else max_potential
         xend_val = analysis_params['high_xend'] if analysis_params['high_xend'] is not None else min_potential
     else:
