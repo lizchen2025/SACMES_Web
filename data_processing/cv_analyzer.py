@@ -71,18 +71,18 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
             - segment_dictionary (dict): A dictionary mapping segment numbers to their data.
               e.g., {1: {'indices': [...], 'potentials': [...], 'currents': [...]}}
     """
-    logger.info(f"=== CV Data Reading Start ===")
-    logger.info(f"File path: {file_path}")
-    logger.info(f"Selected electrode: {selected_electrode}")
-    logger.info(f"Params available: {list(params.keys())}")
-    logger.info(f"Required params check:")
-    logger.info(f"  - voltage_column: {params.get('voltage_column', 'MISSING')}")
-    logger.info(f"  - current_column: {params.get('current_column', 'MISSING')}")
-    logger.info(f"  - delimiter: {params.get('delimiter', 'MISSING')}")
+    logger.error(f"=== CV Data Reading Start ===")  # Use ERROR level to ensure it appears
+    logger.error(f"File path: {file_path}")
+    logger.error(f"Selected electrode: {selected_electrode}")
+    logger.error(f"Params available: {list(params.keys())}")
+    logger.error(f"Required params check:")
+    logger.error(f"  - voltage_column: {params.get('voltage_column', 'MISSING')}")
+    logger.error(f"  - current_column: {params.get('current_column', 'MISSING')}")
+    logger.error(f"  - delimiter: {params.get('delimiter', 'MISSING')}")
 
     delimiter_map = {1: " ", 2: "\t", 3: ","}
     delimiter_char = delimiter_map.get(params.get('delimiter', 1), " ")
-    logger.info(f"Using delimiter: '{delimiter_char}'")
+    logger.error(f"Using delimiter: '{delimiter_char}'")
 
     # Determine electrode index to use
     electrode_idx = selected_electrode if selected_electrode is not None else params.get('selected_electrode', 0)
@@ -120,26 +120,36 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
     else:
         # Original single-electrode or averaged behavior
         try:
-            logger.info(f"Attempting to read CV data using numpy.loadtxt")
+            logger.error(f"Attempting to read CV data using numpy.loadtxt")
 
-            # Check for required parameters
+            # Check for required parameters and convert to int with defaults
             required_params = ['voltage_column', 'current_column', 'spacing_index']
             missing_params = [p for p in required_params if p not in params]
             if missing_params:
                 logger.error(f"Missing required parameters: {missing_params}")
                 return [], [], {}
 
-            logger.info(f"Parameters for reading:")
-            logger.info(f"  - voltage_column (0-based): {params['voltage_column'] - 1}")
-            logger.info(f"  - current_column (0-based): {params['current_column'] - 1 + electrode_idx * params['spacing_index']}")
-            logger.info(f"  - electrode_idx: {electrode_idx}")
-            logger.info(f"  - spacing_index: {params['spacing_index']}")
+            # Convert parameters to int and provide defaults for None values
+            try:
+                voltage_column = int(params['voltage_column']) if params['voltage_column'] is not None else 1
+                current_column = int(params['current_column']) if params['current_column'] is not None else 2
+                spacing_index = int(params['spacing_index']) if params['spacing_index'] is not None else 1
+            except (ValueError, TypeError) as ve:
+                logger.error(f"CV parameter conversion error: {ve}")
+                logger.error(f"Raw parameters: voltage_column={params['voltage_column']}, current_column={params['current_column']}, spacing_index={params['spacing_index']}")
+                return [], [], {}
+
+            logger.error(f"Parameters for reading:")
+            logger.error(f"  - voltage_column (0-based): {voltage_column - 1}")
+            logger.error(f"  - current_column (0-based): {current_column - 1 + electrode_idx * spacing_index}")
+            logger.error(f"  - electrode_idx: {electrode_idx}")
+            logger.error(f"  - spacing_index: {spacing_index}")
 
             data = np.loadtxt(file_path, delimiter=delimiter_char, usecols=(
-            params['voltage_column'] - 1, params['current_column'] - 1 + electrode_idx * params['spacing_index']))
+            voltage_column - 1, current_column - 1 + electrode_idx * spacing_index))
             potentials = data[:, 0].tolist()
             currents = (data[:, 1] * 1e6).tolist()  # Convert to microAmps
-            logger.info(f"CV data read successfully: {len(potentials)} data points")
+            logger.error(f"CV data read successfully: {len(potentials)} data points")
         except KeyError as ke:
             logger.error(f"CV Reader failed - missing parameter: {ke}")
             return [], [], {}
