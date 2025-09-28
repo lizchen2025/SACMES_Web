@@ -184,6 +184,11 @@ export class CVModule {
 
     _requestPreviewFile() {
         const analysisParams = this._collectAnalysisParams();
+
+        // For CV preview, we don't require a specific file extension
+        // Override file_extension to be empty to match files without extensions
+        analysisParams.file_extension = '';
+
         const filters = {
             handle: this.dom.params.fileHandleInput.value.trim(),
             range_start: 1,
@@ -191,7 +196,7 @@ export class CVModule {
         };
 
         console.log('Requesting CV preview with filters:', filters);
-        console.log('Analysis params:', analysisParams);
+        console.log('Analysis params (modified for preview):', analysisParams);
 
         this.dom.segmentStatus.textContent = 'Loading CV preview...';
         this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';

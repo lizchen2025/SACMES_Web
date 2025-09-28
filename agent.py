@@ -479,18 +479,30 @@ def on_get_cv_file_for_preview(data):
         all_files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
         app.log(f"📁 Found {len(all_files)} total files in directory for CV preview")
 
+        # Debug: show some example files
+        if all_files:
+            sample_files = all_files[:5]  # Show first 5 files
+            app.log(f"📝 Sample files in directory: {sample_files}")
+
         # Filter for CV files that match the handle and have frequency pattern
         handle = filters.get('handle', '')
         matching_files = []
 
         for filename in all_files:
+            app.log(f"🔍 Checking file: '{filename}' against handle: '{handle}'")
             if filename.startswith(handle):
+                app.log(f"✓ File starts with handle: {filename}")
                 # Check if file matches CV pattern (handle_frequency_index)
                 import re
                 match = re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', filename, re.IGNORECASE)
+                app.log(f"🔍 Regex match result for '{filename}': {match}")
                 if match:
                     matching_files.append(filename)
                     app.log(f"✓ Found matching CV file for preview: {filename}")
+                else:
+                    app.log(f"✗ File '{filename}' doesn't match CV pattern")
+            else:
+                app.log(f"✗ File '{filename}' doesn't start with handle '{handle}'")
 
         if not matching_files:
             app.log(f"⚠ No CV files found matching handle '{handle}' in directory")
