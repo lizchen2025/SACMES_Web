@@ -200,13 +200,21 @@ export class CVModule {
                     const fileNum = match[1];
                     this.state.cvResults[electrodeKey][fileNum] = data.cv_analysis;
 
-                    // Check if we have enough files to show results
-                    this._checkCVAnalysisProgress();
-                }
+                    // Switch to visualization on first result (like SWV)
+                    if (this.state.currentScreen !== 'visualization' && Object.keys(this.state.cvResults[electrodeKey]).length === 1) {
+                        console.log('First CV result received - switching to visualization');
+                        this.state.currentScreen = 'visualization';
+                        this.uiManager.showScreen('visualizationArea');
+                        this._setupCVVisualization();
+                    }
 
-                // Update visualization if this is the current electrode
-                if (data.electrode_index === this.state.currentElectrode) {
-                    this._updateCVVisualization(data.cv_analysis);
+                    // Update visualization in real-time if this is the current electrode
+                    if (data.electrode_index === this.state.currentElectrode && this.state.currentScreen === 'visualization') {
+                        this._updateCVVisualizationRealTime(data.cv_analysis, fileNum);
+                    }
+
+                    // Check if we have enough files to complete analysis
+                    this._checkCVAnalysisProgress();
                 }
             }
         });
@@ -637,16 +645,15 @@ export class CVModule {
         const processedFiles = Object.keys(electrodeResults).length;
         const totalFiles = this.state.currentNumFiles;
 
-        // For CV analysis, wait for all files to be processed or at least 80% completion
-        const minFilesForVisualization = Math.max(Math.ceil(totalFiles * 0.8), totalFiles - 5);
+        // For CV analysis, only complete when ALL files are processed (like SWV)
+        // This allows real-time visualization during analysis
+        console.log(`CV analysis progress: ${processedFiles}/${totalFiles} files processed.`);
 
         if (processedFiles >= totalFiles) {
-            console.log(`CV analysis complete: ${processedFiles}/${totalFiles} files processed. Switching to visualization.`);
+            console.log(`CV analysis complete: ${processedFiles}/${totalFiles} files processed.`);
             this._completeCVAnalysis('complete');
-        } else if (processedFiles >= minFilesForVisualization) {
-            console.log(`CV analysis near complete: ${processedFiles}/${totalFiles} files processed. Switching to visualization.`);
-            this._completeCVAnalysis('sufficient_data');
         }
+        // Note: No early completion - let analysis run to completion like SWV
     }
 
     _completeCVAnalysis(reason = 'normal') {
@@ -692,6 +699,19 @@ export class CVModule {
         // Create CV visualization plots
         this._createCVPlots(analysisResult);
         this._displayCVSummary(analysisResult);
+    }
+
+    _updateCVVisualizationRealTime(analysisResult, fileNum) {
+        console.log(`CV Real-time Update: File ${fileNum}`, analysisResult);
+
+        if (!analysisResult || (!analysisResult.forward && !analysisResult.reverse)) {
+            console.log('No CV data to visualize in real-time update');
+            return;
+        }
+
+        // Update or create plots in real-time
+        this._createCVPlotsRealTime(analysisResult, fileNum);
+        this._updateCVProgressDisplay(fileNum);
     }
 
     _createCVPlots(analysisResult) {
@@ -791,6 +811,91 @@ export class CVModule {
         }, 100);
 
         return plotDiv;
+    }
+
+    _createCVPlotsRealTime(analysisResult, fileNum) {
+        // Update existing plots or create them if they don't exist
+        const forwardPlotElement = document.getElementById('cv-forward-plot');
+        const reversePlotElement = document.getElementById('cv-reverse-plot');
+
+        // If plots don't exist yet, create them
+        if (!forwardPlotElement || !reversePlotElement) {
+            this._createCVPlots(analysisResult);
+            return;
+        }
+
+        // Update forward plot
+        if (analysisResult.forward && analysisResult.forward.potentials && forwardPlotElement) {
+            this._updateSingleCVPlot(forwardPlotElement, analysisResult.forward, `Forward Sweep (File ${fileNum})`);
+        }
+
+        // Update reverse plot
+        if (analysisResult.reverse && analysisResult.reverse.potentials && reversePlotElement) {
+            this._updateSingleCVPlot(reversePlotElement, analysisResult.reverse, `Reverse Sweep (File ${fileNum})`);
+        }
+    }
+
+    _updateSingleCVPlot(plotElement, sweepData, title) {
+        if (!plotElement || !window.Plotly) return;
+
+        const traces = [
+            {
+                x: sweepData.potentials,
+                y: sweepData.currents,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Raw Data',
+                line: { color: 'blue', width: 2 }
+            }
+        ];
+
+        // Add corrected data if available
+        if (sweepData.corrected_currents) {
+            traces.push({
+                x: sweepData.potentials,
+                y: sweepData.corrected_currents,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Baseline Corrected',
+                line: { color: 'red', width: 2 }
+            });
+        }
+
+        // Add baseline if available
+        if (sweepData.baseline) {
+            traces.push({
+                x: sweepData.potentials,
+                y: sweepData.baseline,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Baseline',
+                line: { color: 'gray', width: 1, dash: 'dash' }
+            });
+        }
+
+        const layout = {
+            title: title,
+            xaxis: { title: 'Potential (V)' },
+            yaxis: { title: 'Current (A)' },
+            showlegend: true,
+            margin: { l: 50, r: 30, t: 50, b: 50 }
+        };
+
+        // Use Plotly.redraw for real-time updates
+        Plotly.redraw(plotElement, traces, layout);
+    }
+
+    _updateCVProgressDisplay(fileNum) {
+        // Update progress display to show current file being processed
+        const titleElement = document.querySelector('#visualizationArea h2');
+        if (titleElement) {
+            const currentElectrode = this.state.currentElectrode;
+            const electrodeKey = currentElectrode !== null ? currentElectrode.toString() : 'averaged';
+            const totalProcessed = Object.keys(this.state.cvResults[electrodeKey] || {}).length;
+            const totalFiles = this.state.currentNumFiles;
+
+            titleElement.textContent = `CV Data Visualization - Processing: ${totalProcessed}/${totalFiles} files`;
+        }
     }
 
     _displayCVSummary(analysisResult) {
