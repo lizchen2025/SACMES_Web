@@ -451,6 +451,89 @@ def on_file_validation_error(data):
     app.log(f"[SECURITY] Reason: {error_message}")
 
 
+@sio.on('get_cv_file_for_preview')
+def on_get_cv_file_for_preview(data):
+    """Handle request for CV preview file from server"""
+    global current_filters
+    app.log(f"✓ Received CV preview request from server: {data}")
+
+    filters = data.get('filters', {})
+    analysis_params = data.get('analysisParams', {})
+    preview_mode = data.get('preview_mode', True)
+
+    app.log(f"✓ CV Preview filters: {filters}")
+
+    # Get directory and find the first matching file for preview
+    directory = app.watch_directory.get()
+    if directory == "No folder selected":
+        app.log("⚠ ERROR: No folder selected for monitoring!")
+        sio.emit('cv_data_from_agent', {
+            'status': 'error',
+            'message': 'No folder selected',
+            'preview_mode': True
+        })
+        return
+
+    try:
+        # Look for files matching the pattern in the directory
+        all_files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+        app.log(f"📁 Found {len(all_files)} total files in directory for CV preview")
+
+        # Filter for CV files that match the handle and have frequency pattern
+        handle = filters.get('handle', '')
+        matching_files = []
+
+        for filename in all_files:
+            if filename.startswith(handle):
+                # Check if file matches CV pattern (handle_frequency_index)
+                import re
+                match = re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', filename, re.IGNORECASE)
+                if match:
+                    matching_files.append(filename)
+                    app.log(f"✓ Found matching CV file for preview: {filename}")
+
+        if not matching_files:
+            app.log(f"⚠ No CV files found matching handle '{handle}' in directory")
+            sample_files = all_files[:3] if all_files else []
+            app.log(f"📝 Sample files in directory: {sample_files}")
+            sio.emit('cv_data_from_agent', {
+                'status': 'error',
+                'message': f'No CV files found matching handle "{handle}"',
+                'preview_mode': True
+            })
+            return
+
+        # Use the first matching file for preview
+        preview_file = matching_files[0]
+        file_path = os.path.join(directory, preview_file)
+        app.log(f"📖 Reading CV preview file: {preview_file}")
+
+        # Read file content
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+
+        app.log(f"✓ Successfully read CV preview file, content length: {len(content)} characters")
+
+        # Send the content back to server for preview processing
+        sio.emit('cv_data_from_agent', {
+            'filename': preview_file,
+            'content': content,
+            'analysisParams': analysis_params,
+            'preview_mode': True,
+            'status': 'success'
+        })
+
+        app.log(f"📤 Sent CV preview data to server: {preview_file}")
+
+    except Exception as e:
+        app.log(f"❌ Error getting CV preview file: {e}")
+        sio.emit('cv_data_from_agent', {
+            'status': 'error',
+            'message': str(e),
+            'preview_mode': True
+        })
+
+
 @sio.on('consent_logged')
 def on_consent_logged(data):
     status = data.get('status', 'unknown')

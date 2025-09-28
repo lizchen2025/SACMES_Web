@@ -1185,6 +1185,8 @@ def handle_cv_instrument_data(data):
 def handle_get_cv_preview(data):
     """Get CV preview file from agent for segment selection"""
     try:
+        logger.info(f"CV Preview requested from client: {request.sid}")
+
         # Get agent_sid from the global agent tracker
         agent_sid = agent_session_tracker.get('agent_sid')
 
@@ -1196,13 +1198,17 @@ def handle_get_cv_preview(data):
                 logger.info(f"Retrieved agent SID from storage for CV preview: {agent_sid}")
 
         if not agent_sid:
+            logger.warning("No agent connected for CV preview request")
             emit('cv_preview_response', {'status': 'error', 'message': 'Agent not connected'})
             return
 
         filters = data.get('filters', {})
         analysis_params = data.get('analysisParams', {})
+        logger.info(f"CV Preview filters: {filters}")
+        logger.info(f"CV Preview params: {analysis_params}")
 
         # Request first file from agent for preview
+        logger.info(f"Sending get_cv_file_for_preview to agent {agent_sid}")
         socketio.emit('get_cv_file_for_preview', {
             'filters': filters,
             'analysisParams': analysis_params,
@@ -1250,23 +1256,39 @@ def handle_get_cv_segments(data):
 @socketio.on('cv_data_from_agent')
 def handle_cv_data_from_agent(data):
     """Handle CV data from agent - both preview and analysis modes"""
+    logger.info(f"Received cv_data_from_agent from {request.sid}")
+
     # Get agent_sid from the global agent tracker
     agent_sid = agent_session_tracker.get('agent_sid')
     if request.sid != agent_sid:
+        logger.warning(f"CV data received from non-agent SID: {request.sid}, expected: {agent_sid}")
         return
 
     try:
         preview_mode = data.get('preview_mode', False)
         file_content = data.get('content', '')
         analysis_params = data.get('analysisParams', {})
+        filename = data.get('filename', 'unknown')
+        status = data.get('status', 'unknown')
+
+        logger.info(f"CV data - Preview mode: {preview_mode}, Filename: {filename}, Status: {status}")
+        logger.info(f"Content length: {len(file_content)}")
+
+        if status == 'error':
+            error_message = data.get('message', 'Unknown error')
+            logger.error(f"Agent reported CV error: {error_message}")
+            emit('cv_preview_response', {'status': 'error', 'message': error_message})
+            return
 
         if preview_mode:
             # This is for segment selection preview
+            logger.info("Processing CV preview data")
             if file_content:
                 # Parse the CV data for preview visualization
                 import tempfile
                 from data_processing.data_reader import ReadData
 
+                logger.info("Creating temporary file for CV preview parsing")
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
                     temp_file.write(file_content)
                     temp_path = temp_file.name
@@ -1278,6 +1300,8 @@ def handle_cv_data_from_agent(data):
                     spacing_index = analysis_params.get('spacing_index', 1)
                     delimiter = analysis_params.get('delimiter', 1)
                     file_extension = analysis_params.get('file_extension', '.txt')
+
+                    logger.info(f"CV Preview parsing params: voltage_col={voltage_column}, current_col={current_column}, spacing={spacing_index}, delimiter={delimiter}")
 
                     # Read data for first electrode or averaged
                     data_result = ReadData(
@@ -1291,7 +1315,9 @@ def handle_cv_data_from_agent(data):
                         selected_electrodes=None  # Use averaging for preview
                     )
 
+                    logger.info(f"CV data parsing result: {type(data_result)}")
                     if data_result and 'voltage' in data_result and 'current' in data_result:
+                        logger.info(f"CV data parsed successfully: voltage points={len(data_result['voltage'])}, current points={len(data_result['current'])}")
                         # Send the CV data for preview visualization
                         emit('cv_preview_response', {
                             'status': 'success',
@@ -1301,7 +1327,9 @@ def handle_cv_data_from_agent(data):
                                 'current': data_result['current']
                             }
                         })
+                        logger.info("Sent CV preview response to client")
                     else:
+                        logger.error(f"CV data parsing failed: {data_result}")
                         emit('cv_preview_response', {
                             'status': 'error',
                             'message': 'Could not parse CV data for preview'
