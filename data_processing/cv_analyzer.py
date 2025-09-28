@@ -282,8 +282,24 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
         # Step 2: Analyze forward and reverse segments individually
         for scan_type in ["forward", "reverse"]:
             segment_num = params.get(f'{scan_type}_segment')
+
+            # If no segment specified, try to auto-detect based on scan type
             if not segment_num or segment_num not in segment_dictionary:
-                continue
+                available_segments = list(segment_dictionary.keys())
+                if not available_segments:
+                    continue
+
+                # Auto-assign segments: forward = 1st segment, reverse = 2nd segment (or 1st if only one)
+                if scan_type == "forward":
+                    segment_num = available_segments[0] if available_segments else None
+                elif scan_type == "reverse":
+                    segment_num = available_segments[1] if len(available_segments) > 1 else available_segments[0]
+
+                logger.info(f"CV Auto-assigned {scan_type} segment: {segment_num} from available segments: {available_segments}")
+
+                if not segment_num or segment_num not in segment_dictionary:
+                    logger.warning(f"CV {scan_type} segment {segment_num} not found in segment dictionary")
+                    continue
 
             segment = segment_dictionary[segment_num]
 

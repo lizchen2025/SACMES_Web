@@ -704,14 +704,26 @@ export class CVModule {
     _updateCVVisualizationRealTime(analysisResult, fileNum) {
         console.log(`CV Real-time Update: File ${fileNum}`, analysisResult);
 
-        if (!analysisResult || (!analysisResult.forward && !analysisResult.reverse)) {
-            console.log('No CV data to visualize in real-time update');
+        // Always update progress display, even if there's no data to plot
+        this._updateCVProgressDisplay(fileNum);
+
+        if (!analysisResult) {
+            console.log('No analysis result for real-time update');
+            return;
+        }
+
+        // Check if we have any CV data to visualize
+        const hasForward = analysisResult.forward && Object.keys(analysisResult.forward).length > 0;
+        const hasReverse = analysisResult.reverse && Object.keys(analysisResult.reverse).length > 0;
+
+        if (!hasForward && !hasReverse) {
+            console.log('No CV forward/reverse data to visualize in real-time update');
+            console.log('Analysis result structure:', analysisResult);
             return;
         }
 
         // Update or create plots in real-time
         this._createCVPlotsRealTime(analysisResult, fileNum);
-        this._updateCVProgressDisplay(fileNum);
     }
 
     _createCVPlots(analysisResult) {
