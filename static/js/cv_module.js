@@ -33,6 +33,8 @@ export class CVModule {
             visualization: {
                 forwardSegmentInput: document.getElementById('cvForwardSegmentInput'),
                 reverseSegmentInput: document.getElementById('cvReverseSegmentInput'),
+                peakMinVoltageInput: document.getElementById('cvPeakMinVoltageInput'),
+                peakMaxVoltageInput: document.getElementById('cvPeakMaxVoltageInput'),
             },
             settings: {
                 voltageColumnInput: document.getElementById('cvVoltageColumnInput'),
@@ -197,12 +199,36 @@ export class CVModule {
                 if (match) {
                     const fileNum = match[1];
                     this.state.cvResults[electrodeKey][fileNum] = data.cv_analysis;
+
+                    // Check if we have enough files to show results
+                    this._checkCVAnalysisProgress();
                 }
 
                 // Update visualization if this is the current electrode
                 if (data.electrode_index === this.state.currentElectrode) {
                     this._updateCVVisualization(data.cv_analysis);
                 }
+            }
+        });
+
+        // Add handler for CV analysis completion
+        this.socketManager.on('cv_analysis_complete', (data) => {
+            if (data.status === 'success') {
+                // Analysis completed successfully, switch to visualization
+                this.state.isAnalysisRunning = false;
+                this.dom.startAnalysisBtn.textContent = 'CV Analysis Complete';
+                this.dom.startAnalysisBtn.disabled = false;
+
+                // Switch to visualization area (reuse SWV's visualization area)
+                this.uiManager.showScreen('visualizationArea');
+                this._setupCVVisualization();
+            } else {
+                // Analysis failed
+                this.state.isAnalysisRunning = false;
+                this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
+                this.dom.startAnalysisBtn.disabled = false;
+                this.dom.segmentStatus.textContent = `Analysis failed: ${data.message}`;
+                this.dom.segmentStatus.className = 'text-sm text-red-600 mt-2';
             }
         });
     }
@@ -307,6 +333,8 @@ export class CVModule {
             high_voltage: parseFloat(this.dom.params.highVoltageInput.value),
             mass_transport: this.dom.params.massTransportInput.value,
             SelectedOptions: this.dom.params.analysisOptionsInput.value,
+            peak_min_voltage: this.dom.visualization.peakMinVoltageInput.value === '' ? null : parseFloat(this.dom.visualization.peakMinVoltageInput.value),
+            peak_max_voltage: this.dom.visualization.peakMaxVoltageInput.value === '' ? null : parseFloat(this.dom.visualization.peakMaxVoltageInput.value),
             voltage_column: parseInt(this.dom.settings.voltageColumnInput.value),
             current_column: parseInt(this.dom.settings.currentColumnInput.value),
             spacing_index: parseInt(this.dom.settings.spacingIndexInput.value),
@@ -366,6 +394,159 @@ export class CVModule {
         this.dom.folderStatus.textContent = "Sending CV instructions to server...";
 
         this.socketManager.emit('start_cv_analysis_session', { filters, analysisParams });
+    }
+
+    _setupCVVisualization() {
+        // Set up CV-specific visualization in the shared visualization area
+        const visualizationArea = document.getElementById('visualizationArea');
+        if (!visualizationArea) return;
+
+        // Update the title for CV analysis
+        const titleElement = visualizationArea.querySelector('h2');
+        if (titleElement) {
+            titleElement.textContent = 'CV Data Visualization';
+        }
+
+        // Hide SWV-specific controls and show basic visualization
+        const adjustmentControls = document.getElementById('adjustmentControls');
+        const exportDataBtn = document.getElementById('exportDataBtn');
+        const backToSWVBtn = document.getElementById('backToSWVBtn');
+
+        if (adjustmentControls) adjustmentControls.classList.add('hidden');
+        if (exportDataBtn) exportDataBtn.classList.add('hidden');
+
+        // Change back button to go to CV settings
+        if (backToSWVBtn) {
+            backToSWVBtn.textContent = 'Back to CV Settings';
+            backToSWVBtn.onclick = () => {
+                this.state.currentScreen = 'settings';
+                this.uiManager.showScreen('cvAnalysisScreen');
+                this.state.isAnalysisRunning = false;
+            };
+        }
+
+        // Set up electrode controls if needed
+        this._setupCVElectrodeControls();
+
+        // Display CV results
+        this._displayCVResults();
+    }
+
+    _setupCVElectrodeControls() {
+        const electrodeControls = document.getElementById('electrodeControls');
+        if (!electrodeControls) return;
+
+        // Clear existing buttons
+        const existingButtons = electrodeControls.querySelectorAll('.electrode-btn');
+        existingButtons.forEach(btn => btn.remove());
+
+        // Add "Averaged" button if no specific electrodes selected
+        if (this.state.selectedElectrodes.length === 0) {
+            const avgBtn = document.createElement('button');
+            avgBtn.className = 'electrode-btn px-4 py-2 text-sm font-medium rounded-lg border bg-blue-500 text-white';
+            avgBtn.textContent = 'Averaged';
+            avgBtn.disabled = true; // Current selection
+            electrodeControls.appendChild(avgBtn);
+        } else {
+            // Add buttons for each selected electrode
+            this.state.selectedElectrodes.forEach(electrodeIdx => {
+                const btn = document.createElement('button');
+                btn.className = `electrode-btn px-4 py-2 text-sm font-medium rounded-lg border ${
+                    electrodeIdx === this.state.currentElectrode
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`;
+                btn.textContent = `Electrode ${electrodeIdx + 1}`;  // Display as 1-based
+                btn.onclick = () => this._switchCVElectrode(electrodeIdx);
+                electrodeControls.appendChild(btn);
+            });
+        }
+    }
+
+    _switchCVElectrode(electrodeIdx) {
+        if (this.state.currentElectrode === electrodeIdx) return;
+
+        this.state.currentElectrode = electrodeIdx;
+        this._setupCVElectrodeControls(); // Update button states
+        this._displayCVResults(); // Refresh plots with new electrode data
+    }
+
+    _displayCVResults() {
+        // Display CV analysis results in the visualization area
+        const currentElectrode = this.state.currentElectrode;
+        const electrodeKey = currentElectrode !== null ? currentElectrode.toString() : 'averaged';
+        const electrodeResults = this.state.cvResults[electrodeKey];
+
+        if (!electrodeResults) {
+            console.log('No CV results available for electrode:', electrodeKey);
+            return;
+        }
+
+        // Clear individual plots container and show CV summary
+        const individualPlotsContainer = document.getElementById('individualPlotsContainer');
+        if (individualPlotsContainer) {
+            individualPlotsContainer.innerHTML = `
+                <div class="border rounded-lg p-4 bg-gray-50">
+                    <h4 class="text-lg font-semibold text-gray-700 mb-2">CV Analysis Summary</h4>
+                    <div class="text-sm text-gray-600">
+                        <p>Files analyzed: ${Object.keys(electrodeResults).length}</p>
+                        <p>Electrode: ${currentElectrode !== null ? currentElectrode + 1 : 'Averaged'}</p>
+                        <p>Analysis complete!</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Hide trend plots as they are SWV-specific
+        const trendPlotsContainer = document.getElementById('trendPlotsContainer');
+        if (trendPlotsContainer) {
+            trendPlotsContainer.innerHTML = `
+                <div class="border rounded-lg p-4 bg-gray-50">
+                    <h4 class="text-lg font-semibold text-gray-700 mb-2">CV Results</h4>
+                    <div class="text-sm text-gray-600">
+                        <p>CV analysis results are available.</p>
+                        <p>Individual file analysis details have been processed.</p>
+                        <p><strong>Note:</strong> CV-specific trend visualization will be implemented in future updates.</p>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    _checkCVAnalysisProgress() {
+        // Check if we have processed enough files to show results
+        if (!this.state.isAnalysisRunning) return;
+
+        const currentElectrode = this.state.currentElectrode;
+        const electrodeKey = currentElectrode !== null ? currentElectrode.toString() : 'averaged';
+        const electrodeResults = this.state.cvResults[electrodeKey];
+
+        if (!electrodeResults) return;
+
+        const processedFiles = Object.keys(electrodeResults).length;
+        const totalFiles = this.state.currentNumFiles;
+
+        // If we've processed at least 3 files or 20% of total files (whichever is smaller),
+        // or if we've processed all files, switch to visualization
+        const minFilesForVisualization = Math.min(3, Math.ceil(totalFiles * 0.2));
+
+        if (processedFiles >= minFilesForVisualization || processedFiles >= totalFiles) {
+            console.log(`CV analysis progress: ${processedFiles}/${totalFiles} files processed. Switching to visualization.`);
+            this._completeCVAnalysis();
+        }
+    }
+
+    _completeCVAnalysis() {
+        if (!this.state.isAnalysisRunning) return;
+
+        // Analysis completed, switch to visualization
+        this.state.isAnalysisRunning = false;
+        this.dom.startAnalysisBtn.textContent = 'CV Analysis Complete';
+        this.dom.startAnalysisBtn.disabled = false;
+
+        // Switch to visualization area (reuse SWV's visualization area)
+        this.uiManager.showScreen('visualizationArea');
+        this._setupCVVisualization();
     }
 
     _updateCVVisualization(analysisResult) {

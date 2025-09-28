@@ -299,7 +299,26 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
                 low_voltage = convert_units(low_voltage, voltage_units, 'base')
                 high_voltage = convert_units(high_voltage, voltage_units, 'base')
 
+            # Apply peak detection range filtering if specified (additional user-defined range)
+            peak_min_voltage = params.get('peak_min_voltage')
+            peak_max_voltage = params.get('peak_max_voltage')
+
+            # Convert peak range limits to base units if specified
+            if peak_min_voltage is not None and voltage_units != 'V':
+                peak_min_voltage = convert_units(peak_min_voltage, voltage_units, 'base')
+            if peak_max_voltage is not None and voltage_units != 'V':
+                peak_max_voltage = convert_units(peak_max_voltage, voltage_units, 'base')
+
+            # First apply the general voltage range
             voltage_mask = (p_raw >= low_voltage) & (p_raw <= high_voltage)
+
+            # Then apply peak detection range if specified
+            if peak_min_voltage is not None or peak_max_voltage is not None:
+                if peak_min_voltage is not None:
+                    voltage_mask = voltage_mask & (p_raw >= peak_min_voltage)
+                if peak_max_voltage is not None:
+                    voltage_mask = voltage_mask & (p_raw <= peak_max_voltage)
+
             p_adj, i_adj = p_raw[voltage_mask].tolist(), i_raw[voltage_mask].tolist()
 
             if len(p_adj) < 3:
