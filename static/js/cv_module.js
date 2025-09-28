@@ -99,12 +99,16 @@ export class CVModule {
         });
 
         this.socketManager.on('cv_preview_response', (data) => {
+            console.log('CV Preview Response received:', data);
             if (data.status === 'success') {
+                console.log('CV preview success, cv_data:', data.cv_data);
+                console.log('Content length:', data.content ? data.content.length : 'No content');
                 this.state.previewFileContent = data.content;
                 this._displayCVPreview(data.cv_data);
                 this.dom.segmentStatus.textContent = 'CV preview loaded. Click "Detect Segments" to analyze.';
                 this.dom.segmentStatus.className = 'text-sm text-green-600 mt-2';
             } else {
+                console.error('CV preview error:', data.message);
                 this.dom.segmentStatus.textContent = `Error loading preview: ${data.message}`;
                 this.dom.segmentStatus.className = 'text-sm text-red-600 mt-2';
             }
@@ -186,10 +190,14 @@ export class CVModule {
             range_end: 1 // Just get the first file for preview
         };
 
+        console.log('Requesting CV preview with filters:', filters);
+        console.log('Analysis params:', analysisParams);
+
         this.dom.segmentStatus.textContent = 'Loading CV preview...';
         this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
 
         // Request the first file for preview
+        console.log('Emitting get_cv_preview event');
         this.socketManager.emit('get_cv_preview', { filters, analysisParams });
     }
 
@@ -315,7 +323,14 @@ export class CVModule {
 
     _displayCVPreview(cvData) {
         // Use PlotlyPlotter to display CV preview
+        console.log('_displayCVPreview called with:', cvData);
+        console.log('cvPreviewPlot element:', this.dom.cvPreviewPlot);
+
         if (cvData && cvData.voltage && cvData.current) {
+            console.log('CV data valid - voltage points:', cvData.voltage.length, 'current points:', cvData.current.length);
+            console.log('Voltage range:', Math.min(...cvData.voltage), 'to', Math.max(...cvData.voltage));
+            console.log('Current range:', Math.min(...cvData.current), 'to', Math.max(...cvData.current));
+
             const plotData = [{
                 x: cvData.voltage,
                 y: cvData.current,
@@ -333,7 +348,21 @@ export class CVModule {
                 showlegend: false
             };
 
-            Plotly.newPlot(this.dom.cvPreviewPlot, plotData, layout, { responsive: true });
+            console.log('About to call Plotly.newPlot with:', plotData, layout);
+            try {
+                Plotly.newPlot(this.dom.cvPreviewPlot, plotData, layout, { responsive: true });
+                console.log('Plotly.newPlot completed successfully');
+            } catch (error) {
+                console.error('Error calling Plotly.newPlot:', error);
+            }
+        } else {
+            console.error('CV data invalid or missing:', {
+                cvData: !!cvData,
+                voltage: cvData ? !!cvData.voltage : false,
+                current: cvData ? !!cvData.current : false,
+                voltageLength: cvData && cvData.voltage ? cvData.voltage.length : 'N/A',
+                currentLength: cvData && cvData.current ? cvData.current.length : 'N/A'
+            });
         }
     }
 
