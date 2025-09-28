@@ -7,6 +7,8 @@ export class CVModule {
         this.socketManager = socketManager;
         this.uiManager = uiManager;
 
+        console.log('Initializing CV Module');
+
         this.dom = {
             cvBtn: document.getElementById('cvBtn'),
             backToWelcomeBtn: document.getElementById('backToWelcomeFromCV'),
@@ -56,6 +58,18 @@ export class CVModule {
             currentScreen: 'settings' // 'settings', 'visualization', 'analysis'
         };
 
+        // Check if critical DOM elements exist
+        console.log('CV Module DOM elements check:');
+        console.log('cvPreviewPlot element:', this.dom.cvPreviewPlot);
+        console.log('segmentStatus element:', this.dom.segmentStatus);
+
+        if (!this.dom.cvPreviewPlot) {
+            console.error('❌ cvPreviewPlot element not found!');
+        }
+        if (!this.dom.segmentStatus) {
+            console.error('❌ segmentStatus element not found!');
+        }
+
         this._setupEventListeners();
         this._setupSocketHandlers();
     }
@@ -82,7 +96,10 @@ export class CVModule {
     }
 
     _setupSocketHandlers() {
-        this.socketManager.on('connect', () => this.socketManager.emit('request_agent_status', {}));
+        this.socketManager.on('connect', () => {
+            console.log('CV Module: Socket connected');
+            this.socketManager.emit('request_agent_status', {});
+        });
 
         this.socketManager.on('agent_status', (data) => {
             this.dom.agentStatus.className = data.status === 'connected' ? 'text-sm text-green-700 mt-1' : 'text-sm text-red-700 mt-1';
@@ -98,8 +115,11 @@ export class CVModule {
             }
         });
 
+        // Debug: Log all socket events to see what we're receiving
+        console.log('Setting up CV preview response handler');
+
         this.socketManager.on('cv_preview_response', (data) => {
-            console.log('CV Preview Response received:', data);
+            console.log('✅ CV Preview Response received:', data);
             if (data.status === 'success') {
                 console.log('CV preview success, cv_data:', data.cv_data);
                 console.log('Content length:', data.content ? data.content.length : 'No content');
@@ -111,6 +131,13 @@ export class CVModule {
                 console.error('CV preview error:', data.message);
                 this.dom.segmentStatus.textContent = `Error loading preview: ${data.message}`;
                 this.dom.segmentStatus.className = 'text-sm text-red-600 mt-2';
+            }
+        });
+
+        // Add a catch-all listener to see all events
+        this.socketManager.onAny((eventName, ...args) => {
+            if (eventName.includes('cv') || eventName.includes('preview')) {
+                console.log(`🔍 Received CV-related event: ${eventName}`, args);
             }
         });
 
@@ -203,7 +230,19 @@ export class CVModule {
 
         // Request the first file for preview
         console.log('Emitting get_cv_preview event');
+        console.log('Socket connected:', this.socketManager.connected);
+        console.log('Socket ID:', this.socketManager.id);
+
         this.socketManager.emit('get_cv_preview', { filters, analysisParams });
+
+        // Set a timeout to check if we get a response
+        setTimeout(() => {
+            if (this.dom.segmentStatus.textContent === 'Loading CV preview...') {
+                console.warn('⚠️ No CV preview response received after 5 seconds');
+                this.dom.segmentStatus.textContent = 'Timeout: No response from server. Check agent connection.';
+                this.dom.segmentStatus.className = 'text-sm text-yellow-600 mt-2';
+            }
+        }, 5000);
     }
 
     _handleDetectSegments() {
