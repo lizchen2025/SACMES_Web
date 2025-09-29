@@ -76,6 +76,7 @@ export class CVModule {
 
         this._setupEventListeners();
         this._setupSocketHandlers();
+        this._setupPlotSizeControls();
     }
 
     _setupEventListeners() {
@@ -97,6 +98,12 @@ export class CVModule {
         this.dom.nextToVisualizationBtn.addEventListener('click', this._handleNextToVisualization.bind(this));
         this.dom.startAnalysisBtn.addEventListener('click', this._handleStartAnalysis.bind(this));
         this.dom.detectSegmentsBtn.addEventListener('click', this._handleDetectSegments.bind(this));
+
+        // CV Preview size control
+        const cvPreviewHeightSelect = document.getElementById('cvPreviewHeight');
+        if (cvPreviewHeightSelect) {
+            cvPreviewHeightSelect.addEventListener('change', this._handleCVPreviewResize.bind(this));
+        }
     }
 
     _setupSocketHandlers() {
@@ -806,7 +813,12 @@ export class CVModule {
                     margin: { l: 50, r: 30, t: 30, b: 50 }
                 };
 
-                Plotly.newPlot(plotElement, traces, layout, { responsive: true });
+                Plotly.newPlot(plotElement, traces, layout, {
+                    responsive: true,
+                    displayModeBar: true,
+                    modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d'],
+                    displaylogo: false
+                });
             }
         }, 100);
 
@@ -924,7 +936,12 @@ export class CVModule {
         };
 
         // Use Plotly.react for real-time updates (better than redraw)
-        Plotly.react(plotElement, traces, layout);
+        Plotly.react(plotElement, traces, layout, {
+            responsive: true,
+            displayModeBar: true,
+            modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d'],
+            displaylogo: false
+        });
     }
 
     _updateCVProgressDisplay(fileNum) {
@@ -969,11 +986,11 @@ export class CVModule {
                 <div class="space-y-4">
                     <div class="bg-white p-3 rounded-lg shadow">
                         <h4 class="text-sm font-semibold mb-2">Forward Sweep</h4>
-                        <div id="cv-forward-plot" style="height: 250px;"></div>
+                        <div id="cv-forward-plot" class="cv-segment-plot" style="height: 400px;"></div>
                     </div>
                     <div class="bg-white p-3 rounded-lg shadow">
                         <h4 class="text-sm font-semibold mb-2">Reverse Sweep</h4>
-                        <div id="cv-reverse-plot" style="height: 250px;"></div>
+                        <div id="cv-reverse-plot" class="cv-segment-plot" style="height: 400px;"></div>
                     </div>
                 </div>
             </div>
@@ -983,11 +1000,11 @@ export class CVModule {
                 <div class="space-y-4">
                     <div class="bg-white p-4 rounded-lg shadow">
                         <h4 class="text-md font-semibold mb-2">Peak Separation Trend</h4>
-                        <div id="cv-peak-separation-plot" style="height: 240px;"></div>
+                        <div id="cv-peak-separation-plot" class="cv-trend-plot" style="height: 400px;"></div>
                     </div>
                     <div class="bg-white p-4 rounded-lg shadow">
                         <h4 class="text-md font-semibold mb-2">AUC Trend</h4>
-                        <div id="cv-auc-plot" style="height: 240px;"></div>
+                        <div id="cv-auc-plot" class="cv-trend-plot" style="height: 400px;"></div>
                     </div>
                 </div>
             </div>
@@ -1052,7 +1069,12 @@ export class CVModule {
             margin: { l: 50, r: 30, t: 40, b: 50 }
         };
 
-        Plotly.react(plotElement, [trace], layout);
+        Plotly.react(plotElement, [trace], layout, {
+            responsive: true,
+            displayModeBar: true,
+            modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d'],
+            displaylogo: false
+        });
     }
 
     _updateAUCPlot(forwardAUCs, reverseAUCs) {
@@ -1092,7 +1114,12 @@ export class CVModule {
             margin: { l: 50, r: 30, t: 40, b: 50 }
         };
 
-        Plotly.react(plotElement, traces, layout);
+        Plotly.react(plotElement, traces, layout, {
+            responsive: true,
+            displayModeBar: true,
+            modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d'],
+            displaylogo: false
+        });
     }
 
     _displayCVSummary(analysisResult) {
@@ -1151,7 +1178,9 @@ export class CVModule {
                 // Create the plot with proper configuration
                 Plotly.newPlot(this.dom.cvPreviewPlot, plotData, layout, {
                     responsive: true,
-                    displayModeBar: false  // Hide the toolbar for cleaner look
+                    displayModeBar: true,  // Show toolbar for zoom controls
+                    modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d', 'autoScale2d'],
+                    displaylogo: false
                 });
 
                 // Ensure the plot resizes when container changes
@@ -1188,6 +1217,66 @@ export class CVModule {
         this.state.isAnalysisRunning = false;
         this.dom.startAnalysisBtn.disabled = false;
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
+    }
+
+    _setupPlotSizeControls() {
+        // Set up plot size controls in visualization area
+        const plotSizeControl = document.getElementById('plotSizeControl');
+        const applyPlotSizeBtn = document.getElementById('applyPlotSizeBtn');
+
+        if (plotSizeControl && applyPlotSizeBtn) {
+            applyPlotSizeBtn.addEventListener('click', () => {
+                this._applyPlotSize(plotSizeControl.value);
+            });
+        }
+    }
+
+    _applyPlotSize(size) {
+        const sizeMap = {
+            'small': { segment: '300px', trend: '300px' },
+            'medium': { segment: '400px', trend: '400px' },
+            'large': { segment: '500px', trend: '500px' },
+            'xlarge': { segment: '600px', trend: '600px' }
+        };
+
+        const sizes = sizeMap[size] || sizeMap['medium'];
+
+        // Update CV segment plots
+        const segmentPlots = document.querySelectorAll('.cv-segment-plot');
+        segmentPlots.forEach(plot => {
+            plot.style.height = sizes.segment;
+            if (window.Plotly && plot.id) {
+                Plotly.Plots.resize(plot);
+            }
+        });
+
+        // Update CV trend plots
+        const trendPlots = document.querySelectorAll('.cv-trend-plot');
+        trendPlots.forEach(plot => {
+            plot.style.height = sizes.trend;
+            if (window.Plotly && plot.id) {
+                Plotly.Plots.resize(plot);
+            }
+        });
+
+        console.log(`Applied plot size: ${size} (${sizes.segment})`);
+    }
+
+    _handleCVPreviewResize() {
+        const selectElement = document.getElementById('cvPreviewHeight');
+        const plotElement = document.getElementById('cvPreviewPlot');
+
+        if (selectElement && plotElement) {
+            const newHeight = selectElement.value + 'px';
+            plotElement.style.height = newHeight;
+
+            // Resize Plotly plot if it exists
+            if (window.Plotly && plotElement.querySelector('.js-plotly-plot')) {
+                Plotly.Plots.resize(plotElement);
+            }
+
+            console.log(`CV Preview resized to: ${newHeight}`);
+        }
     }
 
     _autoDetectNumElectrodes() {

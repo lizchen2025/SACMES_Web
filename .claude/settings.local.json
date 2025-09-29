@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python:*)",
       "Bash(node:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(netstat:*)"
     ],
     "deny": [],
     "ask": []
