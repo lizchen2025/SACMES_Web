@@ -101,22 +101,42 @@ export class CVModule {
 
     _setupSocketHandlers() {
         this.socketManager.on('connect', () => {
-            console.log('CV Module: Socket connected');
+            console.log('✅ CV Module: Socket connected');
             this.socketManager.emit('request_agent_status', {});
+
+            // Update connection status if we have UI elements
+            if (this.dom.agentStatus) {
+                this.dom.agentStatus.textContent = 'Checking agent connection...';
+                this.dom.agentStatus.className = 'text-sm text-blue-600 mt-1';
+            }
         });
 
-        this.socketManager.on('disconnect', () => {
-            console.log('CV Module: Socket disconnected');
+        this.socketManager.on('disconnect', (reason) => {
+            console.log('❌ CV Module: Socket disconnected. Reason:', reason);
             // Clear any pending timeouts
             if (this._segmentDetectionTimeoutId) {
                 clearTimeout(this._segmentDetectionTimeoutId);
                 this._segmentDetectionTimeoutId = null;
             }
+
+            // Update UI to show disconnection
+            if (this.dom.agentStatus) {
+                this.dom.agentStatus.textContent = `Connection lost: ${reason}. Reconnecting...`;
+                this.dom.agentStatus.className = 'text-sm text-red-600 mt-1';
+            }
         });
 
-        this.socketManager.on('reconnect', () => {
-            console.log('CV Module: Socket reconnected');
+        this.socketManager.on('reconnect', (attemptNumber) => {
+            console.log(`🔄 CV Module: Socket reconnected after ${attemptNumber} attempts`);
             this.socketManager.emit('request_agent_status', {});
+        });
+
+        this.socketManager.on('reconnect_attempt', (attemptNumber) => {
+            console.log(`🔄 CV Module: Reconnection attempt ${attemptNumber}`);
+        });
+
+        this.socketManager.on('reconnect_error', (error) => {
+            console.error('❌ CV Module: Reconnection error:', error);
         });
 
         this.socketManager.on('agent_status', (data) => {
@@ -360,8 +380,17 @@ export class CVModule {
         };
 
         console.log('Sending segment detection request:', requestData);
+        console.log('Socket connection status:', this.socketManager.connected);
 
-        this.socketManager.emit('get_cv_segments', requestData);
+        try {
+            this.socketManager.emit('get_cv_segments', requestData);
+            console.log('✅ Segment detection request sent successfully');
+        } catch (error) {
+            console.error('❌ Failed to send segment detection request:', error);
+            this.dom.segmentStatus.textContent = 'Failed to send request. Check connection.';
+            this.dom.segmentStatus.className = 'text-sm text-red-600 mt-2';
+            return;
+        }
 
         this.dom.segmentStatus.textContent = 'Detecting segments...';
         this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
@@ -619,11 +648,16 @@ export class CVModule {
             const timeElapsed = Date.now() - this.state.analysisStartTime;
 
             // Force visualization switch if:
-            // 1. We have some results and 10 seconds have passed
-            // 2. 30 seconds have passed regardless of results
-            // 3. We've received data but no new data for 10 seconds
-            if (hasAnyResults && timeElapsed > 10000) {
-                console.log(`CV analysis: Force switching to visualization after ${timeElapsed}ms with results`);
+            // 1. We have substantial results and 60 seconds have passed
+            // 2. Maximum wait time has been reached
+            const numResults = Object.keys(this.state.cvResults).reduce((total, electrode) => {
+                return total + Object.keys(this.state.cvResults[electrode] || {}).length;
+            }, 0);
+
+            const hasSubstantialResults = numResults >= Math.min(10, this.state.currentNumFiles * 0.2);
+
+            if (hasSubstantialResults && timeElapsed > 60000) {
+                console.log(`CV analysis: Force switching to visualization after ${timeElapsed}ms with ${numResults} results`);
                 this._completeCVAnalysis('timeout_with_data');
                 return;
             } else if (timeElapsed > maxWaitTime) {
@@ -655,18 +689,29 @@ export class CVModule {
 
         if (!electrodeResults) return;
 
-        const processedFiles = Object.keys(electrodeResults).length;
+        // Only count files with successful analysis results
+        const validResults = Object.keys(electrodeResults).filter(key => {
+            const result = electrodeResults[key];
+            return result && typeof result === 'object' &&
+                   result.status === 'success' &&
+                   (result.forward_sweep || result.reverse_sweep || result.peak_info);
+        });
+
+        const processedFiles = validResults.length;
         const totalFiles = this.state.currentNumFiles;
 
         // For CV analysis, only complete when ALL files are processed (like SWV)
         // This allows real-time visualization during analysis
-        console.log(`CV analysis progress: ${processedFiles}/${totalFiles} files processed.`);
+        console.log(`CV analysis progress: ${processedFiles}/${totalFiles} files processed (with valid data).`);
 
-        if (processedFiles >= totalFiles) {
+        // Only complete if we have at least 80% of expected files OR we've been running for a long time
+        const completionThreshold = Math.max(Math.floor(totalFiles * 0.95), totalFiles - 2);
+
+        if (processedFiles >= completionThreshold) {
             console.log(`CV analysis complete: ${processedFiles}/${totalFiles} files processed.`);
             this._completeCVAnalysis('complete');
         }
-        // Note: No early completion - let analysis run to completion like SWV
+        // Note: No early completion - let analysis run to near completion like SWV
     }
 
     _completeCVAnalysis(reason = 'normal') {
