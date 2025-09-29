@@ -105,6 +105,20 @@ export class CVModule {
             this.socketManager.emit('request_agent_status', {});
         });
 
+        this.socketManager.on('disconnect', () => {
+            console.log('CV Module: Socket disconnected');
+            // Clear any pending timeouts
+            if (this._segmentDetectionTimeoutId) {
+                clearTimeout(this._segmentDetectionTimeoutId);
+                this._segmentDetectionTimeoutId = null;
+            }
+        });
+
+        this.socketManager.on('reconnect', () => {
+            console.log('CV Module: Socket reconnected');
+            this.socketManager.emit('request_agent_status', {});
+        });
+
         this.socketManager.on('agent_status', (data) => {
             this.dom.agentStatus.className = data.status === 'connected' ? 'text-sm text-green-700 mt-1' : 'text-sm text-red-700 mt-1';
             this.dom.agentStatus.textContent = data.status === 'connected' ? 'Local agent connected. Ready to sync.' : 'Error: Local agent is disconnected.';
@@ -157,13 +171,28 @@ export class CVModule {
         console.log('Note: Using simplified event listening for debugging');
 
         this.socketManager.on('cv_segments_response', (data) => {
-            if (data.status === 'success') {
-                this.state.availableSegments = data.segments;
+            console.log('✅ CV Segments Response received:', data);
+
+            // Clear any pending timeout
+            if (this._segmentDetectionTimeoutId) {
+                clearTimeout(this._segmentDetectionTimeoutId);
+                this._segmentDetectionTimeoutId = null;
+            }
+
+            if (data && data.status === 'success') {
+                this.state.availableSegments = data.segments || [];
                 this._updateSegmentDropdowns();
-                this.dom.segmentStatus.textContent = `Found ${data.segments.length} scan segments: ${data.segments.join(', ')}`;
-                this.dom.segmentStatus.className = 'text-sm text-green-600 mt-2';
+
+                if (this.state.availableSegments.length > 0) {
+                    this.dom.segmentStatus.textContent = `Found ${data.segments.length} scan segments: ${data.segments.join(', ')}`;
+                    this.dom.segmentStatus.className = 'text-sm text-green-600 mt-2';
+                } else {
+                    this.dom.segmentStatus.textContent = 'No segments found. Using auto-detection for analysis.';
+                    this.dom.segmentStatus.className = 'text-sm text-yellow-600 mt-2';
+                }
             } else {
-                this.dom.segmentStatus.textContent = `Error: ${data.message}`;
+                console.error('CV segments error:', data);
+                this.dom.segmentStatus.textContent = `Segment detection failed: ${data ? data.message : 'Unknown error'}`;
                 this.dom.segmentStatus.className = 'text-sm text-red-600 mt-2';
             }
         });
@@ -309,6 +338,7 @@ export class CVModule {
 
         const analysisParams = this._collectAnalysisParams();
 
+        console.log('Sending segment detection request...');
         this.socketManager.emit('get_cv_segments', {
             content: this.state.previewFileContent,
             filename: 'preview_file',
@@ -317,6 +347,15 @@ export class CVModule {
 
         this.dom.segmentStatus.textContent = 'Detecting segments...';
         this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
+
+        // Add timeout handling for segment detection
+        this._segmentDetectionTimeoutId = setTimeout(() => {
+            if (this.dom.segmentStatus.textContent === 'Detecting segments...') {
+                console.warn('⚠️ Segment detection timeout after 10 seconds');
+                this.dom.segmentStatus.textContent = 'Segment detection timeout. Please try again or check connection.';
+                this.dom.segmentStatus.className = 'text-sm text-yellow-600 mt-2';
+            }
+        }, 10000);
     }
 
     _updateSegmentDropdowns() {
@@ -800,10 +839,17 @@ export class CVModule {
                 }
 
                 const layout = {
-                    xaxis: { title: 'Potential (V)' },
-                    yaxis: { title: 'Current (A)' },
+                    xaxis: {
+                        title: 'Potential (V)',
+                        autorange: true
+                    },
+                    yaxis: {
+                        title: 'Current (A)',
+                        autorange: true
+                    },
                     showlegend: true,
-                    margin: { l: 50, r: 30, t: 30, b: 50 }
+                    margin: { l: 60, r: 40, t: 40, b: 60 },
+                    autosize: true
                 };
 
                 Plotly.newPlot(plotElement, traces, layout, {
@@ -922,10 +968,17 @@ export class CVModule {
 
         const layout = {
             title: title,
-            xaxis: { title: 'Potential (V)' },
-            yaxis: { title: 'Current (µA)' },
+            xaxis: {
+                title: 'Potential (V)',
+                autorange: true
+            },
+            yaxis: {
+                title: 'Current (µA)',
+                autorange: true
+            },
             showlegend: true,
-            margin: { l: 50, r: 30, t: 50, b: 50 }
+            margin: { l: 60, r: 40, t: 60, b: 60 },
+            autosize: true
         };
 
         // Use Plotly.react for real-time updates (better than redraw)
@@ -1149,18 +1202,18 @@ export class CVModule {
                 xaxis: {
                     title: 'Voltage (V)',
                     showgrid: true,
-                    zeroline: true
+                    zeroline: true,
+                    autorange: true
                 },
                 yaxis: {
                     title: 'Current (A)',
                     showgrid: true,
-                    zeroline: true
+                    zeroline: true,
+                    autorange: true
                 },
-                margin: { t: 50, r: 20, b: 50, l: 60 },
+                margin: { t: 50, r: 50, b: 50, l: 80 },
                 showlegend: false,
-                autosize: true,
-                width: undefined,  // Let it auto-size
-                height: undefined  // Let it auto-size
+                autosize: true
             };
 
             console.log('About to call Plotly.newPlot with:', plotData, layout);
@@ -1178,8 +1231,15 @@ export class CVModule {
 
                 // Ensure the plot resizes when container changes
                 setTimeout(() => {
-                    Plotly.Plots.resize(this.dom.cvPreviewPlot);
-                }, 100);
+                    if (window.Plotly && this.dom.cvPreviewPlot) {
+                        Plotly.Plots.resize(this.dom.cvPreviewPlot);
+                        // Force relayout to fix axis scaling
+                        Plotly.relayout(this.dom.cvPreviewPlot, {
+                            'xaxis.autorange': true,
+                            'yaxis.autorange': true
+                        });
+                    }
+                }, 200);
 
                 console.log('Plotly.newPlot completed successfully');
             } catch (error) {
@@ -1204,6 +1264,12 @@ export class CVModule {
         this.state.currentScreen = 'settings';
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
         this.dom.startAnalysisBtn.disabled = false;
+
+        // Clear any pending timeouts
+        if (this._segmentDetectionTimeoutId) {
+            clearTimeout(this._segmentDetectionTimeoutId);
+            this._segmentDetectionTimeoutId = null;
+        }
     }
 
     _resetAnalysisState() {
