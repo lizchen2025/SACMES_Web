@@ -1228,7 +1228,12 @@ def handle_get_cv_preview(data):
 def handle_get_cv_segments(data):
     """Get available CV segments from uploaded file"""
     try:
+        logger.info(f"=== CV Segments Request ===")
+        logger.info(f"From session: {request.sid}")
+        logger.info(f"Data keys: {list(data.keys())}")
+
         if not get_cv_segments:
+            logger.error("CV analyzer not available")
             emit('cv_segments_response', {'status': 'error', 'message': 'CV analyzer not available'})
             return
 
@@ -1236,19 +1241,42 @@ def handle_get_cv_segments(data):
         analysis_params = data.get('params', {})
         selected_electrode = analysis_params.get('selected_electrode')
 
+        logger.info(f"File content length: {len(file_content)}")
+        logger.info(f"Content preview: {file_content[:100] if file_content else 'No content'}")
+        logger.info(f"Analysis params: {analysis_params}")
+        logger.info(f"Selected electrode: {selected_electrode}")
+
+        if not file_content:
+            logger.error("No file content provided")
+            emit('cv_segments_response', {'status': 'error', 'message': 'No file content provided'})
+            return
+
         # Create temporary file
         filename = secure_filename(data.get('filename', 'temp_cv.txt'))
         temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
+        logger.info(f"Creating temp file: {temp_filepath}")
+
         with open(temp_filepath, 'w', encoding='utf-8') as f:
             f.write(file_content)
 
+        # Verify file was written correctly
+        if not os.path.exists(temp_filepath):
+            logger.error("Failed to create temporary file")
+            emit('cv_segments_response', {'status': 'error', 'message': 'Failed to create temporary file'})
+            return
+
+        logger.info(f"Temp file size: {os.path.getsize(temp_filepath)} bytes")
+
         # Get segments
+        logger.info("Calling get_cv_segments function...")
         segments_result = get_cv_segments(temp_filepath, analysis_params, selected_electrode)
+        logger.info(f"Segments result: {segments_result}")
 
         # Clean up
         if os.path.exists(temp_filepath):
             os.remove(temp_filepath)
+            logger.info("Temporary file cleaned up")
 
         emit('cv_segments_response', segments_result)
 

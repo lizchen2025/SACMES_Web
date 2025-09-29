@@ -332,18 +332,36 @@ export class CVModule {
 
     _handleDetectSegments() {
         if (!this.state.previewFileContent) {
+            console.log('No preview file content, requesting preview first...');
+            this.dom.segmentStatus.textContent = 'Loading preview file first...';
+            this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
             this._requestPreviewFile();
+
+            // Set a timeout to auto-detect segments after preview loads
+            setTimeout(() => {
+                if (this.state.previewFileContent) {
+                    this._handleDetectSegments();
+                }
+            }, 3000);
             return;
         }
 
         const analysisParams = this._collectAnalysisParams();
 
-        console.log('Sending segment detection request...');
-        this.socketManager.emit('get_cv_segments', {
+        console.log('=== Segment Detection Request ===');
+        console.log('Preview file content length:', this.state.previewFileContent.length);
+        console.log('Preview file content preview:', this.state.previewFileContent.substring(0, 200));
+        console.log('Analysis params:', analysisParams);
+
+        const requestData = {
             content: this.state.previewFileContent,
-            filename: 'preview_file',
+            filename: 'preview_cv_file.txt',
             params: analysisParams
-        });
+        };
+
+        console.log('Sending segment detection request:', requestData);
+
+        this.socketManager.emit('get_cv_segments', requestData);
 
         this.dom.segmentStatus.textContent = 'Detecting segments...';
         this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
@@ -351,11 +369,15 @@ export class CVModule {
         // Add timeout handling for segment detection
         this._segmentDetectionTimeoutId = setTimeout(() => {
             if (this.dom.segmentStatus.textContent === 'Detecting segments...') {
-                console.warn('⚠️ Segment detection timeout after 10 seconds');
-                this.dom.segmentStatus.textContent = 'Segment detection timeout. Please try again or check connection.';
+                console.warn('⚠️ Segment detection timeout after 15 seconds');
+                this.dom.segmentStatus.textContent = 'Segment detection timeout. Trying auto-detection for analysis.';
                 this.dom.segmentStatus.className = 'text-sm text-yellow-600 mt-2';
+
+                // Set default segments for fallback
+                this.state.availableSegments = [1, 2];
+                this._updateSegmentDropdowns();
             }
-        }, 10000);
+        }, 15000);
     }
 
     _updateSegmentDropdowns() {

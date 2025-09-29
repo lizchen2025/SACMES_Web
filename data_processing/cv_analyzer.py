@@ -68,37 +68,66 @@ def _read_cv_data_simple(file_path, selected_electrode=None):
         tuple: (potentials, currents) or ([], []) if failed
     """
     try:
-        logger.error(f"=== Simple CV Data Reading ===")
-        logger.error(f"File: {file_path}")
-        logger.error(f"Selected electrode: {selected_electrode}")
+        logger.info(f"=== Simple CV Data Reading ===")
+        logger.info(f"File: {file_path}")
+        logger.info(f"Selected electrode: {selected_electrode}")
 
-        # Read all data as space-separated values
-        data = np.loadtxt(file_path, delimiter=' ')
-        logger.error(f"Data shape: {data.shape}")
+        # First try to read with space delimiter
+        try:
+            data = np.loadtxt(file_path, delimiter=' ')
+        except:
+            # Try tab delimiter if space fails
+            try:
+                data = np.loadtxt(file_path, delimiter='\t')
+            except:
+                # Try comma delimiter if tab fails
+                try:
+                    data = np.loadtxt(file_path, delimiter=',')
+                except:
+                    # Try automatic delimiter detection
+                    data = np.loadtxt(file_path)
 
-        # Extract potentials (first column)
-        potentials = data[:, 0].tolist()
+        logger.info(f"Data shape: {data.shape}")
 
-        # Extract currents
-        if selected_electrode is not None and selected_electrode >= 0:
-            # Specific electrode (1-based column indexing: electrode 0 = column 1, etc.)
-            electrode_column = selected_electrode + 1
-            if electrode_column < data.shape[1]:
-                currents = data[:, electrode_column].tolist()
-                logger.error(f"Using electrode {selected_electrode} (column {electrode_column})")
+        if data.size == 0:
+            logger.error("No data found in file")
+            return [], []
+
+        # Ensure data is 2D
+        if data.ndim == 1:
+            if len(data) >= 2:
+                # Assume first half is potentials, second half is currents
+                mid = len(data) // 2
+                potentials = data[:mid].tolist()
+                currents = data[mid:].tolist()
+                logger.info(f"1D data split into potentials and currents")
             else:
-                logger.error(f"Electrode {selected_electrode} not available (only {data.shape[1]-1} electrodes)")
+                logger.error("Insufficient 1D data")
                 return [], []
         else:
-            # Average all electrodes (columns 1 to end)
-            if data.shape[1] > 1:
-                currents = np.mean(data[:, 1:], axis=1).tolist()
-                logger.error(f"Using averaged data from {data.shape[1]-1} electrodes")
-            else:
-                logger.error("No current columns found")
-                return [], []
+            # Extract potentials (first column)
+            potentials = data[:, 0].tolist()
 
-        logger.error(f"Successfully read {len(potentials)} data points")
+            # Extract currents
+            if selected_electrode is not None and selected_electrode >= 0:
+                # Specific electrode (1-based column indexing: electrode 0 = column 1, etc.)
+                electrode_column = selected_electrode + 1
+                if electrode_column < data.shape[1]:
+                    currents = data[:, electrode_column].tolist()
+                    logger.info(f"Using electrode {selected_electrode} (column {electrode_column})")
+                else:
+                    logger.warning(f"Electrode {selected_electrode} not available (only {data.shape[1]-1} electrodes)")
+                    return [], []
+            else:
+                # Average all electrodes (columns 1 to end)
+                if data.shape[1] > 1:
+                    currents = np.mean(data[:, 1:], axis=1).tolist()
+                    logger.info(f"Using averaged data from {data.shape[1]-1} electrodes")
+                else:
+                    logger.warning("No current columns found")
+                    return [], []
+
+        logger.info(f"Successfully read {len(potentials)} data points")
         return potentials, currents
 
     except Exception as e:
