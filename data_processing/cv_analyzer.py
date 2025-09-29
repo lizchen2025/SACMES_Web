@@ -154,8 +154,58 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
             - segment_dictionary (dict): A dictionary mapping segment numbers to their data.
               e.g., {1: {'indices': [...], 'potentials': [...], 'currents': [...]}}
     """
-    # Use the simple CV reader instead of complex parameter-based reader
-    potentials, currents = _read_cv_data_simple(file_path, selected_electrode)
+    # Use the robust GeneralReadData function with proper parameters
+    try:
+        # Extract parameters from the front-end settings
+        voltage_column = params.get('voltage_column', 1)  # 1-based
+        current_column = params.get('current_column', 2)  # 1-based
+        spacing_index = params.get('spacing_index', 1)
+        delimiter_num = params.get('delimiter', 1)
+        file_extension = params.get('file_extension', '.txt')
+        num_electrodes = params.get('num_electrodes', 1)
+
+        # Convert delimiter number to character
+        delimiter_map = {1: ' ', 2: '\t', 3: ',', 4: ';'}
+        delimiter_char = delimiter_map.get(delimiter_num, ' ')
+
+        logger.info(f"CV segment detection using: voltage_col={voltage_column}, current_col={current_column}, delimiter='{delimiter_char}', electrodes={num_electrodes}")
+
+        # Call the robust data reader
+        data_result = GeneralReadData(
+            file_path,
+            voltage_column,
+            current_column,
+            spacing_index,
+            num_electrodes,
+            delimiter_char,
+            file_extension
+        )
+
+        if not data_result or 'voltage' not in data_result or 'current' not in data_result:
+            logger.error("GeneralReadData returned invalid result")
+            return [], [], {}
+
+        potentials = data_result['voltage']
+
+        # Handle electrode selection for CV
+        if selected_electrode is not None and selected_electrode >= 0:
+            # Use specific electrode data if available
+            electrode_key = f'electrode_{selected_electrode}'
+            if electrode_key in data_result:
+                currents = data_result[electrode_key]
+                logger.info(f"Using electrode {selected_electrode} data for segment detection")
+            else:
+                currents = data_result['current']  # Fall back to averaged
+                logger.warning(f"Electrode {selected_electrode} not found, using averaged data")
+        else:
+            currents = data_result['current']  # Averaged data
+            logger.info("Using averaged electrode data for segment detection")
+
+    except Exception as e:
+        logger.error(f"Failed to read CV data with GeneralReadData: {e}")
+        # Fallback to simple reader if GeneralReadData fails
+        logger.info("Falling back to simple CV reader")
+        potentials, currents = _read_cv_data_simple(file_path, selected_electrode)
 
     if not potentials or not currents:
         return [], [], {}
