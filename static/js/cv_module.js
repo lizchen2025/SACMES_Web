@@ -76,7 +76,6 @@ export class CVModule {
 
         this._setupEventListeners();
         this._setupSocketHandlers();
-        this._setupPlotSizeControls();
     }
 
     _setupEventListeners() {
@@ -98,12 +97,6 @@ export class CVModule {
         this.dom.nextToVisualizationBtn.addEventListener('click', this._handleNextToVisualization.bind(this));
         this.dom.startAnalysisBtn.addEventListener('click', this._handleStartAnalysis.bind(this));
         this.dom.detectSegmentsBtn.addEventListener('click', this._handleDetectSegments.bind(this));
-
-        // CV Preview size control
-        const cvPreviewHeightSelect = document.getElementById('cvPreviewHeight');
-        if (cvPreviewHeightSelect) {
-            cvPreviewHeightSelect.addEventListener('change', this._handleCVPreviewResize.bind(this));
-        }
     }
 
     _setupSocketHandlers() {
@@ -764,7 +757,7 @@ export class CVModule {
         plotDiv.className = 'bg-white p-4 rounded-lg shadow';
         plotDiv.innerHTML = `
             <h3 class="text-lg font-semibold mb-2">${title}</h3>
-            <div id="${plotId}" style="height: 400px;"></div>
+            <div id="${plotId}" class="plotly-plot-container"></div>
         `;
 
         // Use setTimeout to ensure DOM is ready
@@ -986,11 +979,11 @@ export class CVModule {
                 <div class="space-y-4">
                     <div class="bg-white p-3 rounded-lg shadow">
                         <h4 class="text-sm font-semibold mb-2">Forward Sweep</h4>
-                        <div id="cv-forward-plot" class="cv-segment-plot" style="height: 400px;"></div>
+                        <div id="cv-forward-plot" class="plotly-plot-container"></div>
                     </div>
                     <div class="bg-white p-3 rounded-lg shadow">
                         <h4 class="text-sm font-semibold mb-2">Reverse Sweep</h4>
-                        <div id="cv-reverse-plot" class="cv-segment-plot" style="height: 400px;"></div>
+                        <div id="cv-reverse-plot" class="plotly-plot-container"></div>
                     </div>
                 </div>
             </div>
@@ -1000,11 +993,11 @@ export class CVModule {
                 <div class="space-y-4">
                     <div class="bg-white p-4 rounded-lg shadow">
                         <h4 class="text-md font-semibold mb-2">Peak Separation Trend</h4>
-                        <div id="cv-peak-separation-plot" class="cv-trend-plot" style="height: 400px;"></div>
+                        <div id="cv-peak-separation-plot" class="plotly-plot-container"></div>
                     </div>
                     <div class="bg-white p-4 rounded-lg shadow">
                         <h4 class="text-md font-semibold mb-2">AUC Trend</h4>
-                        <div id="cv-auc-plot" class="cv-trend-plot" style="height: 400px;"></div>
+                        <div id="cv-auc-plot" class="plotly-plot-container"></div>
                     </div>
                 </div>
             </div>
@@ -1219,65 +1212,6 @@ export class CVModule {
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
     }
 
-    _setupPlotSizeControls() {
-        // Set up plot size controls in visualization area
-        const plotSizeControl = document.getElementById('plotSizeControl');
-        const applyPlotSizeBtn = document.getElementById('applyPlotSizeBtn');
-
-        if (plotSizeControl && applyPlotSizeBtn) {
-            applyPlotSizeBtn.addEventListener('click', () => {
-                this._applyPlotSize(plotSizeControl.value);
-            });
-        }
-    }
-
-    _applyPlotSize(size) {
-        const sizeMap = {
-            'small': { segment: '300px', trend: '300px' },
-            'medium': { segment: '400px', trend: '400px' },
-            'large': { segment: '500px', trend: '500px' },
-            'xlarge': { segment: '600px', trend: '600px' }
-        };
-
-        const sizes = sizeMap[size] || sizeMap['medium'];
-
-        // Update CV segment plots
-        const segmentPlots = document.querySelectorAll('.cv-segment-plot');
-        segmentPlots.forEach(plot => {
-            plot.style.height = sizes.segment;
-            if (window.Plotly && plot.id) {
-                Plotly.Plots.resize(plot);
-            }
-        });
-
-        // Update CV trend plots
-        const trendPlots = document.querySelectorAll('.cv-trend-plot');
-        trendPlots.forEach(plot => {
-            plot.style.height = sizes.trend;
-            if (window.Plotly && plot.id) {
-                Plotly.Plots.resize(plot);
-            }
-        });
-
-        console.log(`Applied plot size: ${size} (${sizes.segment})`);
-    }
-
-    _handleCVPreviewResize() {
-        const selectElement = document.getElementById('cvPreviewHeight');
-        const plotElement = document.getElementById('cvPreviewPlot');
-
-        if (selectElement && plotElement) {
-            const newHeight = selectElement.value + 'px';
-            plotElement.style.height = newHeight;
-
-            // Resize Plotly plot if it exists
-            if (window.Plotly && plotElement.querySelector('.js-plotly-plot')) {
-                Plotly.Plots.resize(plotElement);
-            }
-
-            console.log(`CV Preview resized to: ${newHeight}`);
-        }
-    }
 
     _autoDetectNumElectrodes() {
         // Parse selected electrodes to determine max electrode number needed
