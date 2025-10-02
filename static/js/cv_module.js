@@ -1314,34 +1314,44 @@ export class CVModule {
 
         if (cvData && cvData.voltage && cvData.current) {
             console.log('CV data valid - voltage points:', cvData.voltage.length, 'current points:', cvData.current.length);
-            console.log('Voltage range:', Math.min(...cvData.voltage), 'to', Math.max(...cvData.voltage));
-            console.log('Current range:', Math.min(...cvData.current), 'to', Math.max(...cvData.current));
+            console.log('Raw voltage range:', Math.min(...cvData.voltage), 'to', Math.max(...cvData.voltage));
+            console.log('Raw current range:', Math.min(...cvData.current), 'to', Math.max(...cvData.current));
 
-            // Store original CV data for segment highlighting
+            // Apply unit conversion to match user settings
+            const convertedData = this._convertCVDataUnits(cvData);
+
+            console.log('Converted voltage range:', Math.min(...convertedData.voltage), 'to', Math.max(...convertedData.voltage));
+            console.log('Converted current range:', Math.min(...convertedData.current), 'to', Math.max(...convertedData.current));
+
+            // Store converted CV data for segment highlighting
             this.state.originalCVData = {
-                voltage: cvData.voltage,
-                current: cvData.current
+                voltage: convertedData.voltage,
+                current: convertedData.current
             };
 
             const plotData = [{
-                x: cvData.voltage,
-                y: cvData.current,
+                x: convertedData.voltage,
+                y: convertedData.current,
                 type: 'scatter',
                 mode: 'lines',
                 name: 'CV Preview',
                 line: { color: '#1f77b4', width: 2 }
             }];
 
+            // Get unit settings for axis labels
+            const voltageUnits = this.dom.settings.voltageUnitsInput.value;
+            const currentUnits = this.dom.settings.currentUnitsInput.value;
+
             const layout = {
                 title: 'CV Preview - Select Segments',
                 xaxis: {
-                    title: 'Voltage (V)',
+                    title: `Voltage (${voltageUnits})`,
                     showgrid: true,
                     zeroline: true,
                     autorange: true
                 },
                 yaxis: {
-                    title: 'Current (A)',
+                    title: `Current (${currentUnits})`,
                     showgrid: true,
                     zeroline: true,
                     autorange: true
@@ -1418,7 +1428,7 @@ export class CVModule {
     }
 
     _highlightSegmentsOnPreview() {
-        // Replace the original CV curve with colored segment traces
+        // Add colored segment overlays to preserve original CV curve shape
         if (!this.dom.cvPreviewPlot || !window.Plotly) {
             console.warn('Cannot highlight segments: Plot or Plotly not available');
             return;
@@ -1429,8 +1439,13 @@ export class CVModule {
             return;
         }
 
+        if (!this.state.originalCVData) {
+            console.warn('No original CV data available for highlighting');
+            return;
+        }
+
         try {
-            console.log('Adding colored segment highlighting to CV preview');
+            console.log('Adding colored segment highlighting while preserving CV curve shape');
 
             const plotElement = this.dom.cvPreviewPlot;
 
@@ -1439,9 +1454,22 @@ export class CVModule {
             const xRange = currentLayout.xaxis ? currentLayout.xaxis.range : null;
             const yRange = currentLayout.yaxis ? currentLayout.yaxis.range : null;
 
-            // Create new traces for each colored segment
-            const segmentTraces = [];
+            // Start with the original CV data as the base trace (grayed out)
+            const allTraces = [{
+                x: this.state.originalCVData.voltage,
+                y: this.state.originalCVData.current,
+                mode: 'lines',
+                type: 'scatter',
+                name: 'Full CV',
+                line: {
+                    color: 'rgba(150, 150, 150, 0.3)',  // Light gray background
+                    width: 1
+                },
+                showlegend: true,
+                hoverinfo: 'skip'  // Don't show hover for background trace
+            }];
 
+            // Add colored segment overlays on top
             Object.entries(this.state.segmentInfo).forEach(([segmentNum, segInfo]) => {
                 const segmentType = segInfo.type || 'unknown';
                 const potentials = segInfo.potentials || [];
@@ -1452,46 +1480,55 @@ export class CVModule {
                     return;
                 }
 
+                // Apply unit conversion to segment data to match preview
+                const convertedSegmentData = this._convertCVDataUnits({
+                    voltage: potentials,
+                    current: currents
+                });
+
                 // Choose colors based on segment type
                 const color = segmentType === 'forward' ?
-                    'rgba(0, 120, 255, 0.8)' :   // Blue for forward
-                    'rgba(255, 100, 0, 0.8)';    // Orange for reverse
+                    'rgba(0, 120, 255, 0.9)' :   // Blue for forward
+                    'rgba(255, 100, 0, 0.9)';    // Orange for reverse
 
                 const name = `Segment ${segmentNum} (${segmentType})`;
 
-                // Create trace for this segment
-                segmentTraces.push({
-                    x: potentials,
-                    y: currents,
+                // Create colored overlay trace for this segment
+                allTraces.push({
+                    x: convertedSegmentData.voltage,
+                    y: convertedSegmentData.current,
                     mode: 'lines',
                     type: 'scatter',
                     name: name,
                     line: {
                         color: color,
-                        width: 3
+                        width: 4  // Thicker for visibility on top
                     },
                     showlegend: true,
-                    hovertemplate: `${name}<br>Voltage: %{x:.3f}V<br>Current: %{y:.3e}A<extra></extra>`
+                    hovertemplate: `${name}<br>Voltage: %{x:.3f}${voltageUnits}<br>Current: %{y:.3e}${currentUnits}<extra></extra>`
                 });
             });
 
-            if (segmentTraces.length === 0) {
+            if (allTraces.length <= 1) {
                 console.warn('No segment traces created');
                 return;
             }
 
-            // Create updated layout, preserving zoom if it existed
+            // Create updated layout, preserving zoom and improving axes labels
+            const currentUnits = this.dom.settings.currentUnitsInput.value;
+            const voltageUnits = this.dom.settings.voltageUnitsInput.value;
+
             const updatedLayout = {
-                title: 'CV Preview - Colored Segments',
+                title: 'CV Preview - Highlighted Segments',
                 xaxis: {
-                    title: 'Voltage (V)',
+                    title: `Voltage (${voltageUnits})`,
                     showgrid: true,
                     zeroline: true,
                     range: xRange || undefined,  // Preserve zoom if available
                     autorange: xRange ? false : true
                 },
                 yaxis: {
-                    title: 'Current (A)',
+                    title: `Current (${currentUnits})`,
                     showgrid: true,
                     zeroline: true,
                     range: yRange || undefined,  // Preserve zoom if available
@@ -1511,18 +1548,49 @@ export class CVModule {
                 autosize: true
             };
 
-            // Replace the plot with colored segments (no rescaling)
-            Plotly.react(plotElement, segmentTraces, updatedLayout, {
+            // Update the plot with all traces (preserving shape and scale)
+            Plotly.react(plotElement, allTraces, updatedLayout, {
                 responsive: true,
                 displayModeBar: true,
                 displaylogo: false
             });
 
-            console.log(`✅ Successfully highlighted ${segmentTraces.length} colored segments`);
+            console.log(`✅ Successfully highlighted ${allTraces.length - 1} segments on original CV curve`);
 
         } catch (error) {
             console.error('Error highlighting segments on preview:', error);
         }
+    }
+
+    _convertCVDataUnits(cvData) {
+        // Convert CV data from base units (V, A) to user-selected units
+        const voltageUnits = this.dom.settings.voltageUnitsInput.value || 'V';
+        const currentUnits = this.dom.settings.currentUnitsInput.value || 'A';
+
+        // Unit conversion factors from base units
+        const voltageFactors = {
+            'V': 1.0,
+            'mV': 1e3,    // V to mV
+            'μV': 1e6,    // V to μV
+            'nV': 1e9     // V to nV
+        };
+
+        const currentFactors = {
+            'A': 1.0,
+            'mA': 1e3,    // A to mA
+            'μA': 1e6,    // A to μA
+            'nA': 1e9     // A to nA
+        };
+
+        const voltageFactor = voltageFactors[voltageUnits] || 1.0;
+        const currentFactor = currentFactors[currentUnits] || 1.0;
+
+        console.log(`Converting units: voltage × ${voltageFactor} (${voltageUnits}), current × ${currentFactor} (${currentUnits})`);
+
+        return {
+            voltage: cvData.voltage.map(v => v * voltageFactor),
+            current: cvData.current.map(c => c * currentFactor)
+        };
     }
 
     _autoDetectNumElectrodes() {
