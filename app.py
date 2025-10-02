@@ -1179,7 +1179,7 @@ def handle_cv_instrument_data(data):
         }, to=agent_sid)
         return
 
-    live_analysis_params = get_session_data(session_id, 'cv_live_analysis_params', {})
+    live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
     if not live_analysis_params:
         return
 

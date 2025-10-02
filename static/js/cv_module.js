@@ -319,8 +319,10 @@ export class CVModule {
                 console.log('CV Analysis keys:', Object.keys(data.cv_analysis));
                 console.log('Forward data:', data.cv_analysis.forward);
                 console.log('Reverse data:', data.cv_analysis.reverse);
+                console.log('ELECTRODE INDEX received:', data.electrode_index, 'Type:', typeof data.electrode_index);
 
                 const electrodeKey = data.electrode_index !== null ? data.electrode_index.toString() : 'averaged';
+                console.log('Storing data under electrode key:', electrodeKey);
 
                 if (!this.state.cvResults[electrodeKey]) {
                     this.state.cvResults[electrodeKey] = {};
@@ -605,12 +607,19 @@ export class CVModule {
             cvResults: {},
             uploadedFileContent: this.state.uploadedFileContent,
             availableSegments: this.state.availableSegments,
+            probeVoltages: this.state.probeVoltages || [],  // Preserve probe voltages
             analysisStartTime: Date.now()
         };
 
         const analysisParams = this._collectAnalysisParams();
         analysisParams.selected_electrode = this.state.currentElectrode;
         analysisParams.selected_electrodes = this.state.selectedElectrodes;
+
+        console.log('=== CV Analysis Starting ===');
+        console.log('Selected electrodes:', selectedElectrodes);
+        console.log('Current electrode:', this.state.currentElectrode);
+        console.log('Probe voltages:', this.state.probeVoltages);
+        console.log('Analysis params probe_voltages:', analysisParams.probe_voltages);
 
         const filters = {
             handle: this.dom.params.fileHandleInput.value.trim(),
@@ -689,6 +698,14 @@ export class CVModule {
     _setupCVElectrodeControls() {
         const electrodeControls = document.getElementById('electrodeControls');
         if (!electrodeControls) return;
+
+        // Hide electrode controls during analysis
+        if (this.state.isAnalysisRunning) {
+            electrodeControls.style.display = 'none';
+            return;
+        } else {
+            electrodeControls.style.display = 'block';
+        }
 
         // Clear existing buttons
         const existingButtons = electrodeControls.querySelectorAll('.electrode-btn');
@@ -883,6 +900,9 @@ export class CVModule {
         // Switch to visualization area (reuse SWV's visualization area)
         this.uiManager.showScreen('visualizationArea');
         this._setupCVVisualization(reason);
+
+        // Show electrode controls now that analysis is complete
+        this._setupCVElectrodeControls();
     }
 
     _updateCVVisualization(analysisResult) {
