@@ -411,7 +411,9 @@ def get_cv_segments(file_path, params, selected_electrode=None):
                     "potential_range": [
                         min(seg_data.get('potentials', [0])),
                         max(seg_data.get('potentials', [0]))
-                    ] if seg_data.get('potentials') else [0, 0]
+                    ] if seg_data.get('potentials') else [0, 0],
+                    "potentials": seg_data.get('potentials', []),
+                    "currents": seg_data.get('currents', [])
                 }
                 for seg_num, seg_data in segment_dictionary.items()
             }

@@ -1317,6 +1317,12 @@ export class CVModule {
             console.log('Voltage range:', Math.min(...cvData.voltage), 'to', Math.max(...cvData.voltage));
             console.log('Current range:', Math.min(...cvData.current), 'to', Math.max(...cvData.current));
 
+            // Store original CV data for segment highlighting
+            this.state.originalCVData = {
+                voltage: cvData.voltage,
+                current: cvData.current
+            };
+
             const plotData = [{
                 x: cvData.voltage,
                 y: cvData.current,
@@ -1393,6 +1399,7 @@ export class CVModule {
         this.state.segmentInfo = {};
         this.state.forwardSegments = [];
         this.state.reverseSegments = [];
+        this.state.originalCVData = null;
         this.state.currentScreen = 'settings';
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
         this.dom.startAnalysisBtn.disabled = false;
@@ -1411,7 +1418,7 @@ export class CVModule {
     }
 
     _highlightSegmentsOnPreview() {
-        // Add segment highlighting to the CV preview plot
+        // Replace the original CV curve with colored segment traces
         if (!this.dom.cvPreviewPlot || !window.Plotly) {
             console.warn('Cannot highlight segments: Plot or Plotly not available');
             return;
@@ -1423,80 +1430,95 @@ export class CVModule {
         }
 
         try {
-            console.log('Adding segment highlights to CV preview');
+            console.log('Adding colored segment highlighting to CV preview');
 
-            // Get the original CV data
             const plotElement = this.dom.cvPreviewPlot;
-            const existingData = plotElement.data || [];
 
-            if (existingData.length === 0) {
-                console.warn('No existing plot data found');
-                return;
-            }
+            // Store the current axis ranges to prevent rescaling
+            const currentLayout = plotElement.layout || {};
+            const xRange = currentLayout.xaxis ? currentLayout.xaxis.range : null;
+            const yRange = currentLayout.yaxis ? currentLayout.yaxis.range : null;
 
-            // Create new traces for segment highlighting
-            const newTraces = [...existingData];
+            // Create new traces for each colored segment
+            const segmentTraces = [];
 
-            // Add segment highlighting traces
             Object.entries(this.state.segmentInfo).forEach(([segmentNum, segInfo]) => {
                 const segmentType = segInfo.type || 'unknown';
-                const potentialRange = segInfo.potential_range || [0, 0];
+                const potentials = segInfo.potentials || [];
+                const currents = segInfo.currents || [];
 
-                // Create vertical lines to mark segment boundaries
-                const color = segmentType === 'forward' ? 'rgba(0, 100, 255, 0.7)' : 'rgba(255, 100, 0, 0.7)';
+                if (potentials.length === 0 || currents.length === 0) {
+                    console.warn(`Segment ${segmentNum} has no data points`);
+                    return;
+                }
+
+                // Choose colors based on segment type
+                const color = segmentType === 'forward' ?
+                    'rgba(0, 120, 255, 0.8)' :   // Blue for forward
+                    'rgba(255, 100, 0, 0.8)';    // Orange for reverse
+
                 const name = `Segment ${segmentNum} (${segmentType})`;
 
-                // Add vertical line at segment start
-                newTraces.push({
-                    x: [potentialRange[0], potentialRange[0]],
-                    y: [-1e10, 1e10],  // Full height lines
+                // Create trace for this segment
+                segmentTraces.push({
+                    x: potentials,
+                    y: currents,
                     mode: 'lines',
                     type: 'scatter',
                     name: name,
                     line: {
                         color: color,
-                        width: 3,
-                        dash: 'dash'
+                        width: 3
                     },
                     showlegend: true,
-                    hovertemplate: `${name}<br>Start: ${potentialRange[0].toFixed(3)}V<extra></extra>`
-                });
-
-                // Add vertical line at segment end
-                newTraces.push({
-                    x: [potentialRange[1], potentialRange[1]],
-                    y: [-1e10, 1e10],  // Full height lines
-                    mode: 'lines',
-                    type: 'scatter',
-                    name: `${name} (end)`,
-                    line: {
-                        color: color,
-                        width: 3,
-                        dash: 'dot'
-                    },
-                    showlegend: false,
-                    hovertemplate: `${name}<br>End: ${potentialRange[1].toFixed(3)}V<extra></extra>`
+                    hovertemplate: `${name}<br>Voltage: %{x:.3f}V<br>Current: %{y:.3e}A<extra></extra>`
                 });
             });
 
-            // Update the plot with segment highlights
+            if (segmentTraces.length === 0) {
+                console.warn('No segment traces created');
+                return;
+            }
+
+            // Create updated layout, preserving zoom if it existed
             const updatedLayout = {
-                title: 'CV Preview with Segment Highlights',
+                title: 'CV Preview - Colored Segments',
+                xaxis: {
+                    title: 'Voltage (V)',
+                    showgrid: true,
+                    zeroline: true,
+                    range: xRange || undefined,  // Preserve zoom if available
+                    autorange: xRange ? false : true
+                },
+                yaxis: {
+                    title: 'Current (A)',
+                    showgrid: true,
+                    zeroline: true,
+                    range: yRange || undefined,  // Preserve zoom if available
+                    autorange: yRange ? false : true
+                },
+                margin: { t: 50, r: 50, b: 50, l: 80 },
                 showlegend: true,
                 legend: {
-                    x: 1,
+                    x: 1.02,
                     y: 1,
-                    xanchor: 'right',
+                    xanchor: 'left',
                     yanchor: 'top',
-                    bgcolor: 'rgba(255,255,255,0.8)',
+                    bgcolor: 'rgba(255,255,255,0.9)',
                     bordercolor: 'rgba(0,0,0,0.2)',
                     borderwidth: 1
-                }
+                },
+                autosize: true
             };
 
-            Plotly.react(plotElement, newTraces, updatedLayout);
+            // Replace the plot with colored segments (no rescaling)
+            Plotly.react(plotElement, segmentTraces, updatedLayout, {
+                responsive: true,
+                displayModeBar: true,
+                displaylogo: false
+            });
 
-            console.log(`Added highlights for ${Object.keys(this.state.segmentInfo).length} segments`);
+            console.log(`✅ Successfully highlighted ${segmentTraces.length} colored segments`);
 
         } catch (error) {
             console.error('Error highlighting segments on preview:', error);
