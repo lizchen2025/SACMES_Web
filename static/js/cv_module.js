@@ -599,6 +599,10 @@ export class CVModule {
         if (backToSWVBtn) {
             backToSWVBtn.textContent = 'Back to CV Settings';
             backToSWVBtn.onclick = () => {
+                // Stop any running CV analysis
+                if (this.state.isAnalysisRunning) {
+                    this.socketManager.emit('stop_cv_analysis_session', { reason: 'user_returned_to_settings' });
+                }
                 this.state.currentScreen = 'settings';
                 this.uiManager.showScreen('cvAnalysisScreen');
                 this.state.isAnalysisRunning = false;
@@ -1073,7 +1077,7 @@ export class CVModule {
                 mode: 'markers+text',
                 name: 'Peak',
                 marker: { color: 'red', size: 10, symbol: 'diamond' },
-                text: [`Peak: ${sweepData.peak_potential.toFixed(3)}V, ${sweepData.peak_current.toFixed(2)}µA`],
+                text: [`Peak: ${sweepData.peak_potential.toFixed(3)}V, ${sweepData.peak_current.toFixed(2)}${this.dom.settings.currentUnitsInput.value}`],
                 textposition: 'top center',
                 textfont: { size: 10 }
             });
@@ -1102,7 +1106,7 @@ export class CVModule {
                 autorange: true
             },
             yaxis: {
-                title: 'Current (µA)',
+                title: `Current (${this.dom.settings.currentUnitsInput.value})`,
                 autorange: true
             },
             showlegend: true,
@@ -1156,8 +1160,8 @@ export class CVModule {
         const mainContainer = document.createElement('div');
         mainContainer.className = 'cv-main-container flex gap-4 mt-4';
         mainContainer.innerHTML = `
-            <!-- Left side: CV Segments (30% width) -->
-            <div class="cv-segments-side w-1/3">
+            <!-- Left side: CV Segments (25% width) -->
+            <div class="cv-segments-side w-1/4">
                 <div class="space-y-4">
                     <div class="bg-white p-3 rounded-lg shadow">
                         <h4 class="text-sm font-semibold mb-2">Forward Sweep</h4>
@@ -1170,8 +1174,8 @@ export class CVModule {
                 </div>
             </div>
 
-            <!-- Right side: Comprehensive Analysis (70% width) -->
-            <div class="cv-analysis-side w-2/3">
+            <!-- Right side: Comprehensive Analysis (75% width) -->
+            <div class="cv-analysis-side w-3/4">
                 <div class="space-y-4">
                     <div class="bg-white p-4 rounded-lg shadow">
                         <h4 class="text-md font-semibold mb-2">Peak Separation Trend</h4>
@@ -1241,7 +1245,7 @@ export class CVModule {
             title: 'Peak Separation vs File Number',
             xaxis: { title: 'File Number' },
             yaxis: { title: 'Peak Separation (V)' },
-            margin: { l: 50, r: 30, t: 40, b: 50 }
+            margin: { l: 70, r: 50, t: 50, b: 60 }
         };
 
         Plotly.react(plotElement, [trace], layout, {
@@ -1285,8 +1289,8 @@ export class CVModule {
         const layout = {
             title: 'AUC vs File Number',
             xaxis: { title: 'File Number' },
-            yaxis: { title: 'Charge (µC)' },
-            margin: { l: 50, r: 30, t: 40, b: 50 }
+            yaxis: { title: `Charge (${this.dom.settings.currentUnitsInput.value}C)` },
+            margin: { l: 70, r: 50, t: 50, b: 60 }
         };
 
         Plotly.react(plotElement, traces, layout, {
