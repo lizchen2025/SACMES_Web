@@ -5,6 +5,7 @@
 import numpy as np
 import logging
 import os
+from scipy.signal import savgol_filter
 from .data_reader import ReadData as GeneralReadData  # Keep the original reader for multichannel handling
 
 logger = logging.getLogger(__name__)
@@ -431,6 +432,112 @@ def _baseline_solution_phase(potentials, currents):
     return baseline_currents
 
 
+def _calculate_probe_currents(all_potentials, all_currents, probe_voltages, params):
+    """Calculate current values at specified probe voltages for both forward and reverse segments."""
+    # Get segment dictionary
+    _, _, segment_dictionary = _read_and_segment_data_internal(all_potentials, all_currents, params)
+
+    if not segment_dictionary:
+        return {}
+
+    probe_data = {}
+
+    # Convert probe voltages to base units if needed
+    voltage_units = params.get('voltage_units', 'V')
+    probe_voltages_base = []
+    for voltage in probe_voltages:
+        if voltage_units != 'V':
+            voltage_base = convert_units(voltage, voltage_units, 'base')
+        else:
+            voltage_base = voltage
+        probe_voltages_base.append(voltage_base)
+
+    # Analyze each segment type
+    for scan_type in ["forward", "reverse"]:
+        segment_num = params.get(f'{scan_type}_segment')
+
+        # Auto-detect segment if not specified
+        if not segment_num or segment_num not in segment_dictionary:
+            available_segments = list(segment_dictionary.keys())
+            if scan_type == "forward":
+                segment_num = available_segments[0] if available_segments else None
+            elif scan_type == "reverse":
+                segment_num = available_segments[1] if len(available_segments) > 1 else available_segments[0]
+
+        if not segment_num or segment_num not in segment_dictionary:
+            continue
+
+        segment = segment_dictionary[segment_num]
+        p_raw, i_raw = np.array(segment['potentials']), np.array(segment['currents'])
+
+        # Find current values at probe voltages
+        probe_currents = []
+        for probe_voltage_base in probe_voltages_base:
+            # Find the closest voltage point
+            voltage_diff = np.abs(p_raw - probe_voltage_base)
+            closest_idx = np.argmin(voltage_diff)
+
+            if voltage_diff[closest_idx] < 0.01:  # Within 10mV tolerance
+                current_at_probe = i_raw[closest_idx]
+                probe_currents.append({
+                    'probe_voltage': probe_voltage_base,
+                    'actual_voltage': p_raw[closest_idx],
+                    'current': current_at_probe,
+                    'voltage_diff': voltage_diff[closest_idx]
+                })
+            else:
+                # Interpolate if no close point found
+                if len(p_raw) > 1:
+                    current_interpolated = np.interp(probe_voltage_base, p_raw, i_raw)
+                    probe_currents.append({
+                        'probe_voltage': probe_voltage_base,
+                        'actual_voltage': probe_voltage_base,
+                        'current': current_interpolated,
+                        'voltage_diff': voltage_diff[closest_idx],
+                        'interpolated': True
+                    })
+
+        probe_data[scan_type] = probe_currents
+
+    return probe_data
+
+
+def _read_and_segment_data_internal(potentials, currents, params):
+    """Internal helper for probe calculations using already read data."""
+    # Use the existing segmentation logic but with pre-read data
+    try:
+        # Create a temporary segment dictionary using the same logic as _read_and_segment_data
+        # but without file reading since we already have the data
+        segment_dictionary = {}
+
+        # Simple segmentation for probe calculation - treat entire scan as segments
+        # This is a simplified version for probe voltage calculation
+        if len(potentials) > 0:
+            # Create forward and reverse segments based on voltage direction
+            mid_point = len(potentials) // 2
+
+            # Forward segment (first half)
+            segment_dictionary[1] = {
+                'potentials': potentials[:mid_point],
+                'currents': currents[:mid_point],
+                'type': 'forward'
+            }
+
+            # Reverse segment (second half)
+            if len(potentials) > mid_point:
+                segment_dictionary[2] = {
+                    'potentials': potentials[mid_point:],
+                    'currents': currents[mid_point:],
+                    'type': 'reverse'
+                }
+
+        return potentials, currents, segment_dictionary
+
+    except Exception as e:
+        logger.error(f"Error in internal segmentation for probe calculation: {e}")
+        return potentials, currents, {}
+
+
 # --- Main Public Functions ---
 
 def get_cv_segments(file_path, params, selected_electrode=None):
@@ -594,13 +701,61 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
             if len(p_adj) < 3:
                 continue  # Not enough data in range
 
-            # Calculate baseline
-            if params['mass_transport'] == 'surface':
-                baseline = _baseline_surface_bound(p_adj, i_adj)
-            else:  # solution
-                baseline = _baseline_solution_phase(p_adj, i_adj)
+            # Apply SG filtering if enabled
+            sg_mode = params.get('sg_mode', 'auto')
 
-            i_corrected = np.array(i_adj) - np.array(baseline)
+            # Handle SG filter parameters
+            if sg_mode == 'auto':
+                # Auto-mode: Calculate SG window based on data length
+                # Use 20% of data length for CV, similar to SWV logic but adapted for CV
+                sg_window_points = max(3, int(len(i_adj) * 0.2))
+                sg_window = min(sg_window_points if sg_window_points % 2 == 1 else sg_window_points + 1, len(i_adj) // 2)
+                sg_degree = 2
+            elif sg_mode == 'manual':
+                # Manual mode: Use user-specified parameters
+                sg_window = params.get('sg_window', 5)
+                sg_degree = params.get('sg_degree', 2)
+            else:  # disabled
+                sg_window = None
+                sg_degree = None
+
+            # Apply SG filtering to current data
+            if sg_window is not None:
+                # Validate SG parameters
+                if sg_window % 2 == 0:
+                    sg_window += 1
+
+                min_effective_sg_window = max(3, sg_degree + 1)
+                if sg_window <= sg_degree:
+                    sg_window = sg_degree + 2 if (sg_degree + 2) % 2 != 0 else sg_degree + 3
+                if sg_window < min_effective_sg_window:
+                    sg_window = min_effective_sg_window
+                if sg_window > len(i_adj):
+                    sg_window = len(i_adj) if len(i_adj) % 2 != 0 else len(i_adj) - 1
+                if sg_window < min_effective_sg_window:
+                    sg_window = min_effective_sg_window
+
+                # Check if SG filter can be applied
+                if sg_window <= sg_degree or sg_window > len(i_adj):
+                    logger.warning(f"CV SG filter failed for {scan_type}: Data too short for settings.")
+                    i_smoothed = i_adj  # Use original data
+                else:
+                    try:
+                        i_smoothed = savgol_filter(i_adj, sg_window, sg_degree).tolist()
+                        logger.info(f"CV SG filter applied to {scan_type}: window={sg_window}, degree={sg_degree}")
+                    except Exception as e:
+                        logger.warning(f"CV SG filter error for {scan_type}: {e}. Using original data.")
+                        i_smoothed = i_adj
+            else:
+                i_smoothed = i_adj  # No filtering
+
+            # Calculate baseline (using smoothed data)
+            if params['mass_transport'] == 'surface':
+                baseline = _baseline_surface_bound(p_adj, i_smoothed)
+            else:  # solution
+                baseline = _baseline_solution_phase(p_adj, i_smoothed)
+
+            i_corrected = np.array(i_smoothed) - np.array(baseline)
 
             # Find peak
             peak_idx = np.argmax(np.abs(i_corrected))
@@ -653,11 +808,18 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
                 results["forward"]["peak_potential"] - results["reverse"]["peak_potential"])
             logger.info(f"CV peak separation calculated: {results['peak_separation']}")
 
+        # Step 4: Calculate probe voltage currents if probe voltages are specified
+        probe_voltages = params.get('probe_voltages', [])
+        if probe_voltages:
+            results["probe_data"] = _calculate_probe_currents(all_potentials, all_currents, probe_voltages, params)
+            logger.info(f"CV probe data calculated for {len(probe_voltages)} voltages")
+
         # Log final results summary
         logger.info(f"CV analysis final results for {file_path}:")
         logger.info(f"  - Forward data available: {bool(results['forward'])}")
         logger.info(f"  - Reverse data available: {bool(results['reverse'])}")
         logger.info(f"  - Peak separation: {results.get('peak_separation', 'N/A')}")
+        logger.info(f"  - Probe data available: {bool(results.get('probe_data'))}")
         logger.info(f"  - Status: {results['status']}")
 
         return results

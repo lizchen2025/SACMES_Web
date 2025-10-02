@@ -35,6 +35,11 @@ export class CVModule {
                 reverseSegmentInput: document.getElementById('cvReverseSegmentInput'),
                 peakMinVoltageInput: document.getElementById('cvPeakMinVoltageInput'),
                 peakMaxVoltageInput: document.getElementById('cvPeakMaxVoltageInput'),
+                probeVoltage1Input: document.getElementById('cvProbeVoltage1Input'),
+                probeVoltage2Input: document.getElementById('cvProbeVoltage2Input'),
+                updateProbeBtn: document.getElementById('updateProbeBtn'),
+                exportCVDataBtn: document.getElementById('exportCVDataBtn'),
+                exportStatus: document.getElementById('exportStatus'),
             },
             settings: {
                 voltageColumnInput: document.getElementById('cvVoltageColumnInput'),
@@ -100,6 +105,12 @@ export class CVModule {
         this.dom.nextToVisualizationBtn.addEventListener('click', this._handleNextToVisualization.bind(this));
         this.dom.startAnalysisBtn.addEventListener('click', this._handleStartAnalysis.bind(this));
         this.dom.detectSegmentsBtn.addEventListener('click', this._handleDetectSegments.bind(this));
+
+        // Set up CV export functionality
+        this.dom.visualization.exportCVDataBtn.addEventListener('click', this._handleCVExport.bind(this));
+
+        // Set up voltage probe functionality
+        this.dom.visualization.updateProbeBtn.addEventListener('click', this._updateProbeLines.bind(this));
 
         // Set up SG filtering parameter visibility toggle
         this._setupCVFilterParams();
@@ -360,6 +371,17 @@ export class CVModule {
                 this.dom.segmentStatus.className = 'text-sm text-red-600 mt-2';
             }
         });
+
+        // Add handler for CV export data response
+        this.socketManager.on('export_cv_data_response', (data) => {
+            if (data.status === 'success') {
+                const filename = this.dom.visualization.exportCVDataBtn.dataset.filename || 'cv_export.csv';
+                this.dom.visualization.exportStatus.textContent = `Export successful! Downloading ${filename}...`;
+                this._triggerCsvDownload(data.data, filename);
+            } else {
+                this.dom.visualization.exportStatus.textContent = `Export failed: ${data.message}`;
+            }
+        });
     }
 
     _handleNextToVisualization() {
@@ -547,6 +569,7 @@ export class CVModule {
             sg_mode: this._getSelectedRadioValue('cvSgMode'),
             sg_window: this._getSelectedRadioValue('cvSgMode') === 'manual' ? parseInt(this.dom.settings.sgWindowInput.value) : undefined,
             sg_degree: this._getSelectedRadioValue('cvSgMode') === 'manual' ? parseInt(this.dom.settings.sgDegreeInput.value) : undefined,
+            probe_voltages: this.state.probeVoltages || [],
             byte_limit: parseInt(this.dom.settings.byteLimitInput.value),
             sample_rate: parseFloat(this.dom.settings.sampleRateInput.value),
             analysis_interval: parseInt(this.dom.settings.analysisIntervalInput.value),
@@ -630,6 +653,10 @@ export class CVModule {
 
         if (adjustmentControls) adjustmentControls.classList.add('hidden');
         if (exportDataBtn) exportDataBtn.classList.add('hidden');
+
+        // Show CV export button
+        const exportCVDataBtn = document.getElementById('exportCVDataBtn');
+        if (exportCVDataBtn) exportCVDataBtn.classList.remove('hidden');
 
         // Change back button to go to CV settings
         if (backToSWVBtn) {
@@ -1225,6 +1252,10 @@ export class CVModule {
                         <h4 class="text-md font-semibold mb-2">AUC Trend</h4>
                         <div id="cv-auc-plot" class="plotly-plot-container w-full"></div>
                     </div>
+                    <div class="bg-white p-4 rounded-lg shadow" id="cv-probe-plot-container" style="display: none;">
+                        <h4 class="text-md font-semibold mb-2">Probe Voltage Currents</h4>
+                        <div id="cv-probe-plot" class="plotly-plot-container w-full"></div>
+                    </div>
                 </div>
             </div>
         `;
@@ -1265,6 +1296,9 @@ export class CVModule {
 
         // Update AUC plot
         this._updateAUCPlot(forwardAUCs, reverseAUCs);
+
+        // Update probe data plot if probe voltages exist
+        this._updateProbeDataPlot(electrodeResults, fileNumbers);
     }
 
     _updatePeakSeparationPlot(peakSeparations) {
@@ -1330,6 +1364,116 @@ export class CVModule {
             title: 'AUC vs File Number',
             xaxis: { title: 'File Number' },
             yaxis: { title: `Charge (${this.dom.settings.currentUnitsInput.value}C)` },
+            margin: { l: 70, r: 50, t: 50, b: 60 }
+        };
+
+        Plotly.react(plotElement, traces, layout, {
+            responsive: true,
+            displayModeBar: true,
+            modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d'],
+            displaylogo: false
+        });
+    }
+
+    _updateProbeDataPlot(electrodeResults, fileNumbers) {
+        // Check if probe data exists and we have analysis parameters
+        const analysisParams = this.state.analysisParams || {};
+        const probeVoltages = analysisParams.probe_voltages;
+
+        if (!probeVoltages || probeVoltages.length === 0) {
+            // Hide probe plot if no probe voltages are configured
+            const plotContainer = document.getElementById('cv-probe-plot-container');
+            if (plotContainer) {
+                plotContainer.style.display = 'none';
+            }
+            return;
+        }
+
+        // Extract probe data from results
+        const probeDataSeries = {};
+        probeVoltages.forEach((voltage, voltageIndex) => {
+            probeDataSeries[`probe_${voltageIndex + 1}_forward`] = [];
+            probeDataSeries[`probe_${voltageIndex + 1}_reverse`] = [];
+        });
+
+        fileNumbers.forEach(fileNum => {
+            const result = electrodeResults[fileNum];
+            if (result && result.status === 'success' && result.probe_data) {
+                const forwardProbes = result.probe_data.forward || [];
+                const reverseProbes = result.probe_data.reverse || [];
+
+                probeVoltages.forEach((voltage, voltageIndex) => {
+                    if (forwardProbes[voltageIndex]) {
+                        probeDataSeries[`probe_${voltageIndex + 1}_forward`].push({
+                            x: fileNum,
+                            y: forwardProbes[voltageIndex].current
+                        });
+                    }
+                    if (reverseProbes[voltageIndex]) {
+                        probeDataSeries[`probe_${voltageIndex + 1}_reverse`].push({
+                            x: fileNum,
+                            y: reverseProbes[voltageIndex].current
+                        });
+                    }
+                });
+            }
+        });
+
+        // Create plot if we have data
+        const plotElement = document.getElementById('cv-probe-plot');
+        if (!plotElement || !window.Plotly) return;
+
+        // Show the plot container
+        const plotContainer = document.getElementById('cv-probe-plot-container');
+        if (plotContainer) {
+            plotContainer.style.display = 'block';
+        }
+
+        const traces = [];
+        const colors = ['red', 'blue', 'green', 'orange']; // Colors for different probe voltages
+
+        probeVoltages.forEach((voltage, voltageIndex) => {
+            const forwardData = probeDataSeries[`probe_${voltageIndex + 1}_forward`];
+            const reverseData = probeDataSeries[`probe_${voltageIndex + 1}_reverse`];
+            const color = colors[voltageIndex % colors.length];
+
+            if (forwardData.length > 0) {
+                traces.push({
+                    x: forwardData.map(p => p.x),
+                    y: forwardData.map(p => p.y),
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: `${voltage}V Forward`,
+                    line: { color: color, width: 2 },
+                    marker: { size: 6 }
+                });
+            }
+
+            if (reverseData.length > 0) {
+                traces.push({
+                    x: reverseData.map(p => p.x),
+                    y: reverseData.map(p => p.y),
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: `${voltage}V Reverse`,
+                    line: { color: color, width: 2, dash: 'dash' },
+                    marker: { size: 6 }
+                });
+            }
+        });
+
+        if (traces.length === 0) {
+            const plotContainer = document.getElementById('cv-probe-plot-container');
+            if (plotContainer) {
+                plotContainer.style.display = 'none';
+            }
+            return;
+        }
+
+        const layout = {
+            title: 'Probe Voltage Currents vs File Number',
+            xaxis: { title: 'File Number' },
+            yaxis: { title: `Current (${this.dom.settings.currentUnitsInput.value})` },
             margin: { l: 70, r: 50, t: 50, b: 60 }
         };
 
@@ -1663,5 +1807,99 @@ export class CVModule {
             return false;
         }
         return true;
+    }
+
+    _handleCVExport() {
+        const electrodeInfo = this.state.currentElectrode !== null ? `_Electrode_${this.state.currentElectrode + 1}` : '_Averaged';
+        const defaultFilename = `CV_Analysis${electrodeInfo}_${new Date().toISOString().slice(0, 10)}.csv`;
+        const filename = prompt("Please enter a filename for the CV export:", defaultFilename);
+        if (filename) {
+            this.dom.visualization.exportCVDataBtn.dataset.filename = filename;
+            this.dom.visualization.exportStatus.textContent = 'Generating CV export file...';
+            // Send current electrode info to server for correct data export
+            this.socketManager.emit('request_export_cv_data', {
+                current_electrode: this.state.currentElectrode
+            });
+        }
+    }
+
+    _triggerCsvDownload(csvContent, filename) {
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", filename);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    _updateProbeLines() {
+        const voltage1 = parseFloat(this.dom.visualization.probeVoltage1Input.value);
+        const voltage2 = parseFloat(this.dom.visualization.probeVoltage2Input.value);
+
+        // Store probe voltages for later use in analysis
+        this.state.probeVoltages = [];
+        if (!isNaN(voltage1)) this.state.probeVoltages.push(voltage1);
+        if (!isNaN(voltage2)) this.state.probeVoltages.push(voltage2);
+
+        // Update the preview plot with probe lines
+        this._addProbeLinesToPreview();
+    }
+
+    _addProbeLinesToPreview() {
+        const plotElement = this.dom.cvPreviewPlot;
+        if (!plotElement || !window.Plotly || !this.state.probeVoltages) return;
+
+        // Get existing plot data
+        const plotData = plotElement.data;
+        const plotLayout = plotElement.layout;
+
+        if (!plotData || !plotLayout) return;
+
+        // Remove existing probe line shapes if any
+        let shapes = plotLayout.shapes || [];
+        shapes = shapes.filter(shape => !shape.name || !shape.name.startsWith('probe_line_'));
+
+        // Add new probe lines
+        this.state.probeVoltages.forEach((voltage, index) => {
+            const voltageUnits = this.dom.settings.voltageUnitsInput.value;
+            const voltageInBaseUnits = this._convertToBaseUnits(voltage, voltageUnits);
+
+            shapes.push({
+                type: 'line',
+                name: `probe_line_${index + 1}`,
+                x0: voltageInBaseUnits,
+                x1: voltageInBaseUnits,
+                y0: 0,
+                y1: 1,
+                yref: 'paper',
+                line: {
+                    color: index === 0 ? 'red' : 'orange',
+                    width: 2,
+                    dash: 'dash'
+                }
+            });
+        });
+
+        // Update the layout with new shapes
+        const updatedLayout = {
+            ...plotLayout,
+            shapes: shapes
+        };
+
+        Plotly.relayout(plotElement, updatedLayout);
+        console.log(`✅ Updated probe lines for voltages: ${this.state.probeVoltages.join(', ')}V`);
+    }
+
+    _convertToBaseUnits(value, unit) {
+        const voltageFactors = {
+            'V': 1.0,
+            'mV': 1e-3,
+            'μV': 1e-6,
+            'nV': 1e-9
+        };
+        return value * (voltageFactors[unit] || 1.0);
     }
 }

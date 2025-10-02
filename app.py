@@ -1588,6 +1588,25 @@ def handle_export_request(data):
         emit('export_data_response', {'status': 'error', 'message': f'Export failed: {str(e)}'})
 
 
+@socketio.on('request_export_cv_data')
+def handle_cv_export_request(data):
+    """
+    Handles a request from the client to export CV data to CSV.
+    """
+    logger.info(f"Received 'request_export_cv_data' from {request.sid} with data: {data}")
+    try:
+        # Get current electrode from request data
+        current_electrode = data.get('current_electrode') if data else None
+        csv_data = generate_cv_csv_data(current_electrode)
+        if csv_data:
+            emit('export_cv_data_response', {'status': 'success', 'data': csv_data})
+        else:
+            emit('export_cv_data_response', {'status': 'error', 'message': 'No CV data available to export.'})
+    except Exception as e:
+        logger.error(f"Failed to generate CV CSV for export: {e}", exc_info=True)
+        emit('export_cv_data_response', {'status': 'error', 'message': f'CV export failed: {str(e)}'})
+
+
 @socketio.on('request_electrode_warnings')
 def handle_electrode_warnings_request(data):
     """
@@ -1758,6 +1777,126 @@ def debug_consent_logs():
     except Exception as e:
         logger.error(f"Error checking consent logs: {e}")
         return {'status': 'error', 'message': str(e)}, 500
+
+
+def generate_cv_csv_data(current_electrode=None):
+    """
+    Generates a CSV formatted string from the current CV analysis data with AUC and peak separation data.
+
+    Args:
+        current_electrode: The electrode index to export data for (None for averaged data).
+    """
+    if not live_cv_results:
+        return ""
+
+    string_io = io.StringIO()
+    writer = csv.writer(string_io)
+
+    # Write metadata section first
+    writer.writerow(['# SACMES CV Analysis Report'])
+    writer.writerow(['# Export Date:', str(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))])
+    electrode_info = f"Electrode {current_electrode + 1}" if current_electrode is not None else "Averaged"
+    writer.writerow(['# Electrode:', electrode_info])
+    writer.writerow([])
+
+    # Write analysis parameters section
+    writer.writerow(['# Analysis Parameters'])
+    if live_cv_analysis_params:
+        writer.writerow(['Scan Rate (V/s):', live_cv_analysis_params.get('scan_rate', 'N/A')])
+        writer.writerow(['Mass Transport:', live_cv_analysis_params.get('mass_transport', 'N/A')])
+        writer.writerow(['Analysis Type:', live_cv_analysis_params.get('SelectedOptions', 'N/A')])
+        sg_mode = live_cv_analysis_params.get('sg_mode', 'auto')
+        writer.writerow(['SG Filter Mode:', sg_mode])
+        if sg_mode == 'manual':
+            writer.writerow(['SG Window:', live_cv_analysis_params.get('sg_window', 'N/A')])
+            writer.writerow(['SG Degree:', live_cv_analysis_params.get('sg_degree', 'N/A')])
+        else:
+            writer.writerow(['SG Window:', 'Auto (20% of data length)'])
+            writer.writerow(['SG Degree:', 'Auto (2)'])
+
+        # Add probe voltage information
+        probe_voltages = live_cv_analysis_params.get('probe_voltages', [])
+        if probe_voltages:
+            probe_voltages_str = ', '.join([f"{v} V" for v in probe_voltages])
+            writer.writerow(['Probe Voltages:', probe_voltages_str])
+        else:
+            writer.writerow(['Probe Voltages:', 'None'])
+    writer.writerow([])
+
+    # Write CV data header
+    writer.writerow(['# CV Analysis Data'])
+    header = [
+        'File_Number',
+        'Forward_Peak_Potential_V',
+        'Forward_Peak_Current',
+        'Forward_AUC_Charge',
+        'Reverse_Peak_Potential_V',
+        'Reverse_Peak_Current',
+        'Reverse_AUC_Charge',
+        'Peak_Separation_V'
+    ]
+
+    # Add probe voltage columns if probe data exists
+    probe_voltages = live_cv_analysis_params.get('probe_voltages', []) if live_cv_analysis_params else []
+    for i, voltage in enumerate(probe_voltages):
+        probe_num = i + 1
+        header.extend([
+            f'Probe_{probe_num}_Voltage_V',
+            f'Probe_{probe_num}_Forward_Current',
+            f'Probe_{probe_num}_Reverse_Current'
+        ])
+
+    writer.writerow(header)
+
+    # Get electrode key
+    electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
+
+    # Get CV results for the specified electrode
+    cv_electrode_results = live_cv_results.get(electrode_key, {})
+
+    if cv_electrode_results:
+        # Sort file numbers and write data rows
+        file_numbers = sorted([int(f) for f in cv_electrode_results.keys()])
+
+        for file_num in file_numbers:
+            file_key = str(file_num)
+            result = cv_electrode_results.get(file_key, {})
+
+            if result and result.get('status') == 'success':
+                forward_data = result.get('forward', {})
+                reverse_data = result.get('reverse', {})
+                peak_separation = result.get('peak_separation', '')
+                probe_data = result.get('probe_data', {})
+
+                row = [
+                    file_num,
+                    forward_data.get('peak_potential', ''),
+                    forward_data.get('peak_current', ''),
+                    forward_data.get('charge', ''),
+                    reverse_data.get('peak_potential', ''),
+                    reverse_data.get('peak_current', ''),
+                    reverse_data.get('charge', ''),
+                    peak_separation
+                ]
+
+                # Add probe data if available
+                for i, voltage in enumerate(probe_voltages):
+                    forward_probe_currents = probe_data.get('forward', [])
+                    reverse_probe_currents = probe_data.get('reverse', [])
+
+                    # Get current values for this probe voltage (index i)
+                    forward_current = forward_probe_currents[i]['current'] if i < len(forward_probe_currents) else ''
+                    reverse_current = reverse_probe_currents[i]['current'] if i < len(reverse_probe_currents) else ''
+
+                    row.extend([
+                        voltage,  # Probe voltage
+                        forward_current,  # Forward current at this voltage
+                        reverse_current   # Reverse current at this voltage
+                    ])
+
+                writer.writerow(row)
+
+    return string_io.getvalue()
 
 
 # --- Main Execution (Unchanged) ---

@@ -992,6 +992,49 @@
                                 <option value="Area Under the Curve">Area Under the Curve</option>
                             </select>
                         </div>
+
+                        <!-- CV SG Filter Options -->
+                        <div class="mt-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Savitzky-Golay Filter:</label>
+                            <div class="grid grid-cols-3 gap-4">
+                                <label class="flex items-center">
+                                    <input type="radio" name="cvSgMode" value="disabled" class="mr-2">
+                                    <span class="text-sm">Disabled</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="cvSgMode" value="auto" checked class="mr-2">
+                                    <span class="text-sm">Auto</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="cvSgMode" value="manual" class="mr-2">
+                                    <span class="text-sm">Manual</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- CV Auto Mode Description -->
+                        <div class="mt-4 p-3 bg-blue-50 border-l-4 border-blue-500 rounded-r">
+                            <p class="text-sm text-blue-700">
+                                <strong>Auto Mode:</strong> SG window = 20% of data length, degree = 2. Use Manual mode for fine-tuning performance.
+                            </p>
+                        </div>
+
+                        <!-- CV SG Manual Parameters -->
+                        <div id="cvSgManualParams" class="hidden mt-4">
+                            <h5 class="text-sm font-semibold text-gray-600 mb-2">Savitzky-Golay Filter Parameters:</h5>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label for="cvSgWindowInput" class="block text-gray-700 text-sm font-bold mb-1">SG Window:</label>
+                                    <input type="number" id="cvSgWindowInput" value="15" min="3" step="2"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                                <div>
+                                    <label for="cvSgDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">SG Degree:</label>
+                                    <input type="number" id="cvSgDegreeInput" value="2" min="0"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="flex justify-end pt-4">
@@ -1065,41 +1108,6 @@
                                         <option value="μA">μA (Microampere)</option>
                                         <option value="nA">nA (Nanoampere)</option>
                                     </select>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- CV SG Filtering -->
-                    <div>
-                        <h4 class="text-md font-semibold text-gray-700 mb-2">SG Filtering:</h4>
-                        <div class="flex flex-col space-y-2">
-                            <div class="flex items-center">
-                                <input type="radio" name="cvSgMode" value="disabled" class="mr-2">
-                                <label for="cvSgModeDisabled" class="text-gray-700 text-sm">Disabled</label>
-                            </div>
-                            <div class="flex items-center">
-                                <input type="radio" name="cvSgMode" value="auto" checked class="mr-2">
-                                <label for="cvSgModeAuto" class="text-gray-700 text-sm">Auto</label>
-                            </div>
-                            <div class="flex items-center">
-                                <input type="radio" name="cvSgMode" value="manual" class="mr-2">
-                                <label for="cvSgModeManual" class="text-gray-700 text-sm">Manual</label>
-                            </div>
-                        </div>
-
-                        <!-- CV SG Manual Parameters (initially hidden) -->
-                        <div id="cvSgManualParams" class="hidden mt-4 p-4 bg-gray-50 rounded-lg border">
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label for="cvSgWindowInput" class="block text-gray-700 text-sm font-bold mb-1">SG Window:</label>
-                                    <input type="number" id="cvSgWindowInput" value="15" min="3" step="2"
-                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
-                                </div>
-                                <div>
-                                    <label for="cvSgDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">SG Degree:</label>
-                                    <input type="number" id="cvSgDegreeInput" value="2" min="0"
-                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
                                 </div>
                             </div>
                         </div>
@@ -1201,6 +1209,29 @@
                     </div>
                 </div>
                 <p class="text-xs text-gray-500 mt-1">Optional: Limit peak detection to specific voltage range to exclude noise peaks</p>
+            </div>
+
+            <!-- CV Voltage Probe -->
+            <div class="border-t pt-4 mt-4 mb-6">
+                <h4 class="text-md font-semibold text-gray-700 mb-2">Voltage Probe:</h4>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="cvProbeVoltage1Input" class="block text-gray-700 text-sm font-bold mb-1">Probe Voltage 1 (V):</label>
+                        <input type="number" id="cvProbeVoltage1Input" step="0.01" placeholder="e.g., 0.2"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                    <div>
+                        <label for="cvProbeVoltage2Input" class="block text-gray-700 text-sm font-bold mb-1">Probe Voltage 2 (V):</label>
+                        <input type="number" id="cvProbeVoltage2Input" step="0.01" placeholder="e.g., -0.2"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Optional: Monitor current at specific voltages. Vertical lines will show on preview plot.</p>
+                <div class="mt-3">
+                    <button id="updateProbeBtn" class="bg-teal-500 hover:bg-teal-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out">
+                        Update Probe Lines
+                    </button>
+                </div>
             </div>
 
             <div class="text-center">
@@ -1321,6 +1352,10 @@
                 <button id="exportDataBtn"
                         class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-75 hidden">
                     Export Analysis Data
+                </button>
+                <button id="exportCVDataBtn"
+                        class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 hidden">
+                    Export CV Analysis
                 </button>
                 <button id="backToSWVBtn"
                         class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight">
