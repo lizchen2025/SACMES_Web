@@ -275,47 +275,38 @@ sio = socketio.Client(reconnection_attempts=5, reconnection_delay=5, logger=True
 def file_matches_filters(filename):
     required_keys = ['handle', 'frequencies', 'range_start', 'range_end', 'file_extension']
     if not all(k in current_filters for k in required_keys): return False
+
+    # Debug logging for file matching
+    print(f"[DEBUG] Checking file: {filename}")
+    print(f"[DEBUG] Handle: {current_filters['handle']}")
+    print(f"[DEBUG] Expected frequencies: {current_filters['frequencies']}")
     # Allow files without extension if file_extension is empty, or check extension normally
     file_ext = current_filters['file_extension']
     if file_ext and not filename.endswith(file_ext): return False
     if not filename.startswith(current_filters['handle']): return False
     try:
-        # For CV files like CV_60Hz_1.txt, extract frequency and number
-        # Pattern: handle_frequency_number.extension
-        # This will match both CV_60Hz_1.txt and older formats like _60Hz_1.
-        if filename.startswith(current_filters['handle']):
-            # For files starting with handle (like CV_60Hz_1.txt)
-            # Extract frequency from handle if present, otherwise use default
-            if '_' in current_filters['handle']:
-                # Try to extract frequency from handle (e.g., CV_60Hz -> 60)
-                handle_parts = current_filters['handle'].split('_')
-                freq = 60  # Default
-                for part in handle_parts:
-                    if part.endswith('Hz'):
-                        try:
-                            freq = int(part[:-2])  # Remove 'Hz' and convert to int
-                            break
-                        except ValueError:
-                            pass
-            else:
-                freq = 60  # Default frequency for CV files
-
-            # Extract file number
-            remaining = filename[len(current_filters['handle']):]
-            match = re.search(r'_(\d+)\.', remaining, re.IGNORECASE)
-            if match:
-                num = int(match.group(1))
-            else:
-                return False
-        else:
-            # For older format files like _60Hz_1.
-            match = re.search(r'_(\d+)Hz.*?_(\d+)(?:\.|$)', filename, re.IGNORECASE)
-            if not match: return False
-            freq, num = int(match.group(1)), int(match.group(2))
+        # Use the simple, unified approach from agent1.py that works for both SWV and CV files
+        # Pattern matches: SWV_15Hz_1.txt, CV_60Hz_1.txt, etc.
+        match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
+        if not match:
+            print(f"[DEBUG] REJECTED: Filename {filename} does not match pattern '_NNHz_N.'")
+            return False
+        freq, num = int(match.group(1)), int(match.group(2))
+        print(f"[DEBUG] Extracted from pattern: freq={freq}Hz, num={num}")
     except (ValueError, IndexError):
+        print(f"[DEBUG] REJECTED: Error parsing frequency/number from {filename}")
         return False
-    if freq not in current_filters['frequencies']: return False
-    if not (current_filters['range_start'] <= num <= current_filters['range_end']): return False
+    print(f"[DEBUG] Final extracted values: freq={freq}, num={num}")
+    print(f"[DEBUG] Frequency check: {freq} in {current_filters['frequencies']} = {freq in current_filters['frequencies']}")
+    print(f"[DEBUG] Range check: {current_filters['range_start']} <= {num} <= {current_filters['range_end']} = {current_filters['range_start'] <= num <= current_filters['range_end']}")
+
+    if freq not in current_filters['frequencies']:
+        print(f"[DEBUG] REJECTED: Frequency {freq} not in expected frequencies {current_filters['frequencies']}")
+        return False
+    if not (current_filters['range_start'] <= num <= current_filters['range_end']):
+        print(f"[DEBUG] REJECTED: File number {num} not in range {current_filters['range_start']}-{current_filters['range_end']}")
+        return False
+    print(f"[DEBUG] ACCEPTED: File {filename} matches all filters")
     return True
 
 

@@ -699,13 +699,8 @@ export class CVModule {
         const electrodeControls = document.getElementById('electrodeControls');
         if (!electrodeControls) return;
 
-        // Hide electrode controls during analysis
-        if (this.state.isAnalysisRunning) {
-            electrodeControls.style.display = 'none';
-            return;
-        } else {
-            electrodeControls.style.display = 'block';
-        }
+        // Always show electrode controls (like SWV module)
+        electrodeControls.style.display = 'block';
 
         // Clear existing buttons
         const existingButtons = electrodeControls.querySelectorAll('.electrode-btn');
