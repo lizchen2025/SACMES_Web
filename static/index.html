@@ -1070,6 +1070,41 @@
                         </div>
                     </div>
 
+                    <!-- CV SG Filtering -->
+                    <div>
+                        <h4 class="text-md font-semibold text-gray-700 mb-2">SG Filtering:</h4>
+                        <div class="flex flex-col space-y-2">
+                            <div class="flex items-center">
+                                <input type="radio" name="cvSgMode" value="disabled" class="mr-2">
+                                <label for="cvSgModeDisabled" class="text-gray-700 text-sm">Disabled</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" name="cvSgMode" value="auto" checked class="mr-2">
+                                <label for="cvSgModeAuto" class="text-gray-700 text-sm">Auto</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" name="cvSgMode" value="manual" class="mr-2">
+                                <label for="cvSgModeManual" class="text-gray-700 text-sm">Manual</label>
+                            </div>
+                        </div>
+
+                        <!-- CV SG Manual Parameters (initially hidden) -->
+                        <div id="cvSgManualParams" class="hidden mt-4 p-4 bg-gray-50 rounded-lg border">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="cvSgWindowInput" class="block text-gray-700 text-sm font-bold mb-1">SG Window:</label>
+                                    <input type="number" id="cvSgWindowInput" value="15" min="3" step="2"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                                <div>
+                                    <label for="cvSgDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">SG Degree:</label>
+                                    <input type="number" id="cvSgDegreeInput" value="2" min="0"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div>
                         <label for="cvByteLimitInput" class="block text-gray-700 text-sm font-bold mb-1">Byte Limit for Read (bytes):</label>
                         <input type="number" id="cvByteLimitInput" value="3000" min="1"

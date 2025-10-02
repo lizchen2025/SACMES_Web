@@ -336,31 +336,99 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
 
 
 def _baseline_surface_bound(potentials, currents):
-    """Calculates a linear baseline for surface-bound species using first-last point connection."""
-    # CV baseline: connect first and last points of the segment
-    if len(potentials) < 2:
+    """Calculates a linear baseline for surface-bound species using valley points (vertices)."""
+    if len(potentials) < 4:  # Need at least 4 points to find valleys
         return [0] * len(potentials)
 
-    first_potential, first_current = potentials[0], currents[0]
-    last_potential, last_current = potentials[-1], currents[-1]
+    # Convert to numpy arrays for easier manipulation
+    pot_array = np.array(potentials)
+    curr_array = np.array(currents)
 
-    # Create linear baseline from first to last point
-    if first_potential == last_potential:  # Avoid division by zero
+    # Find peak to help locate valleys
+    peak_idx = np.argmax(np.abs(curr_array))
+
+    # Find left valley (minimum absolute current in left portion)
+    left_portion = curr_array[:peak_idx] if peak_idx > 0 else curr_array[:1]
+    if len(left_portion) > 0:
+        left_valley_idx = np.argmin(np.abs(left_portion))
+    else:
+        left_valley_idx = 0
+
+    # Find right valley (minimum absolute current in right portion)
+    right_portion = curr_array[peak_idx+1:] if peak_idx < len(curr_array)-1 else curr_array[-1:]
+    if len(right_portion) > 0:
+        right_valley_idx = peak_idx + 1 + np.argmin(np.abs(right_portion))
+    else:
+        right_valley_idx = len(curr_array) - 1
+
+    # Get valley points
+    left_potential, left_current = pot_array[left_valley_idx], curr_array[left_valley_idx]
+    right_potential, right_current = pot_array[right_valley_idx], curr_array[right_valley_idx]
+
+    # Create linear baseline between valley points
+    if right_potential == left_potential:  # Avoid division by zero
         slope = 0
     else:
-        slope = (last_current - first_current) / (last_potential - first_potential)
+        slope = (right_current - left_current) / (right_potential - left_potential)
 
-    intercept = first_current - slope * first_potential
+    intercept = left_current - slope * left_potential
     baseline_currents = [(slope * p + intercept) for p in potentials]
 
-    logger.error(f"CV baseline created: first({first_potential:.3f}V, {first_current:.3e}A) -> last({last_potential:.3f}V, {last_current:.3e}A)")
+    logger.error(f"CV Surface Bound baseline: left valley({left_potential:.3f}V, {left_current:.3e}A) -> right valley({right_potential:.3f}V, {right_current:.3e}A)")
     return baseline_currents
 
 
 def _baseline_solution_phase(potentials, currents):
-    """For solution-phase, also use first-last point connection for consistency."""
-    # For CV, both surface and solution use the same baseline approach
-    return _baseline_surface_bound(potentials, currents)
+    """Calculates a sloped baseline for solution-phase species using peak foot slope analysis."""
+    if len(potentials) < 6:  # Need enough points for slope calculation
+        return [0] * len(potentials)
+
+    # Convert to numpy arrays
+    pot_array = np.array(potentials)
+    curr_array = np.array(currents)
+
+    # Find peak
+    peak_idx = np.argmax(np.abs(curr_array))
+
+    # Define region size for slope calculation (typically 10-20% of data on each side)
+    region_size = max(2, len(potentials) // 10)
+
+    # Find left peak foot region (before peak, but not too far)
+    left_start = max(0, peak_idx - region_size * 2)
+    left_end = max(1, peak_idx - region_size // 2)
+    left_region_pot = pot_array[left_start:left_end]
+    left_region_curr = curr_array[left_start:left_end]
+
+    # Find right peak foot region (after peak, but not too far)
+    right_start = min(len(pot_array) - 1, peak_idx + region_size // 2)
+    right_end = min(len(pot_array), peak_idx + region_size * 2)
+    right_region_pot = pot_array[right_start:right_end]
+    right_region_curr = curr_array[right_start:right_end]
+
+    # Calculate slopes in both regions using linear regression
+    left_slope = 0
+    right_slope = 0
+
+    if len(left_region_pot) >= 2:
+        left_slope = np.polyfit(left_region_pot, left_region_curr, 1)[0]
+
+    if len(right_region_pot) >= 2:
+        right_slope = np.polyfit(right_region_pot, right_region_curr, 1)[0]
+
+    # Average the slopes to get overall diffusion-like slope
+    avg_slope = (left_slope + right_slope) / 2
+
+    # Use the peak foot (point before peak with minimum current change) as reference
+    peak_foot_idx = max(0, peak_idx - region_size)
+    peak_foot_potential = pot_array[peak_foot_idx]
+    peak_foot_current = curr_array[peak_foot_idx]
+
+    # Create baseline using the average slope passing through peak foot
+    intercept = peak_foot_current - avg_slope * peak_foot_potential
+    baseline_currents = [(avg_slope * p + intercept) for p in potentials]
+
+    logger.error(f"CV Solution Phase baseline: slope={avg_slope:.3e} A/V, through peak foot({peak_foot_potential:.3f}V, {peak_foot_current:.3e}A)")
+    return baseline_currents
 
 
 # --- Main Public Functions ---

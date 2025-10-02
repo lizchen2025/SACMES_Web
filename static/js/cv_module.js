@@ -44,6 +44,9 @@ export class CVModule {
                 fileExtensionInput: document.getElementById('cvFileExtensionInput'),
                 voltageUnitsInput: document.getElementById('cvVoltageUnitsInput'),
                 currentUnitsInput: document.getElementById('cvCurrentUnitsInput'),
+                sgModeInputs: document.querySelectorAll('input[name="cvSgMode"]'),
+                sgWindowInput: document.getElementById('cvSgWindowInput'),
+                sgDegreeInput: document.getElementById('cvSgDegreeInput'),
                 byteLimitInput: document.getElementById('cvByteLimitInput'),
                 sampleRateInput: document.getElementById('cvSampleRateInput'),
                 analysisIntervalInput: document.getElementById('cvAnalysisIntervalInput'),
@@ -97,6 +100,36 @@ export class CVModule {
         this.dom.nextToVisualizationBtn.addEventListener('click', this._handleNextToVisualization.bind(this));
         this.dom.startAnalysisBtn.addEventListener('click', this._handleStartAnalysis.bind(this));
         this.dom.detectSegmentsBtn.addEventListener('click', this._handleDetectSegments.bind(this));
+
+        // Set up SG filtering parameter visibility toggle
+        this._setupCVFilterParams();
+    }
+
+    _setupCVFilterParams() {
+        const cvSgManualParams = document.getElementById('cvSgManualParams');
+
+        const toggleFilterParams = () => {
+            const sgMode = this._getSelectedRadioValue('cvSgMode');
+
+            // Show/hide CV SG manual params based on SG mode
+            if (sgMode === 'manual') {
+                cvSgManualParams.classList.remove('hidden');
+            } else {
+                cvSgManualParams.classList.add('hidden');
+            }
+        };
+
+        // Add event listeners to all CV SG mode radio buttons
+        this.dom.settings.sgModeInputs.forEach(input => {
+            input.addEventListener('change', toggleFilterParams);
+        });
+
+        toggleFilterParams(); // Initialize on load
+    }
+
+    _getSelectedRadioValue(name) {
+        const selected = document.querySelector(`input[name="${name}"]:checked`);
+        return selected ? selected.value : null;
     }
 
     _setupSocketHandlers() {
@@ -511,6 +544,9 @@ export class CVModule {
             file_extension: this.dom.settings.fileExtensionInput.value,
             voltage_units: this.dom.settings.voltageUnitsInput.value,
             current_units: this.dom.settings.currentUnitsInput.value,
+            sg_mode: this._getSelectedRadioValue('cvSgMode'),
+            sg_window: this._getSelectedRadioValue('cvSgMode') === 'manual' ? parseInt(this.dom.settings.sgWindowInput.value) : undefined,
+            sg_degree: this._getSelectedRadioValue('cvSgMode') === 'manual' ? parseInt(this.dom.settings.sgDegreeInput.value) : undefined,
             byte_limit: parseInt(this.dom.settings.byteLimitInput.value),
             sample_rate: parseFloat(this.dom.settings.sampleRateInput.value),
             analysis_interval: parseInt(this.dom.settings.analysisIntervalInput.value),
@@ -606,6 +642,10 @@ export class CVModule {
                 this.state.currentScreen = 'settings';
                 this.uiManager.showScreen('cvAnalysisScreen');
                 this.state.isAnalysisRunning = false;
+
+                // Reset button state when returning to settings
+                this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
+                this.dom.startAnalysisBtn.disabled = false;
             };
         }
 
