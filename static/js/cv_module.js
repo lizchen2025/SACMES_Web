@@ -458,8 +458,8 @@ export class CVModule {
             const range = segInfo.potential_range || [0, 0];
 
             // Create descriptive labels
-            const forwardLabel = `Segment ${segment} (${segmentType}, ${points} pts, ${range[0].toFixed(2)}V to ${range[1].toFixed(2)}V)`;
-            const reverseLabel = `Segment ${segment} (${segmentType}, ${points} pts, ${range[0].toFixed(2)}V to ${range[1].toFixed(2)}V)`;
+            const forwardLabel = `Segment ${segment} (${segmentType}, ${points} pts, ${range[0].toFixed(2)}${this.dom.settings.voltageUnitsInput.value} to ${range[1].toFixed(2)}${this.dom.settings.voltageUnitsInput.value})`;
+            const reverseLabel = `Segment ${segment} (${segmentType}, ${points} pts, ${range[0].toFixed(2)}${this.dom.settings.voltageUnitsInput.value} to ${range[1].toFixed(2)}${this.dom.settings.voltageUnitsInput.value})`;
 
             const option1 = new Option(forwardLabel, segment);
             const option2 = new Option(reverseLabel, segment);
@@ -1077,7 +1077,7 @@ export class CVModule {
                 mode: 'markers+text',
                 name: 'Peak',
                 marker: { color: 'red', size: 10, symbol: 'diamond' },
-                text: [`Peak: ${sweepData.peak_potential.toFixed(3)}V, ${sweepData.peak_current.toFixed(2)}${this.dom.settings.currentUnitsInput.value}`],
+                text: [`Peak: ${sweepData.peak_potential.toFixed(3)}${this.dom.settings.voltageUnitsInput.value}, ${sweepData.peak_current.toFixed(2)}${this.dom.settings.currentUnitsInput.value}`],
                 textposition: 'top center',
                 textfont: { size: 10 }
             });
@@ -1158,32 +1158,32 @@ export class CVModule {
 
         // Create new layout: left side segments, right side comprehensive analysis
         const mainContainer = document.createElement('div');
-        mainContainer.className = 'cv-main-container flex gap-4 mt-4';
+        mainContainer.className = 'cv-main-container grid grid-cols-1 lg:grid-cols-4 gap-4 mt-4';
         mainContainer.innerHTML = `
-            <!-- Left side: CV Segments (25% width) -->
-            <div class="cv-segments-side w-1/4">
+            <!-- Left side: CV Segments (responsive width) -->
+            <div class="cv-segments-side lg:col-span-1">
                 <div class="space-y-4">
                     <div class="bg-white p-3 rounded-lg shadow">
                         <h4 class="text-sm font-semibold mb-2">Forward Sweep</h4>
-                        <div id="cv-forward-plot" class="plotly-plot-container"></div>
+                        <div id="cv-forward-plot" class="plotly-plot-container w-full"></div>
                     </div>
                     <div class="bg-white p-3 rounded-lg shadow">
                         <h4 class="text-sm font-semibold mb-2">Reverse Sweep</h4>
-                        <div id="cv-reverse-plot" class="plotly-plot-container"></div>
+                        <div id="cv-reverse-plot" class="plotly-plot-container w-full"></div>
                     </div>
                 </div>
             </div>
 
-            <!-- Right side: Comprehensive Analysis (75% width) -->
-            <div class="cv-analysis-side w-3/4">
+            <!-- Right side: Comprehensive Analysis (responsive width) -->
+            <div class="cv-analysis-side lg:col-span-3">
                 <div class="space-y-4">
                     <div class="bg-white p-4 rounded-lg shadow">
                         <h4 class="text-md font-semibold mb-2">Peak Separation Trend</h4>
-                        <div id="cv-peak-separation-plot" class="plotly-plot-container"></div>
+                        <div id="cv-peak-separation-plot" class="plotly-plot-container w-full"></div>
                     </div>
                     <div class="bg-white p-4 rounded-lg shadow">
                         <h4 class="text-md font-semibold mb-2">AUC Trend</h4>
-                        <div id="cv-auc-plot" class="plotly-plot-container"></div>
+                        <div id="cv-auc-plot" class="plotly-plot-container w-full"></div>
                     </div>
                 </div>
             </div>

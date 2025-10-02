@@ -511,7 +511,9 @@ export class SWVModule {
                     individual_analysis.auc_vertices,
                     this.dom.settings.selectedOptionsInput.value,
                     individual_analysis.peak_info,  // NEW: Peak detection info
-                    individual_analysis.peak_baseline_line  // NEW: Peak-to-baseline line
+                    individual_analysis.peak_baseline_line,  // NEW: Peak-to-baseline line
+                    this.dom.settings.voltageUnitsInput.value,  // Voltage units
+                    this.dom.settings.currentUnitsInput.value   // Current units
                 );
                 fileNumEl.textContent = fileNum;
                 peakHeightEl.textContent = individual_analysis.peak_value !== null ? individual_analysis.peak_value.toFixed(4) : "N/A";
@@ -553,7 +555,9 @@ export class SWVModule {
                     latestData.auc_vertices,
                     this.dom.settings.selectedOptionsInput.value,
                     latestData.peak_info,  // NEW: Peak detection info
-                    latestData.peak_baseline_line  // NEW: Peak-to-baseline line
+                    latestData.peak_baseline_line,  // NEW: Peak-to-baseline line
+                    this.dom.settings.voltageUnitsInput.value,  // Voltage units
+                    this.dom.settings.currentUnitsInput.value   // Current units
                 );
                 fileNumEl.textContent = latestFileNum;
                 peakHeightEl.textContent = latestData.peak_value !== null ? latestData.peak_value.toFixed(4) : "N/A";
@@ -566,7 +570,7 @@ export class SWVModule {
         const resizeInterval = parseInt(this.dom.settings.resizeIntervalInput.value);
         const freqStrs = this.state.currentFrequencies.map(String);
         const xAxisTitle = (this.state.currentXAxisOptions === "Experiment Time") ? 'Experiment Time (min)' : 'File Number';
-        PlotlyPlotter.renderFullTrendPlot('peakCurrentTrendPlot', trendData, freqStrs, xAxisTitle, 'Peak Current (µA)', this.state.currentNumFiles, '', 'peak', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
+        PlotlyPlotter.renderFullTrendPlot('peakCurrentTrendPlot', trendData, freqStrs, xAxisTitle, `Peak Current (${this.dom.settings.currentUnitsInput.value})`, this.state.currentNumFiles, '', 'peak', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
         PlotlyPlotter.renderFullTrendPlot('normalizedPeakTrendPlot', trendData, freqStrs, xAxisTitle, 'Normalized Current', this.state.currentNumFiles, '', 'normalized', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
         PlotlyPlotter.renderFullTrendPlot('kdmTrendPlot', trendData, freqStrs, xAxisTitle, 'KDM Value', this.state.currentNumFiles, '', 'kdm', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
     }

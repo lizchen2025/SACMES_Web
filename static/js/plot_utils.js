@@ -1,7 +1,7 @@
 // static/js/plot_utils.js (Final version with injection point fix)
 
 export class PlotlyPlotter {
-    static plotIndividualData(plotDivId, potentials, rawCurrents, smoothedCurrents, regressionLine, adjustedPotentials, aucVertices, selectedOptions, peakInfo = null, peakBaselineLine = null) {
+    static plotIndividualData(plotDivId, potentials, rawCurrents, smoothedCurrents, regressionLine, adjustedPotentials, aucVertices, selectedOptions, peakInfo = null, peakBaselineLine = null, voltageUnits = 'V', currentUnits = 'µA') {
         const traces = [];
 
         traces.push({
@@ -38,8 +38,8 @@ export class PlotlyPlotter {
                     symbol: ['circle', 'diamond']
                 },
                 hovertemplate: '<b>%{fullData.name}</b><br>' +
-                             'Potential: %{x:.4f} V<br>' +
-                             'Current: %{y:.4f} µA<br>' +
+                             `Potential: %{x:.4f} ${voltageUnits}<br>` +
+                             `Current: %{y:.4f} ${currentUnits}<br>` +
                              '<extra></extra>'
             });
         }
@@ -58,10 +58,10 @@ export class PlotlyPlotter {
                     line: {color: 'darkred', width: 2}
                 },
                 hovertemplate: '<b>Peak Detection</b><br>' +
-                             'Peak Potential: ' + peakInfo.peak_potential.toFixed(4) + ' V<br>' +
-                             'Peak Current: ' + peakInfo.peak_current.toFixed(4) + ' µA<br>' +
-                             'Baseline Current: ' + peakInfo.baseline_current.toFixed(4) + ' µA<br>' +
-                             'Peak Height: ' + peakInfo.peak_height.toFixed(4) + ' µA<br>' +
+                             'Peak Potential: ' + peakInfo.peak_potential.toFixed(4) + ` ${voltageUnits}<br>` +
+                             'Peak Current: ' + peakInfo.peak_current.toFixed(4) + ` ${currentUnits}<br>` +
+                             'Baseline Current: ' + peakInfo.baseline_current.toFixed(4) + ` ${currentUnits}<br>` +
+                             'Peak Height: ' + peakInfo.peak_height.toFixed(4) + ` ${currentUnits}<br>` +
                              '<extra></extra>'
             });
 
@@ -79,8 +79,8 @@ export class PlotlyPlotter {
                         line: {color: 'darkgreen', width: 1}
                     },
                     hovertemplate: '<b>Baseline Point</b><br>' +
-                                 'Potential: %{x:.4f} V<br>' +
-                                 'Current: %{y:.4f} µA<br>' +
+                                 `Potential: %{x:.4f} ${voltageUnits}<br>` +
+                                 `Current: %{y:.4f} ${currentUnits}<br>` +
                                  '<extra></extra>'
                 });
             }
@@ -99,8 +99,8 @@ export class PlotlyPlotter {
 
         const layout = {
             title: '', autosize: true,
-            xaxis: { title: 'Potential (V)', autorange: true, tickangle: -45, tickfont: { size: 10 } },
-            yaxis: { title: 'Current (µA)', autorange: true, rangemode: 'normal' },
+            xaxis: { title: `Potential (${voltageUnits})`, autorange: true, tickangle: -45, tickfont: { size: 10 } },
+            yaxis: { title: `Current (${currentUnits})`, autorange: true, rangemode: 'normal' },
             legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'center', x: 0.5, font: { size: 10 } },
             margin: { t: 50, b: 50, l: 60, r: 20 }
         };
