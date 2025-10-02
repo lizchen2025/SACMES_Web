@@ -144,7 +144,33 @@ REDIS_PASSWORD = read_secret('redis_password', 'REDIS_PASSWORD')
 AGENT_AUTH_TOKEN = read_secret('agent_auth_token', 'AGENT_AUTH_TOKEN', 'your_super_secret_token_here')
 
 app.config['SECRET_KEY'] = SECRET_KEY
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', logger=True, engineio_logger=True)
+# Enhanced SocketIO configuration for OpenShift deployment
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='eventlet',
+    logger=True,
+    engineio_logger=True,
+
+    # OpenShift-optimized settings to prevent disconnections
+    ping_timeout=60,        # Extended timeout for heavy operations (default: 20s)
+    ping_interval=25,       # More frequent heartbeats (default: 25s)
+
+    # Prevent disconnections during processing
+    allow_upgrades=True,
+    max_http_buffer_size=10000000,  # 10MB for large CV data files
+
+    # Transport optimization for container environments
+    transports=['websocket', 'polling'],
+
+    # Additional stability settings
+    always_connect=True,
+    reconnection=True,
+    reconnection_attempts=5,
+    reconnection_delay=1,
+    reconnection_delay_max=5,
+    randomization_factor=0.5
+)
 
 # Redis connection - construct URL securely
 REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
@@ -1226,9 +1252,9 @@ def handle_get_cv_preview(data):
 
 @socketio.on('get_cv_segments')
 def handle_get_cv_segments(data):
-    """Get available CV segments from uploaded file"""
+    """Get available CV segments from uploaded file - Non-blocking version"""
     try:
-        logger.info(f"=== CV Segments Request ===")
+        logger.info(f"=== CV Segments Request (Non-blocking) ===")
         logger.info(f"From session: {request.sid}")
         logger.info(f"Data keys: {list(data.keys())}")
 
@@ -1239,20 +1265,55 @@ def handle_get_cv_segments(data):
 
         file_content = data.get('content', '')
         analysis_params = data.get('params', {})
-        selected_electrode = analysis_params.get('selected_electrode')
 
         logger.info(f"File content length: {len(file_content)}")
-        logger.info(f"Content preview: {file_content[:100] if file_content else 'No content'}")
-        logger.info(f"Analysis params: {analysis_params}")
-        logger.info(f"Selected electrode: {selected_electrode}")
+        logger.info(f"Analysis params keys: {list(analysis_params.keys())}")
 
         if not file_content:
             logger.error("No file content provided")
             emit('cv_segments_response', {'status': 'error', 'message': 'No file content provided'})
             return
 
+        # Send immediate acknowledgment to prevent timeout
+        emit('cv_segments_processing', {
+            'status': 'started',
+            'message': 'Processing CV segments in background...'
+        })
+
+        # Start background task to avoid blocking the main thread
+        socketio.start_background_task(
+            target=process_cv_segments_background,
+            data=data,
+            client_sid=request.sid
+        )
+
+        logger.info(f"Background CV segment processing started for client {request.sid}")
+
+    except Exception as e:
+        logger.error(f"Error starting CV segments processing: {e}", exc_info=True)
+        emit('cv_segments_response', {'status': 'error', 'message': str(e)})
+
+
+def process_cv_segments_background(data, client_sid):
+    """Background processing for CV segments to avoid blocking main thread"""
+    temp_filepath = None
+    try:
+        logger.info(f"=== Background CV Segments Processing Started ===")
+        logger.info(f"Client SID: {client_sid}")
+
+        # Extract data
+        file_content = data.get('content', '')
+        analysis_params = data.get('params', {})
+        selected_electrode = analysis_params.get('selected_electrode')
+
+        # Send progress update
+        socketio.emit('cv_segments_progress', {
+            'progress': 10,
+            'message': 'Creating temporary file...'
+        }, room=client_sid)
+
         # Create temporary file
-        filename = secure_filename(data.get('filename', 'temp_cv.txt'))
+        filename = secure_filename(data.get('filename', f'temp_cv_{client_sid}.txt'))
         temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
         logger.info(f"Creating temp file: {temp_filepath}")
@@ -1260,29 +1321,93 @@ def handle_get_cv_segments(data):
         with open(temp_filepath, 'w', encoding='utf-8') as f:
             f.write(file_content)
 
+        # Yield control to event loop
+        eventlet.sleep(0)
+
         # Verify file was written correctly
         if not os.path.exists(temp_filepath):
             logger.error("Failed to create temporary file")
-            emit('cv_segments_response', {'status': 'error', 'message': 'Failed to create temporary file'})
+            socketio.emit('cv_segments_response', {
+                'status': 'error',
+                'message': 'Failed to create temporary file'
+            }, room=client_sid)
             return
 
         logger.info(f"Temp file size: {os.path.getsize(temp_filepath)} bytes")
 
-        # Get segments
+        # Send progress update
+        socketio.emit('cv_segments_progress', {
+            'progress': 30,
+            'message': 'Reading and parsing CV data...'
+        }, room=client_sid)
+
+        # Yield control before heavy operation
+        eventlet.sleep(0)
+
+        # Get segments with periodic yielding
         logger.info("Calling get_cv_segments function...")
-        segments_result = get_cv_segments(temp_filepath, analysis_params, selected_electrode)
+        segments_result = get_cv_segments_with_yield(temp_filepath, analysis_params, selected_electrode, client_sid)
         logger.info(f"Segments result: {segments_result}")
 
-        # Clean up
-        if os.path.exists(temp_filepath):
-            os.remove(temp_filepath)
-            logger.info("Temporary file cleaned up")
+        # Send final progress update
+        socketio.emit('cv_segments_progress', {
+            'progress': 100,
+            'message': 'Segment detection completed!'
+        }, room=client_sid)
 
-        emit('cv_segments_response', segments_result)
+        # Send final result
+        socketio.emit('cv_segments_response', segments_result, room=client_sid)
+
+        logger.info(f"CV segments processing completed successfully for client {client_sid}")
 
     except Exception as e:
-        logger.error(f"Error getting CV segments: {e}", exc_info=True)
-        emit('cv_segments_response', {'status': 'error', 'message': str(e)})
+        logger.error(f"Error in background CV segments processing: {e}", exc_info=True)
+        socketio.emit('cv_segments_response', {
+            'status': 'error',
+            'message': f'Background processing error: {str(e)}'
+        }, room=client_sid)
+
+    finally:
+        # Clean up temporary file
+        if temp_filepath and os.path.exists(temp_filepath):
+            try:
+                os.remove(temp_filepath)
+                logger.info(f"Temporary file cleaned up: {temp_filepath}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up temp file {temp_filepath}: {cleanup_error}")
+
+
+def get_cv_segments_with_yield(file_path, params, selected_electrode, client_sid=None):
+    """CV segments detection with yielding to prevent blocking"""
+    try:
+        # Send progress update
+        if client_sid:
+            socketio.emit('cv_segments_progress', {
+                'progress': 50,
+                'message': 'Analyzing CV segments...'
+            }, room=client_sid)
+
+        # Yield control before calling the heavy function
+        eventlet.sleep(0)
+
+        # Call the original function but with yielding
+        result = get_cv_segments(file_path, params, selected_electrode)
+
+        # Yield control after processing
+        eventlet.sleep(0)
+
+        # Send progress update
+        if client_sid:
+            socketio.emit('cv_segments_progress', {
+                'progress': 90,
+                'message': 'Finalizing segment detection...'
+            }, room=client_sid)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in get_cv_segments_with_yield: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
 
 
 @socketio.on('cv_data_from_agent')
@@ -1512,6 +1637,65 @@ def handle_agent_consent(data):
 
 
 # --- HTTP Routes ---
+# Health check endpoints for OpenShift
+@app.route('/health')
+def health_check():
+    """Health check for OpenShift liveness probe"""
+    return {
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'service': 'SACMES Web Frontend'
+    }, 200
+
+
+@app.route('/ready')
+def readiness_check():
+    """Readiness check for OpenShift readiness probe"""
+    try:
+        # Check if critical services are available
+        redis_ok = True
+        redis_message = "connected"
+        try:
+            if redis_client:
+                redis_client.ping()
+            else:
+                redis_ok = False
+                redis_message = "not configured"
+        except Exception as e:
+            redis_ok = False
+            redis_message = f"error: {str(e)}"
+
+        # Check if analyzers are loaded
+        analyzers_ok = bool(analyze_cv_data and get_cv_segments)
+
+        # Overall readiness
+        is_ready = redis_ok and analyzers_ok
+
+        return {
+            'status': 'ready' if is_ready else 'not_ready',
+            'timestamp': datetime.now().isoformat(),
+            'checks': {
+                'redis': {
+                    'status': redis_message,
+                    'healthy': redis_ok
+                },
+                'analyzers': {
+                    'cv_analyzer': bool(analyze_cv_data),
+                    'cv_segments': bool(get_cv_segments),
+                    'healthy': analyzers_ok
+                }
+            }
+        }, 200 if is_ready else 503
+
+    except Exception as e:
+        logger.error(f"Readiness check error: {e}")
+        return {
+            'status': 'error',
+            'message': str(e),
+            'timestamp': datetime.now().isoformat()
+        }, 500
+
+
 @app.route('/')
 def index():
     return send_from_directory(app.static_folder, 'index.html')

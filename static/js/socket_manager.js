@@ -7,7 +7,13 @@ export class SocketManager {
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            timeout: 20000
+            timeout: 60000,  // Extended timeout to match backend (60s)
+
+            // Additional settings for OpenShift stability
+            forceNew: false,
+            upgrade: true,
+            rememberUpgrade: true,
+            transports: ['websocket', 'polling']
         });
         this.eventHandlers = {}; // To store custom event handlers
 

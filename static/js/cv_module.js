@@ -190,6 +190,25 @@ export class CVModule {
         // Debug: Note - onAny is not available in this SocketManager implementation
         console.log('Note: Using simplified event listening for debugging');
 
+        // New: Handle CV segments processing acknowledgment
+        this.socketManager.on('cv_segments_processing', (data) => {
+            console.log('📝 CV Segments Processing Started:', data);
+            if (this.dom.segmentStatus) {
+                this.dom.segmentStatus.textContent = data.message || 'Starting segment detection...';
+                this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
+            }
+        });
+
+        // New: Handle CV segments progress updates
+        this.socketManager.on('cv_segments_progress', (data) => {
+            console.log('📊 CV Segments Progress:', data);
+            if (this.dom.segmentStatus) {
+                const progressText = data.progress ? ` (${data.progress}%)` : '';
+                this.dom.segmentStatus.textContent = `${data.message}${progressText}`;
+                this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
+            }
+        });
+
         this.socketManager.on('cv_segments_response', (data) => {
             console.log('✅ CV Segments Response received:', data);
 
@@ -392,21 +411,27 @@ export class CVModule {
             return;
         }
 
-        this.dom.segmentStatus.textContent = 'Detecting segments...';
+        this.dom.segmentStatus.textContent = 'Initializing segment detection...';
         this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
 
-        // Add timeout handling for segment detection
+        // Extended timeout handling for background processing
         this._segmentDetectionTimeoutId = setTimeout(() => {
-            if (this.dom.segmentStatus.textContent === 'Detecting segments...') {
-                console.warn('⚠️ Segment detection timeout after 15 seconds');
-                this.dom.segmentStatus.textContent = 'Segment detection timeout. Trying auto-detection for analysis.';
+            // Check if we're still waiting for a response (status hasn't been updated by progress events)
+            if (this.dom.segmentStatus.textContent.includes('Initializing') ||
+                this.dom.segmentStatus.textContent.includes('Processing') ||
+                this.dom.segmentStatus.textContent.includes('Creating') ||
+                this.dom.segmentStatus.textContent.includes('Reading') ||
+                this.dom.segmentStatus.textContent.includes('Analyzing')) {
+
+                console.warn('⚠️ Segment detection timeout after 30 seconds');
+                this.dom.segmentStatus.textContent = 'Segment detection timeout. Using auto-detection for analysis.';
                 this.dom.segmentStatus.className = 'text-sm text-yellow-600 mt-2';
 
                 // Set default segments for fallback
                 this.state.availableSegments = [1, 2];
                 this._updateSegmentDropdowns();
             }
-        }, 15000);
+        }, 30000); // Extended timeout from 15s to 30s for background processing
     }
 
     _updateSegmentDropdowns() {
