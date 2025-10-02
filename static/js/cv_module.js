@@ -333,6 +333,11 @@ export class CVModule {
                 if (match) {
                     const fileNum = match[1];
                     this.state.cvResults[electrodeKey][fileNum] = data.cv_analysis;
+                    console.log(`Stored CV data: Electrode ${electrodeKey}, File ${fileNum}`);
+                    console.log(`Current CV Results structure:`, Object.keys(this.state.cvResults));
+                    Object.keys(this.state.cvResults).forEach(elecKey => {
+                        console.log(`  Electrode ${elecKey}: ${Object.keys(this.state.cvResults[elecKey]).length} files`);
+                    });
 
                     // Switch to visualization on first result (like SWV)
                     if (this.state.currentScreen !== 'visualization' && Object.keys(this.state.cvResults[electrodeKey]).length === 1) {
@@ -349,6 +354,9 @@ export class CVModule {
 
                     // Check if we have enough files to complete analysis
                     this._checkCVAnalysisProgress();
+
+                    // Update electrode controls as we receive data for different electrodes
+                    this._setupCVElectrodeControls();
                 }
             }
         });
@@ -732,15 +740,28 @@ export class CVModule {
     _switchCVElectrode(electrodeIdx) {
         if (this.state.currentElectrode === electrodeIdx) return;
 
-        console.log(`Switching CV electrode from ${this.state.currentElectrode} to ${electrodeIdx}`);
+        console.log(`=== CV Electrode Switch ===`);
+        console.log(`Switching from electrode ${this.state.currentElectrode} to ${electrodeIdx}`);
         console.log('Available CV results:', Object.keys(this.state.cvResults));
+
+        const newElectrodeKey = electrodeIdx?.toString() || 'averaged';
+        const newElectrodeData = this.state.cvResults[newElectrodeKey];
+        console.log(`New electrode ${newElectrodeKey} data:`, newElectrodeData);
+
+        if (newElectrodeData) {
+            console.log(`Electrode ${newElectrodeKey} has ${Object.keys(newElectrodeData).length} files`);
+            Object.keys(newElectrodeData).forEach(fileNum => {
+                const fileData = newElectrodeData[fileNum];
+                console.log(`  File ${fileNum}: Forward peak = ${fileData?.forward?.peak_current}, Reverse peak = ${fileData?.reverse?.peak_current}`);
+            });
+        } else {
+            console.log(`No data found for electrode ${newElectrodeKey}`);
+        }
 
         this.state.currentElectrode = electrodeIdx;
         this._setupCVElectrodeControls(); // Update button states
         this._displayCVResults(); // Refresh plots with new electrode data
         this._updateCVSummaryPlots(); // Update summary plots for new electrode
-
-        console.log(`Current electrode data:`, this.state.cvResults[electrodeIdx?.toString() || 'averaged']);
     }
 
     _displayCVResults() {
