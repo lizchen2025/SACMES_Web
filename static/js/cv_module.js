@@ -720,9 +720,15 @@ export class CVModule {
     _switchCVElectrode(electrodeIdx) {
         if (this.state.currentElectrode === electrodeIdx) return;
 
+        console.log(`Switching CV electrode from ${this.state.currentElectrode} to ${electrodeIdx}`);
+        console.log('Available CV results:', Object.keys(this.state.cvResults));
+
         this.state.currentElectrode = electrodeIdx;
         this._setupCVElectrodeControls(); // Update button states
         this._displayCVResults(); // Refresh plots with new electrode data
+        this._updateCVSummaryPlots(); // Update summary plots for new electrode
+
+        console.log(`Current electrode data:`, this.state.cvResults[electrodeIdx?.toString() || 'averaged']);
     }
 
     _displayCVResults() {
@@ -1377,8 +1383,16 @@ export class CVModule {
 
     _updateProbeDataPlot(electrodeResults, fileNumbers) {
         // Check if probe data exists and we have analysis parameters
-        const analysisParams = this.state.analysisParams || {};
-        const probeVoltages = analysisParams.probe_voltages;
+        const probeVoltages = this.state.probeVoltages || [];
+
+        // Also check if probe voltages are stored in analysis params
+        if (probeVoltages.length === 0) {
+            const analysisParams = this.state.analysisParams || {};
+            const storedProbeVoltages = analysisParams.probe_voltages;
+            if (storedProbeVoltages && storedProbeVoltages.length > 0) {
+                probeVoltages.push(...storedProbeVoltages);
+            }
+        }
 
         if (!probeVoltages || probeVoltages.length === 0) {
             // Hide probe plot if no probe voltages are configured
@@ -1398,6 +1412,7 @@ export class CVModule {
 
         fileNumbers.forEach(fileNum => {
             const result = electrodeResults[fileNum];
+
             if (result && result.status === 'success' && result.probe_data) {
                 const forwardProbes = result.probe_data.forward || [];
                 const reverseProbes = result.probe_data.reverse || [];

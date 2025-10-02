@@ -1786,8 +1786,16 @@ def generate_cv_csv_data(current_electrode=None):
     Args:
         current_electrode: The electrode index to export data for (None for averaged data).
     """
+    # Get CV results from session data
+    session_id = 'global_agent_session'
+    live_trend_data = get_session_data(session_id, 'live_trend_data', {})
+    live_cv_results = live_trend_data.get('cv_results', {})
+
     if not live_cv_results:
         return ""
+
+    # Also get analysis parameters from session
+    live_cv_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
 
     string_io = io.StringIO()
     writer = csv.writer(string_io)
