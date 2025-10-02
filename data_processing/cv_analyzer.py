@@ -214,45 +214,119 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
     # We'll convert current to microAmps for consistency with existing code
     currents = [c * 1e6 for c in currents]  # Convert A to µA
 
-    # --- Segment Detection Logic ---
+    # --- Enhanced CV Segment Detection Logic (Based on SACMES_CV.py) ---
     segment_dictionary = {}
-    if len(potentials) < 3:  # Need at least 3 points to detect a change in direction
+    forward_segments = {}
+    reverse_segments = {}
+
+    if len(potentials) < 3:  # Need at least 3 points to detect direction changes
         return potentials, currents, {}
 
-    current_segment = 1
-    segment_indices = []
+    logger.info(f"CV Segment Detection: Processing {len(potentials)} data points")
 
-    # Determine initial scan direction
-    initial_direction = np.sign(potentials[1] - potentials[0])
-    last_direction = initial_direction
+    # Determine initial scan direction from the first meaningful step
+    initial_step = None
+    for i in range(1, min(10, len(potentials))):  # Check first few points for direction
+        step = potentials[i] - potentials[i-1]
+        if abs(step) > 1e-6:  # Avoid noise/zero steps
+            initial_step = "Positive" if step > 0 else "Negative"
+            break
 
-    for i in range(len(potentials) - 1):
-        segment_indices.append(i)
-        direction = np.sign(potentials[i + 1] - potentials[i])
+    if initial_step is None:
+        logger.warning("Could not determine initial scan direction")
+        return potentials, currents, {}
 
-        # When direction changes, a segment ends and a new one begins
-        if direction != last_direction and direction != 0:
-            # Add the vertex point to the current segment before starting a new one
-            segment_indices.append(i)
+    logger.info(f"Initial scan direction: {initial_step}")
 
-            segment_dictionary[current_segment] = {
-                'indices': list(segment_indices),
-                'potentials': [potentials[j] for j in segment_indices],
-                'currents': [currents[j] for j in segment_indices]
-            }
+    # Create step direction list
+    step_list = []
+    for i in range(1, len(potentials)):
+        step = potentials[i] - potentials[i-1]
+        if abs(step) > 1e-6:  # Filter out noise
+            step_direction = "Positive" if step > 0 else "Negative"
+        else:
+            step_direction = step_list[-1] if step_list else initial_step  # Keep previous direction for tiny steps
+        step_list.append(step_direction)
 
-            # Start new segment
-            current_segment += 1
-            segment_indices = [i]  # The vertex point is also the start of the new segment
-            last_direction = direction
+    # Detect segments based on sustained direction changes
+    segment_number = 1
+    segment_dictionary[segment_number] = []
+    current_indices = [0]  # Start with first point
 
-    # Add the last point and the final segment
-    segment_indices.append(len(potentials) - 1)
-    segment_dictionary[current_segment] = {
-        'indices': list(segment_indices),
-        'potentials': [potentials[j] for j in segment_indices],
-        'currents': [currents[j] for j in segment_indices]
-    }
+    for i in range(1, len(potentials)):
+        current_indices.append(i)
+
+        # Check for direction change (need consistent change over multiple points)
+        if i >= 2:  # Need at least 2 steps to compare
+            # Look for sustained direction change (not just single point fluctuation)
+            current_direction = step_list[i-1]
+            previous_direction = step_list[i-2] if i >= 2 else initial_step
+
+            # Check if we have a consistent direction change over several points
+            if current_direction != previous_direction:
+                # Verify this is a real direction change by looking ahead
+                is_real_change = True
+                look_ahead = min(5, len(potentials) - i)  # Look ahead up to 5 points
+                if look_ahead > 1:
+                    consistent_count = 0
+                    for j in range(1, look_ahead):
+                        if i + j < len(step_list) and step_list[i + j - 1] == current_direction:
+                            consistent_count += 1
+
+                    # Only create new segment if direction change is sustained
+                    if consistent_count < look_ahead // 2:
+                        is_real_change = False
+
+                if is_real_change:
+                    # Finalize current segment
+                    segment_dictionary[segment_number] = {
+                        'indices': list(current_indices[:-1]),  # Don't include the turning point yet
+                        'potentials': [potentials[j] for j in current_indices[:-1]],
+                        'currents': [currents[j] for j in current_indices[:-1]],
+                        'direction': previous_direction,
+                        'type': 'forward' if previous_direction == initial_step else 'reverse'
+                    }
+
+                    # Classify the completed segment
+                    if previous_direction == initial_step:
+                        forward_segments[segment_number] = segment_dictionary[segment_number]
+                    else:
+                        reverse_segments[segment_number] = segment_dictionary[segment_number]
+
+                    # Start new segment with the turning point
+                    segment_number += 1
+                    current_indices = [i-1, i]  # Include turning point in new segment
+                    segment_dictionary[segment_number] = []
+
+    # Finalize the last segment
+    if current_indices:
+        last_direction = step_list[-1] if step_list else initial_step
+        segment_dictionary[segment_number] = {
+            'indices': list(current_indices),
+            'potentials': [potentials[j] for j in current_indices],
+            'currents': [currents[j] for j in current_indices],
+            'direction': last_direction,
+            'type': 'forward' if last_direction == initial_step else 'reverse'
+        }
+
+        # Classify the final segment
+        if last_direction == initial_step:
+            forward_segments[segment_number] = segment_dictionary[segment_number]
+        else:
+            reverse_segments[segment_number] = segment_dictionary[segment_number]
+
+    # Remove empty segments
+    segment_dictionary = {k: v for k, v in segment_dictionary.items() if v and len(v.get('indices', [])) > 0}
+
+    logger.info(f"CV Segment Detection Results:")
+    logger.info(f"  - Total segments detected: {len(segment_dictionary)}")
+    logger.info(f"  - Forward segments: {list(forward_segments.keys())}")
+    logger.info(f"  - Reverse segments: {list(reverse_segments.keys())}")
+
+    # Store segment classification for later use
+    for seg_num, seg_data in segment_dictionary.items():
+        seg_data['is_forward'] = seg_num in forward_segments
+        seg_data['is_reverse'] = seg_num in reverse_segments
 
     return potentials, currents, segment_dictionary
 
@@ -297,14 +371,47 @@ def get_cv_segments(file_path, params, selected_electrode=None):
         selected_electrode (int): Index of specific electrode to analyze (0-based).
 
     Returns:
-        dict: A dictionary containing the status and the list of segment numbers.
+        dict: A dictionary containing the status, segment numbers, and classification info.
     """
     try:
         _, _, segment_dictionary = _read_and_segment_data(file_path, params, selected_electrode)
         if not segment_dictionary:
             return {"status": "error", "message": "No data or segments found."}
 
-        return {"status": "success", "segments": list(segment_dictionary.keys())}
+        # Organize segments by type for better frontend handling
+        forward_segments = []
+        reverse_segments = []
+        all_segments = []
+
+        for seg_num, seg_data in segment_dictionary.items():
+            all_segments.append(seg_num)
+            segment_type = seg_data.get('type', 'unknown')
+            if segment_type == 'forward' or seg_data.get('is_forward', False):
+                forward_segments.append(seg_num)
+            elif segment_type == 'reverse' or seg_data.get('is_reverse', False):
+                reverse_segments.append(seg_num)
+
+        logger.info(f"Segment classification: Forward={forward_segments}, Reverse={reverse_segments}")
+
+        return {
+            "status": "success",
+            "segments": all_segments,
+            "forward_segments": forward_segments,
+            "reverse_segments": reverse_segments,
+            "total_segments": len(all_segments),
+            "segment_info": {
+                str(seg_num): {
+                    "type": seg_data.get('type', 'unknown'),
+                    "direction": seg_data.get('direction', 'unknown'),
+                    "points": len(seg_data.get('indices', [])),
+                    "potential_range": [
+                        min(seg_data.get('potentials', [0])),
+                        max(seg_data.get('potentials', [0]))
+                    ] if seg_data.get('potentials') else [0, 0]
+                }
+                for seg_num, seg_data in segment_dictionary.items()
+            }
+        }
     except Exception as e:
         logger.error(f"Error getting CV segments: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}

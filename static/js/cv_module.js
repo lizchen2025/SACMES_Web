@@ -219,12 +219,23 @@ export class CVModule {
             }
 
             if (data && data.status === 'success') {
+                // Store enhanced segment information
                 this.state.availableSegments = data.segments || [];
+                this.state.segmentInfo = data.segment_info || {};
+                this.state.forwardSegments = data.forward_segments || [];
+                this.state.reverseSegments = data.reverse_segments || [];
+
                 this._updateSegmentDropdowns();
 
                 if (this.state.availableSegments.length > 0) {
-                    this.dom.segmentStatus.textContent = `Found ${data.segments.length} scan segments: ${data.segments.join(', ')}`;
+                    const forwardCount = this.state.forwardSegments.length;
+                    const reverseCount = this.state.reverseSegments.length;
+                    this.dom.segmentStatus.textContent =
+                        `Found ${data.segments.length} segments: ${forwardCount} forward, ${reverseCount} reverse`;
                     this.dom.segmentStatus.className = 'text-sm text-green-600 mt-2';
+
+                    // Highlight segments on preview plot
+                    this._highlightSegmentsOnPreview();
                 } else {
                     this.dom.segmentStatus.textContent = 'No segments found. Using auto-detection for analysis.';
                     this.dom.segmentStatus.className = 'text-sm text-yellow-600 mt-2';
@@ -439,17 +450,43 @@ export class CVModule {
         this.dom.visualization.forwardSegmentInput.innerHTML = '<option value="">Auto-detect</option>';
         this.dom.visualization.reverseSegmentInput.innerHTML = '<option value="">Auto-detect</option>';
 
-        // Add detected segments
+        // Add detected segments with type classification
         this.state.availableSegments.forEach(segment => {
-            const option1 = new Option(`Segment ${segment}`, segment);
-            const option2 = new Option(`Segment ${segment}`, segment);
+            const segInfo = this.state.segmentInfo[segment] || {};
+            const segmentType = segInfo.type || 'unknown';
+            const points = segInfo.points || 0;
+            const range = segInfo.potential_range || [0, 0];
+
+            // Create descriptive labels
+            const forwardLabel = `Segment ${segment} (${segmentType}, ${points} pts, ${range[0].toFixed(2)}V to ${range[1].toFixed(2)}V)`;
+            const reverseLabel = `Segment ${segment} (${segmentType}, ${points} pts, ${range[0].toFixed(2)}V to ${range[1].toFixed(2)}V)`;
+
+            const option1 = new Option(forwardLabel, segment);
+            const option2 = new Option(reverseLabel, segment);
+
+            // Style options based on segment type
+            if (segmentType === 'forward') {
+                option1.style.backgroundColor = '#e6f3ff';  // Light blue for forward
+                option2.style.backgroundColor = '#e6f3ff';
+            } else if (segmentType === 'reverse') {
+                option1.style.backgroundColor = '#ffe6e6';  // Light red for reverse
+                option2.style.backgroundColor = '#ffe6e6';
+            }
+
             this.dom.visualization.forwardSegmentInput.add(option1);
             this.dom.visualization.reverseSegmentInput.add(option2);
         });
 
-        // Auto-select typical forward and reverse segments if available
-        if (this.state.availableSegments.length >= 2) {
+        // Smart auto-selection based on segment classification
+        if (this.state.forwardSegments.length > 0) {
+            this.dom.visualization.forwardSegmentInput.value = this.state.forwardSegments[0];
+        } else if (this.state.availableSegments.length > 0) {
             this.dom.visualization.forwardSegmentInput.value = this.state.availableSegments[0];
+        }
+
+        if (this.state.reverseSegments.length > 0) {
+            this.dom.visualization.reverseSegmentInput.value = this.state.reverseSegments[0];
+        } else if (this.state.availableSegments.length > 1) {
             this.dom.visualization.reverseSegmentInput.value = this.state.availableSegments[1];
         }
     }
@@ -1353,6 +1390,9 @@ export class CVModule {
         this.state.cvResults = {};
         this.state.previewFileContent = null;
         this.state.availableSegments = [];
+        this.state.segmentInfo = {};
+        this.state.forwardSegments = [];
+        this.state.reverseSegments = [];
         this.state.currentScreen = 'settings';
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
         this.dom.startAnalysisBtn.disabled = false;
@@ -1370,6 +1410,98 @@ export class CVModule {
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
     }
 
+    _highlightSegmentsOnPreview() {
+        // Add segment highlighting to the CV preview plot
+        if (!this.dom.cvPreviewPlot || !window.Plotly) {
+            console.warn('Cannot highlight segments: Plot or Plotly not available');
+            return;
+        }
+
+        if (!this.state.segmentInfo || Object.keys(this.state.segmentInfo).length === 0) {
+            console.warn('No segment information available for highlighting');
+            return;
+        }
+
+        try {
+            console.log('Adding segment highlights to CV preview');
+
+            // Get the original CV data
+            const plotElement = this.dom.cvPreviewPlot;
+            const existingData = plotElement.data || [];
+
+            if (existingData.length === 0) {
+                console.warn('No existing plot data found');
+                return;
+            }
+
+            // Create new traces for segment highlighting
+            const newTraces = [...existingData];
+
+            // Add segment highlighting traces
+            Object.entries(this.state.segmentInfo).forEach(([segmentNum, segInfo]) => {
+                const segmentType = segInfo.type || 'unknown';
+                const potentialRange = segInfo.potential_range || [0, 0];
+
+                // Create vertical lines to mark segment boundaries
+                const color = segmentType === 'forward' ? 'rgba(0, 100, 255, 0.7)' : 'rgba(255, 100, 0, 0.7)';
+                const name = `Segment ${segmentNum} (${segmentType})`;
+
+                // Add vertical line at segment start
+                newTraces.push({
+                    x: [potentialRange[0], potentialRange[0]],
+                    y: [-1e10, 1e10],  // Full height lines
+                    mode: 'lines',
+                    type: 'scatter',
+                    name: name,
+                    line: {
+                        color: color,
+                        width: 3,
+                        dash: 'dash'
+                    },
+                    showlegend: true,
+                    hovertemplate: `${name}<br>Start: ${potentialRange[0].toFixed(3)}V<extra></extra>`
+                });
+
+                // Add vertical line at segment end
+                newTraces.push({
+                    x: [potentialRange[1], potentialRange[1]],
+                    y: [-1e10, 1e10],  // Full height lines
+                    mode: 'lines',
+                    type: 'scatter',
+                    name: `${name} (end)`,
+                    line: {
+                        color: color,
+                        width: 3,
+                        dash: 'dot'
+                    },
+                    showlegend: false,
+                    hovertemplate: `${name}<br>End: ${potentialRange[1].toFixed(3)}V<extra></extra>`
+                });
+            });
+
+            // Update the plot with segment highlights
+            const updatedLayout = {
+                title: 'CV Preview with Segment Highlights',
+                showlegend: true,
+                legend: {
+                    x: 1,
+                    y: 1,
+                    xanchor: 'right',
+                    yanchor: 'top',
+                    bgcolor: 'rgba(255,255,255,0.8)',
+                    bordercolor: 'rgba(0,0,0,0.2)',
+                    borderwidth: 1
+                }
+            };
+
+            Plotly.react(plotElement, newTraces, updatedLayout);
+
+            console.log(`Added highlights for ${Object.keys(this.state.segmentInfo).length} segments`);
+
+        } catch (error) {
+            console.error('Error highlighting segments on preview:', error);
+        }
+    }
 
     _autoDetectNumElectrodes() {
         // Parse selected electrodes to determine max electrode number needed
