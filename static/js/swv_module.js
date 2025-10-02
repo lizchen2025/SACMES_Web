@@ -628,7 +628,47 @@ export class SWVModule {
         });
     }
 
+    _cleanupCVRemnants() {
+        console.log('SWV: Cleaning up any CV remnants...');
+
+        const visualizationArea = document.getElementById('visualizationArea');
+        if (!visualizationArea) return;
+
+        // Remove all CV-specific elements that might interfere with SWV
+        const elementsToRemove = [
+            '.cv-main-container',           // Main CV layout
+            '.cv-plot-container',           // Individual CV plots
+            '.cv-summary-plots',            // Summary plots container
+            '#cv-forward-plot',             // Forward plot
+            '#cv-reverse-plot',             // Reverse plot
+            '#cv-peak-separation-plot',     // Peak separation plot
+            '#cv-auc-plot',                 // AUC plot
+            '#cv-probe-plot-container',     // Probe plot container
+            '.analysis-summary'             // Text summaries
+        ];
+
+        elementsToRemove.forEach(selector => {
+            const elements = visualizationArea.querySelectorAll(selector);
+            elements.forEach(element => {
+                console.log(`SWV: Removing CV element: ${selector}`);
+                element.remove();
+            });
+        });
+
+        // Ensure trend plots container is visible for SWV
+        const trendPlotsContainer = document.getElementById('trendPlotsContainer');
+        if (trendPlotsContainer) {
+            trendPlotsContainer.style.display = '';
+            console.log('SWV: Ensured trendPlotsContainer is visible');
+        }
+
+        console.log('SWV: CV remnants cleanup complete');
+    }
+
     _setupVisualizationLayout() {
+        // Clean up any CV remnants before setting up SWV visualization
+        this._cleanupCVRemnants();
+
         const { individualPlotsContainer } = this.dom.visualization;
         const { currentKdmHighFreq, currentKdmLowFreq } = this.state;
         if (individualPlotsContainer) {

@@ -1658,12 +1658,67 @@ export class CVModule {
             clearTimeout(this._segmentDetectionTimeoutId);
             this._segmentDetectionTimeoutId = null;
         }
+
+        // Clean up CV-specific content from shared visualization area
+        this._cleanupVisualizationArea();
     }
 
     _resetAnalysisState() {
         this.state.isAnalysisRunning = false;
         this.dom.startAnalysisBtn.disabled = false;
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
+    }
+
+    _cleanupVisualizationArea() {
+        const visualizationArea = document.getElementById('visualizationArea');
+        if (!visualizationArea) return;
+
+        console.log('Cleaning up CV visualization area...');
+
+        // Remove all CV-specific elements
+        const elementsToRemove = [
+            '.cv-main-container',           // Main CV layout
+            '.cv-plot-container',           // Individual CV plots
+            '.cv-summary-plots',            // Summary plots container
+            '#cv-forward-plot',             // Forward plot
+            '#cv-reverse-plot',             // Reverse plot
+            '#cv-peak-separation-plot',     // Peak separation plot
+            '#cv-auc-plot',                 // AUC plot
+            '#cv-probe-plot-container',     // Probe plot container
+            '.analysis-summary'             // Text summaries
+        ];
+
+        elementsToRemove.forEach(selector => {
+            const elements = visualizationArea.querySelectorAll(selector);
+            elements.forEach(element => {
+                console.log(`Removing CV element: ${selector}`);
+                element.remove();
+            });
+        });
+
+        // Reset visualization area title
+        const titleElement = visualizationArea.querySelector('h2');
+        if (titleElement) {
+            titleElement.textContent = 'Data Visualization';
+        }
+
+        // Hide electrode controls since we're leaving CV
+        const electrodeControls = document.getElementById('electrodeControls');
+        if (electrodeControls) {
+            electrodeControls.style.display = 'none';
+            // Clear electrode buttons
+            const existingButtons = electrodeControls.querySelectorAll('.electrode-btn');
+            existingButtons.forEach(btn => btn.remove());
+        }
+
+        // Restore SWV trend plots container visibility that CV may have hidden
+        const trendPlotsContainer = document.getElementById('trendPlotsContainer');
+        if (trendPlotsContainer) {
+            trendPlotsContainer.style.display = '';
+            console.log('Restored trendPlotsContainer visibility for SWV');
+        }
+
+        console.log('CV visualization area cleanup complete');
     }
 
     _highlightSegmentsOnPreview() {
