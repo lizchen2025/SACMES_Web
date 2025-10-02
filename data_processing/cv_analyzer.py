@@ -157,8 +157,8 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
     # Use the robust GeneralReadData function with proper parameters
     try:
         # Extract parameters from the front-end settings
-        voltage_column = params.get('voltage_column', 1)  # 1-based
-        current_column = params.get('current_column', 2)  # 1-based
+        voltage_column = params.get('voltage_column', 1)  # 1-based from frontend
+        current_column = params.get('current_column', 2)  # 1-based from frontend
         spacing_index = params.get('spacing_index', 1)
         delimiter_num = params.get('delimiter', 1)
         file_extension = params.get('file_extension', '.txt')
@@ -168,13 +168,17 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
         delimiter_map = {1: ' ', 2: '\t', 3: ',', 4: ';'}
         delimiter_char = delimiter_map.get(delimiter_num, ' ')
 
-        logger.info(f"CV segment detection using: voltage_col={voltage_column}, current_col={current_column}, delimiter='{delimiter_char}', electrodes={num_electrodes}")
+        # Convert to 0-based indices for GeneralReadData function
+        voltage_column_0based = voltage_column - 1
+        current_column_0based = current_column - 1
 
-        # Call the robust data reader
+        logger.info(f"CV segment detection using: voltage_col={voltage_column}(0-based: {voltage_column_0based}), current_col={current_column}(0-based: {current_column_0based}), delimiter='{delimiter_char}', electrodes={num_electrodes}")
+
+        # Call the robust data reader with 0-based indices
         data_result = GeneralReadData(
             file_path,
-            voltage_column,
-            current_column,
+            voltage_column_0based,
+            current_column_0based,
             spacing_index,
             num_electrodes,
             delimiter_char,
