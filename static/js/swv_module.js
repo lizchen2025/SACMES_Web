@@ -579,6 +579,9 @@ export class SWVModule {
         const { electrodeControls } = this.dom.visualization;
         if (!electrodeControls) return;
 
+        // Ensure electrode controls are visible
+        electrodeControls.style.display = 'block';
+
         // Clear existing buttons
         const existingButtons = electrodeControls.querySelectorAll('.electrode-btn');
         existingButtons.forEach(btn => btn.remove());
@@ -654,6 +657,17 @@ export class SWVModule {
                 element.remove();
             });
         });
+
+        // Restore electrode controls visibility (CV may have hidden it)
+        const electrodeControls = document.getElementById('electrodeControls');
+        if (electrodeControls) {
+            // Don't set to 'block' yet - let _setupElectrodeControls handle visibility
+            // But ensure CV hasn't forced it to 'none'
+            if (electrodeControls.style.display === 'none') {
+                electrodeControls.style.display = '';
+                console.log('SWV: Restored electrodeControls visibility');
+            }
+        }
 
         // Ensure trend plots container is visible and restore its structure if needed
         const trendPlotsContainer = document.getElementById('trendPlotsContainer');
