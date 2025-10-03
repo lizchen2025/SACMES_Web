@@ -785,19 +785,15 @@ export class CVModule {
             }
         }
 
-        // Remove any text summaries and CV text-based result containers
-        const textSummaries = document.querySelectorAll('.analysis-summary, #individualPlotsContainer .border');
-        textSummaries.forEach(summary => summary.remove());
+        // Remove only CV-specific text summaries (not SWV content)
+        const cvTextSummaries = document.querySelectorAll('.analysis-summary, .cv-text-summary, .cv-analysis-summary');
+        cvTextSummaries.forEach(summary => summary.remove());
 
         // Hide SWV trend plots container since we use our own CV layout
         const trendPlotsContainer = document.getElementById('trendPlotsContainer');
         if (trendPlotsContainer) {
             trendPlotsContainer.style.display = 'none';
         }
-
-        // Remove any remaining text-based CV summaries
-        const cvTextSummaries = document.querySelectorAll('.cv-text-summary, .cv-analysis-summary');
-        cvTextSummaries.forEach(summary => summary.remove());
     }
 
     _setupCVAnalysisTimeout() {
@@ -1711,10 +1707,46 @@ export class CVModule {
             existingButtons.forEach(btn => btn.remove());
         }
 
-        // Restore SWV trend plots container visibility that CV may have hidden
+        // Restore SWV trend plots container visibility and structure
         const trendPlotsContainer = document.getElementById('trendPlotsContainer');
         if (trendPlotsContainer) {
             trendPlotsContainer.style.display = '';
+
+            // Restore trend plots structure if it was damaged
+            const peakPlot = document.getElementById('peakCurrentTrendPlot');
+            const normalizedPlot = document.getElementById('normalizedPeakTrendPlot');
+            const kdmPlot = document.getElementById('kdmTrendPlot');
+
+            if (!peakPlot || !normalizedPlot || !kdmPlot) {
+                console.log('CV Cleanup: Restoring SWV trend plots structure...');
+                trendPlotsContainer.innerHTML = `
+                    <!-- Peak Current Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Peak Current Trend</h4>
+                        <div id="peakCurrentTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+
+                    <!-- Normalized Peak Current Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Normalized Peak Current Trend</h4>
+                        <div id="normalizedPeakTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+
+                    <!-- KDM Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">KDM Trend</h4>
+                        <div id="kdmTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+                `;
+                console.log('CV Cleanup: SWV trend plots structure restored');
+            }
+
             console.log('Restored trendPlotsContainer visibility for SWV');
         }
 

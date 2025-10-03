@@ -655,11 +655,49 @@ export class SWVModule {
             });
         });
 
-        // Ensure trend plots container is visible for SWV
+        // Ensure trend plots container is visible and restore its structure if needed
         const trendPlotsContainer = document.getElementById('trendPlotsContainer');
         if (trendPlotsContainer) {
             trendPlotsContainer.style.display = '';
-            console.log('SWV: Ensured trendPlotsContainer is visible');
+
+            // Check if the trend plots structure is intact, if not, restore it
+            const peakPlot = document.getElementById('peakCurrentTrendPlot');
+            const normalizedPlot = document.getElementById('normalizedPeakTrendPlot');
+            const kdmPlot = document.getElementById('kdmTrendPlot');
+
+            if (!peakPlot || !normalizedPlot || !kdmPlot) {
+                console.log('SWV: Restoring trend plots structure...');
+                trendPlotsContainer.innerHTML = `
+                    <!-- Peak Current Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Peak Current Trend</h4>
+                        <div id="peakCurrentTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+
+                    <!-- Normalized Peak Current Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Normalized Peak Current Trend</h4>
+                        <div id="normalizedPeakTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+
+                    <!-- KDM Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">KDM Trend</h4>
+                        <div id="kdmTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+                `;
+                console.log('SWV: Trend plots structure restored');
+            } else {
+                console.log('SWV: Trend plots structure is intact');
+            }
+
+            console.log('SWV: Ensured trendPlotsContainer is visible and intact');
         }
 
         console.log('SWV: CV remnants cleanup complete');
