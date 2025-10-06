@@ -1254,9 +1254,11 @@ def handle_get_cv_preview(data):
 def handle_get_cv_segments(data):
     """Get available CV segments from uploaded file - Non-blocking version"""
     try:
-        logger.info(f"=== CV Segments Request (Non-blocking) ===")
-        logger.info(f"From session: {request.sid}")
-        logger.info(f"Data keys: {list(data.keys())}")
+        logger.info(f"=== CV Segments Request RECEIVED (Non-blocking) ===")
+        logger.info(f"From session/client: {request.sid}")
+        logger.info(f"Request namespace: {request.namespace}")
+        logger.info(f"Data keys: {list(data.keys()) if data else 'NO DATA'}")
+        logger.info(f"Socket connected: {request.sid is not None}")
 
         if not get_cv_segments:
             logger.error("CV analyzer not available")
@@ -1275,19 +1277,22 @@ def handle_get_cv_segments(data):
             return
 
         # Send immediate acknowledgment to prevent timeout
+        logger.info(f"Sending cv_segments_processing acknowledgment to {request.sid}")
         emit('cv_segments_processing', {
             'status': 'started',
             'message': 'Processing CV segments in background...'
         })
+        logger.info(f"cv_segments_processing acknowledgment sent")
 
         # Start background task to avoid blocking the main thread
+        logger.info(f"Starting background task for CV segment processing")
         socketio.start_background_task(
             target=process_cv_segments_background,
             data=data,
             client_sid=request.sid
         )
 
-        logger.info(f"Background CV segment processing started for client {request.sid}")
+        logger.info(f"✅ Background CV segment processing task started for client {request.sid}")
 
     except Exception as e:
         logger.error(f"Error starting CV segments processing: {e}", exc_info=True)

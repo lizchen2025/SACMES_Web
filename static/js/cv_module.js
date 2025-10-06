@@ -236,7 +236,7 @@ export class CVModule {
 
         // New: Handle CV segments processing acknowledgment
         this.socketManager.on('cv_segments_processing', (data) => {
-            console.log('📝 CV Segments Processing Started:', data);
+            console.log('📝 [CV SEGMENTS] Processing acknowledgment received:', data);
             if (this.dom.segmentStatus) {
                 this.dom.segmentStatus.textContent = data.message || 'Starting segment detection...';
                 this.dom.segmentStatus.className = 'text-sm text-blue-600 mt-2';
@@ -245,7 +245,7 @@ export class CVModule {
 
         // New: Handle CV segments progress updates
         this.socketManager.on('cv_segments_progress', (data) => {
-            console.log('📊 CV Segments Progress:', data);
+            console.log('📊 [CV SEGMENTS] Progress update received:', data);
             if (this.dom.segmentStatus) {
                 const progressText = data.progress ? ` (${data.progress}%)` : '';
                 this.dom.segmentStatus.textContent = `${data.message}${progressText}`;
@@ -254,7 +254,9 @@ export class CVModule {
         });
 
         this.socketManager.on('cv_segments_response', (data) => {
-            console.log('✅ CV Segments Response received:', data);
+            console.log('✅ [CV SEGMENTS] Final response received:', data);
+            console.log('Response status:', data ? data.status : 'NO DATA');
+            console.log('Response segments:', data ? data.segments : 'NO SEGMENTS');
 
             // Clear any pending timeout
             if (this._segmentDetectionTimeoutId) {
@@ -474,14 +476,17 @@ export class CVModule {
             params: analysisParams
         };
 
-        console.log('Sending segment detection request:', requestData);
-        console.log('Socket connection status:', this.socketManager.connected);
+        console.log('=== Sending Segment Detection Request ===');
+        console.log('Request data:', requestData);
+        console.log('Socket connected:', this.socketManager.socket.connected);
+        console.log('Socket id:', this.socketManager.socket.id);
 
         try {
             this.socketManager.emit('get_cv_segments', requestData);
-            console.log('✅ Segment detection request sent successfully');
+            console.log('✅ Segment detection request emitted via socket');
+            console.log('Waiting for server response...');
         } catch (error) {
-            console.error('❌ Failed to send segment detection request:', error);
+            console.error('❌ Failed to emit segment detection request:', error);
             this.dom.segmentStatus.textContent = 'Failed to send request. Check connection.';
             this.dom.segmentStatus.className = 'text-sm text-red-600 mt-2';
             return;
