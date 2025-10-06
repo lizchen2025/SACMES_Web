@@ -471,20 +471,26 @@ export class CVModule {
         console.log('Analysis params:', analysisParams);
 
         const requestData = {
-            content: this.state.previewFileContent,
+            // Don't send content - backend will use stored preview content from session
+            // This avoids sending large payloads that cause socket disconnection
+            content: '',  // Empty - backend will fetch from session
             filename: 'preview_cv_file.txt',
             params: analysisParams
         };
 
         console.log('=== Sending Segment Detection Request ===');
-        console.log('Request data:', requestData);
+        console.log('Request data (content excluded for performance):', {
+            filename: requestData.filename,
+            params: requestData.params,
+            contentLength: this.state.previewFileContent ? this.state.previewFileContent.length : 0
+        });
         console.log('Socket connected:', this.socketManager.socket.connected);
         console.log('Socket id:', this.socketManager.socket.id);
 
         try {
             this.socketManager.emit('get_cv_segments', requestData);
             console.log('✅ Segment detection request emitted via socket');
-            console.log('Waiting for server response...');
+            console.log('Waiting for server response (using session-stored preview content)...');
         } catch (error) {
             console.error('❌ Failed to emit segment detection request:', error);
             this.dom.segmentStatus.textContent = 'Failed to send request. Check connection.';

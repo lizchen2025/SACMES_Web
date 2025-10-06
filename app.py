@@ -1268,11 +1268,18 @@ def handle_get_cv_segments(data):
         file_content = data.get('content', '')
         analysis_params = data.get('params', {})
 
+        # Try to use preview content from session first to avoid large payload transfers
+        session_id = 'global_agent_session'
+        if not file_content:
+            file_content = get_session_data(session_id, 'cv_preview_content', '')
+            if file_content:
+                logger.info(f"Using CV preview content from session ({len(file_content)} bytes)")
+
         logger.info(f"File content length: {len(file_content)}")
         logger.info(f"Analysis params keys: {list(analysis_params.keys())}")
 
         if not file_content:
-            logger.error("No file content provided")
+            logger.error("No file content provided and no preview content in session")
             emit('cv_segments_response', {'status': 'error', 'message': 'No file content provided'})
             return
 
@@ -1496,10 +1503,16 @@ def handle_cv_data_from_agent(data):
                             requesting_client_sid = analysis_params.get('requesting_client_sid')
                             logger.info(f"Sending CV preview response to original client: {requesting_client_sid}")
 
-                            # Send the CV data for preview visualization
+                            # Store preview content in session for segment detection (avoid re-sending large data)
+                            session_id = 'global_agent_session'
+                            set_session_data(session_id, 'cv_preview_content', file_content)
+                            set_session_data(session_id, 'cv_preview_client_sid', requesting_client_sid)
+                            logger.info(f"Stored CV preview content in session ({len(file_content)} bytes)")
+
+                            # Send the CV data for preview visualization (without content to reduce payload)
                             socketio.emit('cv_preview_response', {
                                 'status': 'success',
-                                'content': file_content,
+                                'content': file_content,  # Keep for backward compatibility
                                 'cv_data': {
                                     'voltage': voltage_data,
                                     'current': current_data
