@@ -508,8 +508,12 @@ export class CVModule {
                 this.dom.segmentStatus.textContent = 'Segment detection timeout. Using auto-detection for analysis.';
                 this.dom.segmentStatus.className = 'text-sm text-yellow-600 mt-2';
 
-                // Set default segments for fallback
+                // Set default segments for fallback with basic info
                 this.state.availableSegments = [1, 2];
+                this.state.segmentInfo = {
+                    '1': { type: 'forward', points: 0, potential_range: [0, 0] },
+                    '2': { type: 'reverse', points: 0, potential_range: [0, 0] }
+                };
                 this._updateSegmentDropdowns();
             }
         }, 30000); // Extended timeout from 15s to 30s for background processing

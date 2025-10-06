@@ -13,7 +13,10 @@ export class SocketManager {
             forceNew: false,
             upgrade: true,
             rememberUpgrade: true,
-            transports: ['websocket', 'polling']
+            transports: ['websocket', 'polling'],
+
+            // Increase max buffer size for large CV data files (must match backend)
+            maxHttpBufferSize: 10000000  // 10MB to match backend setting
         });
         this.eventHandlers = {}; // To store custom event handlers
 
