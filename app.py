@@ -1318,6 +1318,22 @@ def process_cv_segments_background(data, client_sid):
         analysis_params = data.get('params', {})
         selected_electrode = analysis_params.get('selected_electrode')
 
+        # If no content provided, try to get from session (preview content)
+        if not file_content:
+            session_id = 'global_agent_session'
+            file_content = get_session_data(session_id, 'cv_preview_content', '')
+            if file_content:
+                logger.info(f"Retrieved CV preview content from session ({len(file_content)} bytes)")
+            else:
+                logger.error("No file content in request and no preview content in session")
+                socketio.emit('cv_segments_response', {
+                    'status': 'error',
+                    'message': 'No file content available. Please load preview first.'
+                }, room=client_sid)
+                return
+
+        logger.info(f"File content available: {len(file_content)} bytes")
+
         # Send progress update
         socketio.emit('cv_segments_progress', {
             'progress': 10,
