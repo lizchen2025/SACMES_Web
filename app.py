@@ -14,7 +14,6 @@ import uuid
 import redis
 import json
 import threading
-import numpy as np
 from datetime import datetime
 from flask import Flask, send_from_directory, request, session
 from flask_socketio import SocketIO, emit
@@ -210,81 +209,6 @@ fallback_data = {
     'live_peak_detection_warnings': {},
     'validation_error_sent': False
 }
-
-CV_MAX_PLOT_POINTS = 400
-
-
-def _downsample_indices(length, max_points=CV_MAX_PLOT_POINTS):
-    if length <= max_points:
-        return list(range(length))
-    indices = np.linspace(0, length - 1, num=max_points, dtype=int)
-    return indices.tolist()
-
-
-def _trim_cv_sweep(sweep_data, max_points=CV_MAX_PLOT_POINTS):
-    if not sweep_data:
-        return {}
-
-    trimmed = {
-        'peak_potential': sweep_data.get('peak_potential'),
-        'peak_current': sweep_data.get('peak_current'),
-        'charge': sweep_data.get('charge'),
-        'peak_width': sweep_data.get('peak_width'),
-        'half_peak_potential': sweep_data.get('half_peak_potential')
-    }
-
-    potentials = sweep_data.get('potentials')
-    if potentials:
-        indices = _downsample_indices(len(potentials), max_points)
-        trimmed['potentials'] = [potentials[i] for i in indices]
-
-        for key in ('currents', 'corrected_currents', 'baseline'):
-            series = sweep_data.get(key)
-            if series:
-                trimmed[key] = [series[i] for i in indices]
-
-        auc_vertices = sweep_data.get('auc_vertices')
-        if auc_vertices:
-            trimmed['auc_vertices'] = [auc_vertices[i] for i in indices if i < len(auc_vertices)]
-
-    return trimmed
-
-
-def _build_cv_summary(analysis_result):
-    summary = {
-        'status': analysis_result.get('status'),
-        'peak_separation': analysis_result.get('peak_separation')
-    }
-
-    for sweep in ('forward', 'reverse'):
-        sweep_data = analysis_result.get(sweep) or {}
-        summary[sweep] = {
-            'peak_potential': sweep_data.get('peak_potential'),
-            'peak_current': sweep_data.get('peak_current'),
-            'charge': sweep_data.get('charge'),
-            'peak_width': sweep_data.get('peak_width'),
-            'half_peak_potential': sweep_data.get('half_peak_potential')
-        }
-
-    if analysis_result.get('probe_data'):
-        summary['probe_data'] = analysis_result['probe_data']
-
-    return summary
-
-
-def _build_trimmed_cv_transport(analysis_result, max_points=CV_MAX_PLOT_POINTS):
-    trimmed = {
-        'status': analysis_result.get('status'),
-        'peak_separation': analysis_result.get('peak_separation')
-    }
-
-    for sweep in ('forward', 'reverse'):
-        trimmed[sweep] = _trim_cv_sweep(analysis_result.get(sweep), max_points)
-
-    if analysis_result.get('probe_data'):
-        trimmed['probe_data'] = analysis_result['probe_data']
-
-    return trimmed
 
 # --- Session Management Helper Functions ---
 def get_session_id():
@@ -536,14 +460,7 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
                     }, room=all_web_viewer_sids)
             return
 
-        summary_payload = None
-        transport_payload = None
-
-        if analysis_result and analysis_result.get('status') in ['success', 'warning']:
-            transport_payload = _build_trimmed_cv_transport(analysis_result)
-            summary_payload = _build_cv_summary(analysis_result)
-
-        if analysis_result and analysis_result.get('status') in ['success', 'warning']:
+        if analysis_result and analysis_result.get('status') == 'success':
             # Store CV results differently - not in trend data but as individual results
             # Support CV_60Hz_1.txt format and other formats
             match = re.search(r'CV_(\d+)Hz_(\d+)(?:\.|$)', original_filename, re.IGNORECASE) or re.search(r'_(\d+)Hz_?_?(\d+)(?:\.|$)', original_filename, re.IGNORECASE) or re.search(r'_(\d+)(?:\.|$)', original_filename, re.IGNORECASE)
@@ -562,10 +479,7 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
                 if electrode_key not in live_trend_data['cv_results']:
                     live_trend_data['cv_results'][electrode_key] = {}
 
-                if summary_payload is None:
-                    summary_payload = _build_cv_summary(analysis_result)
-
-                live_trend_data['cv_results'][electrode_key][str(parsed_filenum)] = summary_payload
+                live_trend_data['cv_results'][electrode_key][str(parsed_filenum)] = analysis_result
                 set_session_data(session_id, 'live_trend_data', live_trend_data)
 
         # Send CV update to ALL web viewers across all sessions
@@ -590,8 +504,7 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
             # Send CV update
             response_data = {
                 "filename": original_filename,
-                "cv_analysis": transport_payload or analysis_result,
-                "cv_summary": summary_payload,
+                "cv_analysis": analysis_result,
                 "electrode_index": selected_electrode
             }
             socketio.emit('live_cv_update', response_data, to=all_web_viewer_sids)

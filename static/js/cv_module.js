@@ -65,13 +65,10 @@ export class CVModule {
             selectedElectrodes: [],
             currentElectrode: null,
             cvResults: {},
-            cvPlotCache: {},
             previewFileContent: null,
             availableSegments: [],
             currentScreen: 'settings' // 'settings', 'visualization', 'analysis'
         };
-
-        this.CV_PLOT_CACHE_LIMIT = 50;
 
         // Check if critical DOM elements exist
         console.log('CV Module DOM elements check:');
@@ -318,64 +315,52 @@ export class CVModule {
 
             if (!this.state.isAnalysisRunning) return;
 
-            const electrodeIndex = data.electrode_index !== undefined ? data.electrode_index : null;
-            const electrodeKey = electrodeIndex !== null ? electrodeIndex.toString() : 'averaged';
-            const filename = data.filename || '';
-            const match = filename.match(/CV_\d+Hz_+(\d+)\./) || filename.match(/_(\d+)\./);
+            // Store CV results per electrode
+            if (data.cv_analysis && data.electrode_index !== undefined) {
+                console.log('CV Analysis data structure:', data.cv_analysis);
+                console.log('CV Analysis keys:', Object.keys(data.cv_analysis));
+                console.log('Forward data:', data.cv_analysis.forward);
+                console.log('Reverse data:', data.cv_analysis.reverse);
+                console.log('ELECTRODE INDEX received:', data.electrode_index, 'Type:', typeof data.electrode_index);
 
-            if (!match) {
-                console.warn('Unable to extract CV file number from filename:', filename);
-                return;
-            }
+                const electrodeKey = data.electrode_index !== null ? data.electrode_index.toString() : 'averaged';
+                console.log('Storing data under electrode key:', electrodeKey);
 
-            const fileNum = match[1];
-            console.log('Normalized electrode key:', electrodeKey, 'File number:', fileNum);
+                if (!this.state.cvResults[electrodeKey]) {
+                    this.state.cvResults[electrodeKey] = {};
+                }
 
-            // Ensure summary structure exists
-            if (!this.state.cvResults[electrodeKey]) {
-                this.state.cvResults[electrodeKey] = {};
-            }
+                // Extract file number from filename (support CV_60Hz_1.txt format and others)
+                const match = data.filename.match(/CV_\d+Hz_(\d+)\./) || data.filename.match(/_(\d+)\./);
+                if (match) {
+                    const fileNum = match[1];
+                    this.state.cvResults[electrodeKey][fileNum] = data.cv_analysis;
+                    console.log(`Stored CV data: Electrode ${electrodeKey}, File ${fileNum}`);
+                    console.log(`Current CV Results structure:`, Object.keys(this.state.cvResults));
+                    Object.keys(this.state.cvResults).forEach(elecKey => {
+                        console.log(`  Electrode ${elecKey}: ${Object.keys(this.state.cvResults[elecKey]).length} files`);
+                    });
 
-            const summaryPayload = data.cv_summary || data.cv_analysis || { status: data.status || 'unknown' };
-            const summaryCopy = summaryPayload ? JSON.parse(JSON.stringify(summaryPayload)) : { status: 'unknown' };
-            summaryCopy.file_number = Number(fileNum);
-            summaryCopy.filename = filename;
+                    // Switch to visualization on first result (like SWV)
+                    if (this.state.currentScreen !== 'visualization' && Object.keys(this.state.cvResults[electrodeKey]).length === 1) {
+                        console.log('First CV result received - switching to visualization');
+                        this.state.currentScreen = 'visualization';
+                        this.uiManager.showScreen('visualizationArea');
+                        this._setupCVVisualization();
+                    }
 
-            this.state.cvResults[electrodeKey][fileNum] = summaryCopy;
-            console.log(`Stored CV summary for electrode ${electrodeKey}, file ${fileNum}`);
+                    // Update visualization in real-time if this is the current electrode
+                    if (data.electrode_index === this.state.currentElectrode && this.state.currentScreen === 'visualization') {
+                        this._updateCVVisualizationRealTime(data.cv_analysis, fileNum);
+                    }
 
-            if (data.cv_analysis) {
-                this._cacheCvPlotData(electrodeKey, fileNum, data.cv_analysis);
-            }
+                    // Check if we have enough files to complete analysis
+                    this._checkCVAnalysisProgress();
 
-            console.log('Current CV summary structure:', Object.keys(this.state.cvResults));
-            Object.keys(this.state.cvResults).forEach(elecKey => {
-                console.log(`  Electrode ${elecKey}: ${Object.keys(this.state.cvResults[elecKey]).length} files`);
-            });
-
-            // Switch to visualization on first result (like SWV)
-            if (this.state.currentScreen !== 'visualization' && Object.keys(this.state.cvResults[electrodeKey]).length === 1) {
-                console.log('First CV result received - switching to visualization');
-                this.state.currentScreen = 'visualization';
-                this.uiManager.showScreen('visualizationArea');
-                this._setupCVVisualization();
-            }
-
-            // Update visualization in real-time if this is the current electrode
-            if (electrodeIndex === this.state.currentElectrode && this.state.currentScreen === 'visualization') {
-                const plotData = data.cv_analysis || this._getCvPlotData(electrodeKey, fileNum);
-                if (plotData) {
-                    this._updateCVVisualizationRealTime(plotData, fileNum);
-                } else {
-                    console.log('No plot data available for real-time update yet.');
+                    // Update electrode controls as we receive data for different electrodes
+                    this._setupCVElectrodeControls();
                 }
             }
-
-            // Check if we have enough files to complete analysis
-            this._checkCVAnalysisProgress();
-
-            // Update electrode controls as we receive data for different electrodes
-            this._setupCVElectrodeControls();
         });
 
         // Add handler for CV analysis completion
@@ -767,30 +752,6 @@ export class CVModule {
         }
     }
 
-    _cacheCvPlotData(electrodeKey, fileNum, plotData) {
-        if (!plotData) return;
-
-        if (!this.state.cvPlotCache[electrodeKey]) {
-            this.state.cvPlotCache[electrodeKey] = {};
-        }
-
-        const fileKey = fileNum.toString();
-        this.state.cvPlotCache[electrodeKey][fileKey] = plotData;
-
-        const cachedKeys = Object.keys(this.state.cvPlotCache[electrodeKey]).map(Number).sort((a, b) => a - b);
-        while (cachedKeys.length > this.CV_PLOT_CACHE_LIMIT) {
-            const oldestKey = cachedKeys.shift().toString();
-            delete this.state.cvPlotCache[electrodeKey][oldestKey];
-        }
-    }
-
-    _getCvPlotData(electrodeKey, fileNum) {
-        const cache = this.state.cvPlotCache[electrodeKey];
-        if (!cache) return null;
-        const fileKey = fileNum.toString();
-        return cache[fileKey] || null;
-    }
-
     _switchCVElectrode(electrodeIdx) {
         if (this.state.currentElectrode === electrodeIdx) return;
 
@@ -829,15 +790,11 @@ export class CVModule {
             // Get the most recent analysis result for visualization
             const fileNumbers = Object.keys(electrodeResults).map(Number).sort((a, b) => b - a);
             const latestFileNum = fileNumbers[0];
-            const latestSummary = electrodeResults[latestFileNum];
-            const latestPlotData = this._getCvPlotData(electrodeKey, latestFileNum);
-            const visualizationPayload = latestPlotData || latestSummary;
+            const latestResult = electrodeResults[latestFileNum];
 
-            if (latestSummary && latestSummary.status === 'success') {
-                // Display the latest CV plots with all peaks/AUC intact if plot data exists
-                if (visualizationPayload) {
-                    this._updateCVVisualization(visualizationPayload);
-                }
+            if (latestResult && latestResult.status === 'success') {
+                // Display the latest CV plots with all peaks/AUC intact
+                this._updateCVVisualization(latestResult);
                 // Update comprehensive analysis
                 this._updateCVSummaryPlots();
             }
@@ -978,16 +935,8 @@ export class CVModule {
     _updateCVVisualization(analysisResult) {
         console.log('CV Analysis Result:', analysisResult);
 
-        if (!analysisResult) {
+        if (!analysisResult || !analysisResult.forward && !analysisResult.reverse) {
             console.log('No CV data to visualize');
-            return;
-        }
-
-        const hasForwardData = analysisResult.forward && Array.isArray(analysisResult.forward.potentials) && analysisResult.forward.potentials.length > 0;
-        const hasReverseData = analysisResult.reverse && Array.isArray(analysisResult.reverse.potentials) && analysisResult.reverse.potentials.length > 0;
-
-        if (!hasForwardData && !hasReverseData) {
-            console.log('No CV sweep data available for visualization');
             return;
         }
 
@@ -1002,11 +951,11 @@ export class CVModule {
         const forwardPlotElement = document.getElementById('cv-forward-plot');
         const reversePlotElement = document.getElementById('cv-reverse-plot');
 
-        if (hasForwardData && forwardPlotElement) {
+        if (analysisResult.forward && forwardPlotElement) {
             this._updateSingleCVPlot(forwardPlotElement, analysisResult.forward, 'Forward Sweep');
         }
 
-        if (hasReverseData && reversePlotElement) {
+        if (analysisResult.reverse && reversePlotElement) {
             this._updateSingleCVPlot(reversePlotElement, analysisResult.reverse, 'Reverse Sweep');
         }
     }
@@ -1037,8 +986,8 @@ export class CVModule {
         console.log('Reverse is object:', typeof analysisResult.reverse === 'object');
         console.log('Reverse keys:', analysisResult.reverse ? Object.keys(analysisResult.reverse) : 'null/undefined');
 
-        const hasForward = analysisResult.forward && Array.isArray(analysisResult.forward.potentials) && analysisResult.forward.potentials.length > 0;
-        const hasReverse = analysisResult.reverse && Array.isArray(analysisResult.reverse.potentials) && analysisResult.reverse.potentials.length > 0;
+        const hasForward = analysisResult.forward && Object.keys(analysisResult.forward).length > 0;
+        const hasReverse = analysisResult.reverse && Object.keys(analysisResult.reverse).length > 0;
 
         console.log('Has forward data:', hasForward);
         console.log('Has reverse data:', hasReverse);
@@ -1705,7 +1654,6 @@ export class CVModule {
     _resetAnalysis() {
         this.state.isAnalysisRunning = false;
         this.state.cvResults = {};
-        this.state.cvPlotCache = {};
         this.state.previewFileContent = null;
         this.state.availableSegments = [];
         this.state.segmentInfo = {};
