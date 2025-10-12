@@ -266,6 +266,30 @@ is_monitoring_active = False
 agent_thread = None
 file_processing_complete = False
 pending_file_ack = None
+is_cv_analysis_active = False
+last_preview_file_path = None
+
+# --- Filename Parsing Helpers ---
+def _normalize_frequency_value(value):
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_frequency_and_number(filename):
+    name, _ = os.path.splitext(filename)
+
+    match = re.search(r'_+(\d+)Hz_+(\d+)$', name, re.IGNORECASE)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+
+    match = re.search(r'_+(\d+)$', name)
+    if match:
+        return None, int(match.group(1))
+
+    return None, None
+
 
 # --- Socket.IO Client Setup ---
 sio = socketio.Client(reconnection_attempts=5, reconnection_delay=5, logger=True, engineio_logger=True)
@@ -282,28 +306,46 @@ def file_matches_filters(filename):
     print(f"[DEBUG] Expected frequencies: {current_filters['frequencies']}")
     # Allow files without extension if file_extension is empty, or check extension normally
     file_ext = current_filters['file_extension']
-    if file_ext and not filename.endswith(file_ext): return False
-    if not filename.startswith(current_filters['handle']): return False
-    try:
-        # Use the simple, unified approach from agent1.py that works for both SWV and CV files
-        # Pattern matches: SWV_15Hz_1.txt, CV_60Hz_1.txt, etc.
-        match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
-        if not match:
-            print(f"[DEBUG] REJECTED: Filename {filename} does not match pattern '_NNHz_N.'")
-            return False
-        freq, num = int(match.group(1)), int(match.group(2))
-        print(f"[DEBUG] Extracted from pattern: freq={freq}Hz, num={num}")
-    except (ValueError, IndexError):
-        print(f"[DEBUG] REJECTED: Error parsing frequency/number from {filename}")
+    if file_ext and not filename.lower().endswith(file_ext.lower()):
         return False
-    print(f"[DEBUG] Final extracted values: freq={freq}, num={num}")
-    print(f"[DEBUG] Frequency check: {freq} in {current_filters['frequencies']} = {freq in current_filters['frequencies']}")
-    print(f"[DEBUG] Range check: {current_filters['range_start']} <= {num} <= {current_filters['range_end']} = {current_filters['range_start'] <= num <= current_filters['range_end']}")
+    if not filename.startswith(current_filters['handle']):
+        return False
 
-    if freq not in current_filters['frequencies']:
-        print(f"[DEBUG] REJECTED: Frequency {freq} not in expected frequencies {current_filters['frequencies']}")
+    is_cv_mode = is_cv_analysis_active
+    if not is_cv_mode:
+        handle_upper = current_filters.get('handle', '').upper()
+        frequencies = current_filters.get('frequencies', [])
+        if 'CV_' in handle_upper and len(frequencies) <= 1:
+            is_cv_mode = True
+
+    freq, num = _extract_frequency_and_number(filename)
+    if num is None:
+        print(f"[DEBUG] REJECTED: Could not parse file number from {filename}")
         return False
-    if not (current_filters['range_start'] <= num <= current_filters['range_end']):
+
+    print(f"[DEBUG] Final extracted values: freq={freq}, num={num}")
+
+    if not is_cv_mode:
+        if freq is None:
+            print(f"[DEBUG] REJECTED: Missing frequency component for SWV file {filename}")
+            return False
+
+        normalized_freqs = {
+            _normalize_frequency_value(f)
+            for f in current_filters.get('frequencies', [])
+            if _normalize_frequency_value(f) is not None
+        }
+        freq_value = _normalize_frequency_value(freq)
+        print(f"[DEBUG] Frequency check: {freq_value} in {normalized_freqs} = {freq_value in normalized_freqs}")
+        if normalized_freqs and freq_value not in normalized_freqs:
+            print(f"[DEBUG] REJECTED: Frequency {freq} not in expected frequencies {current_filters['frequencies']}")
+            return False
+    else:
+        print("[DEBUG] CV mode detected; skipping frequency validation.")
+
+    range_ok = current_filters['range_start'] <= num <= current_filters['range_end']
+    print(f"[DEBUG] Range check: {current_filters['range_start']} <= {num} <= {current_filters['range_end']} = {range_ok}")
+    if not range_ok:
         print(f"[DEBUG] REJECTED: File number {num} not in range {current_filters['range_start']}-{current_filters['range_end']}")
         return False
     print(f"[DEBUG] ACCEPTED: File {filename} matches all filters")
@@ -311,7 +353,7 @@ def file_matches_filters(filename):
 
 
 def send_file_to_server(file_path):
-    global file_processing_complete, pending_file_ack
+    global file_processing_complete, pending_file_ack, is_cv_analysis_active, is_monitoring_active
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
@@ -323,8 +365,14 @@ def send_file_to_server(file_path):
             file_processing_complete = False
             pending_file_ack = filename
 
-            # Determine if this is CV analysis based on filename pattern
-            is_cv_file = filename.startswith('CV_') or (current_filters.get('handle', '').startswith('CV_'))
+            # Determine if this is CV analysis based on filename/handle patterns or active CV flag
+            filename_upper = filename.upper()
+            handle_upper = current_filters.get('handle', '').upper()
+            is_cv_file = (
+                'CV_' in filename_upper or
+                'CV_' in handle_upper or
+                is_cv_analysis_active
+            )
 
             if is_cv_file:
                 # Send CV file to CV handler
@@ -347,19 +395,24 @@ def send_file_to_server(file_path):
 
             if file_processing_complete:
                 app.log(f"<-- Server confirmed processing complete for '{filename}'")
+                time.sleep(SEND_DELAY_SECONDS)
+                pending_file_ack = None
+                return True
             else:
                 app.log(f"[Warning] Timeout waiting for server confirmation for '{filename}'")
-
-            # Reset state
-            pending_file_ack = None
+                pending_file_ack = None
+                is_monitoring_active = False
+                return False
 
         else:
             app.log(f"[Warning] Cannot send '{filename}', not connected.")
-            global is_monitoring_active
             is_monitoring_active = False
+            pending_file_ack = None
+            return False
     except Exception as e:
         app.log(f"[Error] Could not read or send file {file_path}: {e}")
         pending_file_ack = None
+        return False
 
 
 def monitor_directory_loop(directory):
@@ -380,27 +433,48 @@ def monitor_directory_loop(directory):
             if new_matching_files:
                 files_by_number = defaultdict(list)
                 for filename in new_matching_files:
-                    # Extract file number for grouping
-                    if filename.startswith(current_filters['handle']):
-                        # For files starting with handle (like CV_60Hz_1.txt)
-                        remaining = filename[len(current_filters['handle']):]
-                        match = re.search(r'_(\d+)\.', remaining, re.IGNORECASE)
-                        if match:
-                            num = int(match.group(1))
-                            files_by_number[num].append(filename)
-                    else:
-                        # For older format files like _60Hz_1.
-                        match = re.search(r'(?:^|_)(\d+)Hz.*?_(\d+)(?:\.|$)', filename, re.IGNORECASE)
-                        if match:
-                            files_by_number[int(match.group(2))].append(filename)
+                    freq, num = _extract_frequency_and_number(filename)
+                    if num is None:
+                        app.log(f"[DEBUG] Skipping file with unparsable number: {filename}")
+                        continue
+                    files_by_number[num].append((freq, filename))
+
                 app.log(f"Found {len(new_matching_files)} new matching file(s) to process...")
+
+                normalized_freqs = [
+                    _normalize_frequency_value(f)
+                    for f in current_filters.get('frequencies', [])
+                    if _normalize_frequency_value(f) is not None
+                ]
+                frequency_order_lookup = {
+                    freq_value: index for index, freq_value in enumerate(normalized_freqs)
+                }
+                is_cv_mode = is_cv_analysis_active or not frequency_order_lookup
+
                 for num in sorted(files_by_number.keys()):
-                    for filename in sorted(files_by_number[num]):
+                    entries = files_by_number[num]
+                    if is_cv_mode:
+                        ordered_entries = sorted(entries, key=lambda item: item[1].lower())
+                    else:
+                        ordered_entries = sorted(
+                            entries,
+                            key=lambda item: (
+                                frequency_order_lookup.get(_normalize_frequency_value(item[0]), len(frequency_order_lookup)),
+                                _normalize_frequency_value(item[0]) if item[0] is not None else float('inf'),
+                                item[1].lower()
+                            )
+                        )
+
+                    for freq, filename in ordered_entries:
                         if not is_monitoring_active:
                             app.log("Monitoring stopped, aborting file sending.")
                             return
                         app.log(f"Sending file: {filename}")
-                        send_file_to_server(os.path.join(directory, filename))
+                        success = send_file_to_server(os.path.join(directory, filename))
+                        if not success:
+                            app.log(f"[Warning] Stopping monitoring due to send failure for '{filename}'")
+                            processed_files.discard(filename)
+                            return
                         processed_files.add(filename)
             else:
                 # Show a few example files to help with debugging
@@ -447,13 +521,19 @@ def disconnect():
 
 @sio.on('set_filters')
 def on_set_filters(data):
-    global current_filters, processed_files, agent_thread, is_monitoring_active
+    global current_filters, processed_files, agent_thread, is_monitoring_active, is_cv_analysis_active
     app.log(f"Received filter instructions from server: {data}")
     current_filters.clear()
     current_filters.update(data)
     processed_files = set()
     app.log(f"Updated current filters: {current_filters}")
     app.log(f"Monitor directory: {app.watch_directory.get()}")
+
+    handle_upper = current_filters.get('handle', '').upper()
+    if 'CV_' in handle_upper:
+        is_cv_analysis_active = True
+    elif 'SWV_' in handle_upper:
+        is_cv_analysis_active = False
 
     if agent_thread and agent_thread.is_alive():
         app.log("Stopping previous monitoring thread...")
@@ -465,6 +545,22 @@ def on_set_filters(data):
 
     if directory == "No folder selected":
         app.log("ERROR: No folder selected for monitoring!")
+        return
+
+    if is_cv_analysis_active and last_preview_file_path and os.path.exists(last_preview_file_path):
+        preview_basename = os.path.basename(last_preview_file_path)
+        if file_matches_filters(preview_basename):
+            app.log(f"Sending previously previewed file before bulk processing: {preview_basename}")
+            if send_file_to_server(last_preview_file_path):
+                processed_files.add(preview_basename)
+                app.log(f"Preview file '{preview_basename}' sent successfully.")
+            else:
+                app.log(f"[Warning] Failed to send preview file '{preview_basename}' before monitoring.")
+        else:
+            app.log("Preview file does not match current filters; skipping pre-send.")
+
+    if not is_monitoring_active:
+        app.log("[Warning] Monitoring not started because the previous send did not complete successfully.")
         return
 
     app.log(f"Starting file monitoring in directory: {directory}")
@@ -495,7 +591,8 @@ def on_file_validation_error(data):
 @sio.on('get_cv_file_for_preview')
 def on_get_cv_file_for_preview(data):
     """Handle request for CV preview file from server"""
-    global current_filters
+    global current_filters, is_cv_analysis_active
+    is_cv_analysis_active = True
     app.log(f"Received CV preview request from server: {data}")
 
     filters = data.get('filters', {})
@@ -580,6 +677,9 @@ def on_get_cv_file_for_preview(data):
             content = f.read()
 
         app.log(f"Successfully read CV preview file, content length: {len(content)} characters")
+
+        global last_preview_file_path
+        last_preview_file_path = file_path
 
         # Send the content back to server for preview processing
         sio.emit('cv_data_from_agent', {
@@ -763,8 +863,9 @@ class AgentApp:
             sio.disconnect()
 
     def stop_monitoring_logic(self):
-        global is_monitoring_active, agent_thread
+        global is_monitoring_active, agent_thread, is_cv_analysis_active
         is_monitoring_active = False
+        is_cv_analysis_active = False
         if agent_thread and agent_thread.is_alive():
             agent_thread.join(timeout=POLLING_INTERVAL_SECONDS + 1)
         self.start_button.config(state=tk.NORMAL)
