@@ -285,24 +285,48 @@ def file_matches_filters(filename):
     if file_ext and not filename.endswith(file_ext): return False
     if not filename.startswith(current_filters['handle']): return False
     try:
-        # Use the simple, unified approach from agent1.py that works for both SWV and CV files
-        # Pattern matches: SWV_15Hz_1.txt, CV_60Hz_1.txt, etc.
-        match = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
-        if not match:
-            print(f"[DEBUG] REJECTED: Filename {filename} does not match pattern '_NNHz_N.'")
-            return False
-        freq, num = int(match.group(1)), int(match.group(2))
-        print(f"[DEBUG] Extracted from pattern: freq={freq}Hz, num={num}")
+        # Two file naming patterns:
+        # 1. SWV: handle_freqHz_{1,2}num  (e.g., SWV_15Hz_1 or SWV_15Hz__1)
+        #    - frequency MUST be extracted from filename for KDM calculation
+        # 2. CV: handle_{1,2}num  (e.g., CV_60Hz_1 or CV_60Hz__1)
+        #    - handle already contains "CV_60Hz", just extract file number
+
+        # First try SWV pattern (handle + frequency in filename)
+        match_swv = re.search(r'_(\d+)Hz_{1,2}(\d+)\.', filename, re.IGNORECASE)
+        if match_swv:
+            # SWV format: extract frequency from filename
+            freq, num = int(match_swv.group(1)), int(match_swv.group(2))
+            print(f"[DEBUG] SWV pattern matched: freq={freq}Hz, num={num}")
+        else:
+            # CV format: handle_{1,2}num (e.g., CV_60Hz_1, 2025_10_03_CV_Test__1)
+            # CV doesn't need frequency - just match handle + file number
+            remaining = filename[len(current_filters['handle']):]
+            match_cv = re.search(r'^_{1,2}(\d+)\.', remaining, re.IGNORECASE)
+            if not match_cv:
+                print(f"[DEBUG] REJECTED: No match for SWV or CV pattern")
+                return False
+            # CV doesn't use frequency
+            num = int(match_cv.group(1))
+            freq = None  # No frequency for CV
+            print(f"[DEBUG] CV pattern matched: num={num} (CV doesn't use frequency)")
     except (ValueError, IndexError):
         print(f"[DEBUG] REJECTED: Error parsing frequency/number from {filename}")
         return False
+
+    # Validation
     print(f"[DEBUG] Final extracted values: freq={freq}, num={num}")
-    print(f"[DEBUG] Frequency check: {freq} in {current_filters['frequencies']} = {freq in current_filters['frequencies']}")
     print(f"[DEBUG] Range check: {current_filters['range_start']} <= {num} <= {current_filters['range_end']} = {current_filters['range_start'] <= num <= current_filters['range_end']}")
 
-    if freq not in current_filters['frequencies']:
-        print(f"[DEBUG] REJECTED: Frequency {freq} not in expected frequencies {current_filters['frequencies']}")
-        return False
+    # Only check frequency for SWV files (freq is not None)
+    if freq is not None:
+        print(f"[DEBUG] SWV frequency check: {freq} in {current_filters['frequencies']} = {freq in current_filters['frequencies']}")
+        if freq not in current_filters['frequencies']:
+            print(f"[DEBUG] REJECTED: Frequency {freq} not in expected frequencies {current_filters['frequencies']}")
+            return False
+    else:
+        print(f"[DEBUG] CV file - skipping frequency check")
+
+    # Check file number range (applies to both SWV and CV)
     if not (current_filters['range_start'] <= num <= current_filters['range_end']):
         print(f"[DEBUG] REJECTED: File number {num} not in range {current_filters['range_start']}-{current_filters['range_end']}")
         return False
@@ -382,9 +406,10 @@ def monitor_directory_loop(directory):
                 for filename in new_matching_files:
                     # Extract file number for grouping
                     if filename.startswith(current_filters['handle']):
-                        # For files starting with handle (like CV_60Hz_1.txt)
+                        # For files starting with handle (like CV_60Hz_1.txt or CV_60Hz__1.txt)
                         remaining = filename[len(current_filters['handle']):]
-                        match = re.search(r'_(\d+)\.', remaining, re.IGNORECASE)
+                        # Support both single and double underscore before file number
+                        match = re.search(r'_{1,2}(\d+)\.', remaining, re.IGNORECASE)
                         if match:
                             num = int(match.group(1))
                             files_by_number[num].append(filename)
@@ -542,11 +567,11 @@ def on_get_cv_file_for_preview(data):
         if all_files:
             app.log(f"Sample files found: {all_files[:3]}")
 
-        # Pattern to match CV_60Hz_1.txt format
-        # For handle "CV_60Hz", this will match CV_60Hz_1.txt, CV_60Hz_2.txt, etc.
-        # The pattern is: handle + _ + number + .txt
-        cv_pattern = re.compile(r'^' + re.escape(handle) + r'_(\d+)\.txt$', re.IGNORECASE)
-        app.log(f"Using regex pattern: ^{re.escape(handle)}_(\d+)\.txt$")
+        # Pattern to match CV_60Hz_1.txt or CV_60Hz__1.txt format
+        # For handle "CV_60Hz", this will match CV_60Hz_1.txt, CV_60Hz__1.txt, etc.
+        # The pattern is: handle + (_ or __) + number + .txt
+        cv_pattern = re.compile(r'^' + re.escape(handle) + r'_{1,2}(\d+)\.txt$', re.IGNORECASE)
+        app.log(f"Using regex pattern: ^{re.escape(handle)}_{{1,2}}(\d+)\.txt$")
 
         for filename in all_files:
             app.log(f"Testing file: '{filename}' against pattern")
