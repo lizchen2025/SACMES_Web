@@ -545,8 +545,8 @@ def on_get_cv_file_for_preview(data):
         # Pattern to match CV_60Hz_1.txt format
         # For handle "CV_60Hz", this will match CV_60Hz_1.txt, CV_60Hz_2.txt, etc.
         # The pattern is: handle + _ + number + .txt
-        cv_pattern = re.compile(r'^' + re.escape(handle) + r'_(\d+)\.txt$', re.IGNORECASE)
-        app.log(f"Using regex pattern: ^{re.escape(handle)}_(\d+)\.txt$")
+        cv_pattern = re.compile(r'^' + re.escape(handle) + r'_+(\d+)\.txt$', re.IGNORECASE)
+        app.log(f"Using regex pattern: ^{re.escape(handle)}_+(\d+)\.txt$")
 
         for filename in all_files:
             app.log(f"Testing file: '{filename}' against pattern")
