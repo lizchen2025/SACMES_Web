@@ -1115,6 +1115,13 @@ export class CVModule {
                 const voltageUnits = this._displayUnits?.voltage || 'V';
                 const currentUnits = this._displayUnits?.current || 'A';
 
+                // Calculate data range for better auto-zoom
+                const allYValues = traces.flatMap(trace => trace.y || []);
+                const yMin = Math.min(...allYValues);
+                const yMax = Math.max(...allYValues);
+                const yRange = yMax - yMin;
+                const yPadding = yRange * 0.1;  // 10% padding on each side
+
                 const layout = {
                     xaxis: {
                         title: `Potential (${voltageUnits})`,
@@ -1122,7 +1129,8 @@ export class CVModule {
                     },
                     yaxis: {
                         title: `Current (${currentUnits})`,
-                        autorange: true
+                        range: [yMin - yPadding, yMax + yPadding],  // Auto-zoom with padding
+                        automargin: true
                     },
                     showlegend: true,
                     margin: { l: 60, r: 40, t: 40, b: 60 },
@@ -1274,6 +1282,13 @@ export class CVModule {
         const voltageUnits = this._displayUnits?.voltage || 'V';
         const currentUnits = this._displayUnits?.current || 'A';
 
+        // Calculate data range for better auto-zoom
+        const allYValues = traces.flatMap(trace => trace.y || []);
+        const yMin = Math.min(...allYValues);
+        const yMax = Math.max(...allYValues);
+        const yRange = yMax - yMin;
+        const yPadding = yRange * 0.1;  // 10% padding on each side
+
         const layout = {
             title: title,
             xaxis: {
@@ -1282,7 +1297,8 @@ export class CVModule {
             },
             yaxis: {
                 title: `Current (${currentUnits})`,
-                autorange: true
+                range: [yMin - yPadding, yMax + yPadding],  // Auto-zoom with padding
+                automargin: true
             },
             showlegend: true,
             legend: {
@@ -1364,6 +1380,10 @@ export class CVModule {
                         <div id="cv-peak-separation-plot" class="plotly-plot-container w-full"></div>
                     </div>
                     <div class="bg-white p-4 rounded-lg shadow">
+                        <h4 class="text-md font-semibold mb-2">Peak Height Trend</h4>
+                        <div id="cv-peak-height-plot" class="plotly-plot-container w-full"></div>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow">
                         <h4 class="text-md font-semibold mb-2">AUC Trend</h4>
                         <div id="cv-auc-plot" class="plotly-plot-container w-full"></div>
                     </div>
@@ -1388,6 +1408,8 @@ export class CVModule {
 
         const fileNumbers = Object.keys(electrodeResults).map(Number).sort((a, b) => a - b);
         const peakSeparations = [];
+        const forwardPeakHeights = [];
+        const reversePeakHeights = [];
         const forwardAUCs = [];
         const reverseAUCs = [];
 
@@ -1396,6 +1418,12 @@ export class CVModule {
             if (result && result.status === 'success') {
                 if (result.peak_separation !== undefined && result.peak_separation !== null) {
                     peakSeparations.push({ x: fileNum, y: result.peak_separation });
+                }
+                if (result.forward && result.forward.peak_height !== undefined) {
+                    forwardPeakHeights.push({ x: fileNum, y: result.forward.peak_height });
+                }
+                if (result.reverse && result.reverse.peak_height !== undefined) {
+                    reversePeakHeights.push({ x: fileNum, y: result.reverse.peak_height });
                 }
                 if (result.forward && result.forward.charge !== undefined) {
                     forwardAUCs.push({ x: fileNum, y: result.forward.charge });
@@ -1408,6 +1436,9 @@ export class CVModule {
 
         // Update peak separation plot
         this._updatePeakSeparationPlot(peakSeparations);
+
+        // Update peak height plot
+        this._updatePeakHeightPlot(forwardPeakHeights, reversePeakHeights);
 
         // Update AUC plot
         this._updateAUCPlot(forwardAUCs, reverseAUCs);
@@ -1433,11 +1464,75 @@ export class CVModule {
         const layout = {
             title: 'Peak Separation vs File Number',
             xaxis: { title: 'File Number' },
-            yaxis: { title: 'Peak Separation (V)' },
+            yaxis: {
+                title: 'Peak Separation (V)',
+                rangemode: 'tozero'  // Force y-axis to start from 0
+            },
             margin: { l: 70, r: 50, t: 50, b: 60 }
         };
 
         Plotly.react(plotElement, [trace], layout, {
+            responsive: true,
+            displayModeBar: true,
+            modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d'],
+            displaylogo: false
+        });
+    }
+
+    _updatePeakHeightPlot(forwardPeakHeights, reversePeakHeights) {
+        const plotElement = document.getElementById('cv-peak-height-plot');
+        if (!plotElement || !window.Plotly) return;
+
+        const traces = [];
+
+        // Get current display units for axis label
+        const currentUnits = this._displayUnits?.current || 'μA';
+
+        // Add forward peak heights trace
+        if (forwardPeakHeights.length > 0) {
+            traces.push({
+                x: forwardPeakHeights.map(p => p.x),
+                y: forwardPeakHeights.map(p => p.y),
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Forward Sweep',
+                line: { color: 'rgb(31, 119, 180)', width: 2 },
+                marker: { size: 6 }
+            });
+        }
+
+        // Add reverse peak heights trace
+        if (reversePeakHeights.length > 0) {
+            traces.push({
+                x: reversePeakHeights.map(p => p.x),
+                y: reversePeakHeights.map(p => p.y),
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Reverse Sweep',
+                line: { color: 'rgb(255, 127, 14)', width: 2 },
+                marker: { size: 6 }
+            });
+        }
+
+        const layout = {
+            title: 'Peak Height vs File Number',
+            xaxis: { title: 'File Number' },
+            yaxis: {
+                title: `Peak Height (${currentUnits})`,
+                rangemode: 'tozero'  // Force y-axis to start from 0
+            },
+            showlegend: true,
+            legend: {
+                orientation: 'h',  // Horizontal legend
+                x: 0.5,            // Center horizontally
+                xanchor: 'center',
+                y: -0.15,          // Below plot
+                yanchor: 'top'
+            },
+            margin: { l: 70, r: 50, t: 50, b: 80 }
+        };
+
+        Plotly.react(plotElement, traces, layout, {
             responsive: true,
             displayModeBar: true,
             modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d'],
@@ -1776,6 +1871,7 @@ export class CVModule {
             '#cv-forward-plot',             // Forward plot
             '#cv-reverse-plot',             // Reverse plot
             '#cv-peak-separation-plot',     // Peak separation plot
+            '#cv-peak-height-plot',         // Peak height plot
             '#cv-auc-plot',                 // AUC plot
             '#cv-probe-plot-container',     // Probe plot container
             '.analysis-summary'             // Text summaries
