@@ -1986,12 +1986,8 @@ export class CVModule {
     }
 
     _convertCVDataUnits(cvData) {
-        // NEW LOGIC: File input units only indicate what's in the file
-        // Backend sends data in file units (as-is, no conversion)
-        // Frontend auto-selects best display units based on magnitude
-
-        // Data comes from backend in file units (user specified: V/A, mV/mA, etc.)
-        // We assume backend data is in the units user specified for their files
+        // SIMPLIFIED: Always display in V and μA
+        // Backend sends data in file units (user specified)
         const fileVoltageUnit = this.dom.settings.voltageUnitsInput.value || 'V';
         const fileCurrentUnit = this.dom.settings.currentUnitsInput.value || 'A';
 
@@ -2018,34 +2014,16 @@ export class CVModule {
         const voltageBase = cvData.voltage.map(v => v * voltageToBase);  // to V
         const currentBase = cvData.current.map(c => c * currentToBase);  // to A
 
-        // Auto-select best display units based on magnitude
-        // Voltage: always display in V (most common for CV)
+        // FIXED DISPLAY UNITS: Always V and μA (simple and consistent)
         const displayVoltageUnit = 'V';
-        const displayVoltageFactor = 1.0;
+        const displayCurrentUnit = 'μA';
 
-        // Current: auto-select based on magnitude
-        const maxCurrent = Math.max(...currentBase.map(Math.abs));
-        let displayCurrentUnit, displayCurrentFactor;
+        // Convert to display units
+        const voltageDisplay = voltageBase;  // V (no conversion needed)
+        const currentDisplay = currentBase.map(c => c * 1e6);  // A to μA
 
-        if (maxCurrent >= 1e-3) {
-            // >= 1 mA: display in mA
-            displayCurrentUnit = 'mA';
-            displayCurrentFactor = 1e3;
-        } else if (maxCurrent >= 1e-6) {
-            // >= 1 μA: display in μA
-            displayCurrentUnit = 'μA';
-            displayCurrentFactor = 1e6;
-        } else if (maxCurrent >= 1e-9) {
-            // >= 1 nA: display in nA
-            displayCurrentUnit = 'nA';
-            displayCurrentFactor = 1e9;
-        } else {
-            // < 1 nA: display in A
-            displayCurrentUnit = 'A';
-            displayCurrentFactor = 1.0;
-        }
-
-        console.log(`Auto-selected display units: voltage=${displayVoltageUnit}, current=${displayCurrentUnit} (max=${maxCurrent.toExponential(2)}A)`);
+        console.log(`Display: ${displayVoltageUnit}, ${displayCurrentUnit}`);
+        console.log(`Sample: V=${voltageDisplay[0]?.toFixed(3)}, I=${currentDisplay[0]?.toFixed(3)} μA`);
 
         // Store display units for axis labels
         this._displayUnits = {
@@ -2054,8 +2032,8 @@ export class CVModule {
         };
 
         return {
-            voltage: voltageBase.map(v => v * displayVoltageFactor),
-            current: currentBase.map(c => c * displayCurrentFactor)
+            voltage: voltageDisplay,
+            current: currentDisplay
         };
     }
 
