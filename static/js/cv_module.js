@@ -1196,6 +1196,10 @@ export class CVModule {
 
         // Add peak marker if available
         if (sweepData.peak_potential !== undefined && sweepData.peak_current !== undefined) {
+            // Use auto-selected display units for peak label
+            const voltageUnits = this._displayUnits?.voltage || 'V';
+            const currentUnits = this._displayUnits?.current || 'A';
+
             traces.push({
                 x: [sweepData.peak_potential],
                 y: [sweepData.peak_current],
@@ -1203,7 +1207,7 @@ export class CVModule {
                 mode: 'markers+text',
                 name: 'Peak',
                 marker: { color: 'red', size: 10, symbol: 'diamond' },
-                text: [`Peak: ${sweepData.peak_potential.toFixed(3)}${this.dom.settings.voltageUnitsInput.value}, ${sweepData.peak_current.toFixed(2)}${this.dom.settings.currentUnitsInput.value}`],
+                text: [`Peak: ${sweepData.peak_potential.toFixed(3)} ${voltageUnits}, ${sweepData.peak_current.toFixed(2)} ${currentUnits}`],
                 textposition: 'top center',
                 textfont: { size: 10 }
             });
@@ -1225,18 +1229,29 @@ export class CVModule {
             });
         }
 
+        // Use auto-selected display units for axis labels
+        const voltageUnits = this._displayUnits?.voltage || 'V';
+        const currentUnits = this._displayUnits?.current || 'A';
+
         const layout = {
             title: title,
             xaxis: {
-                title: 'Potential (V)',
+                title: `Potential (${voltageUnits})`,
                 autorange: true
             },
             yaxis: {
-                title: `Current (${this.dom.settings.currentUnitsInput.value})`,
+                title: `Current (${currentUnits})`,
                 autorange: true
             },
             showlegend: true,
-            margin: { l: 60, r: 40, t: 60, b: 60 },
+            legend: {
+                orientation: 'h',  // Horizontal legend
+                x: 0.5,            // Center horizontally
+                xanchor: 'center',
+                y: -0.2,           // Place below the plot
+                yanchor: 'top'
+            },
+            margin: { l: 60, r: 40, t: 60, b: 100 },  // Increased bottom margin for legend
             autosize: true
         };
 
@@ -1419,10 +1434,13 @@ export class CVModule {
             });
         }
 
+        // Use auto-selected current unit for charge label (charge = current × time)
+        const currentUnits = this._displayUnits?.current || 'A';
+
         const layout = {
             title: 'AUC vs File Number',
             xaxis: { title: 'File Number' },
-            yaxis: { title: `Charge (${this.dom.settings.currentUnitsInput.value}C)` },
+            yaxis: { title: `Charge (${currentUnits}·s)` },  // Coulomb = A·s
             margin: { l: 70, r: 50, t: 50, b: 60 }
         };
 
@@ -1538,10 +1556,13 @@ export class CVModule {
             return;
         }
 
+        // Use auto-selected current unit
+        const currentUnits = this._displayUnits?.current || 'A';
+
         const layout = {
             title: 'Probe Voltage Currents vs File Number',
             xaxis: { title: 'File Number' },
-            yaxis: { title: `Current (${this.dom.settings.currentUnitsInput.value})` },
+            yaxis: { title: `Current (${currentUnits})` },
             margin: { l: 70, r: 50, t: 50, b: 60 }
         };
 
@@ -1594,9 +1615,9 @@ export class CVModule {
                 line: { color: '#1f77b4', width: 2 }
             }];
 
-            // Get unit settings for axis labels
-            const voltageUnits = this.dom.settings.voltageUnitsInput.value;
-            const currentUnits = this.dom.settings.currentUnitsInput.value;
+            // Use auto-selected display units for axis labels
+            const voltageUnits = this._displayUnits?.voltage || 'V';
+            const currentUnits = this._displayUnits?.current || 'A';
 
             const layout = {
                 title: 'CV Preview - Select Segments',
@@ -1910,33 +1931,76 @@ export class CVModule {
     }
 
     _convertCVDataUnits(cvData) {
-        // Convert CV data from base units (V, A) to user-selected units
-        const voltageUnits = this.dom.settings.voltageUnitsInput.value || 'V';
-        const currentUnits = this.dom.settings.currentUnitsInput.value || 'A';
+        // NEW LOGIC: File input units only indicate what's in the file
+        // Backend sends data in file units (as-is, no conversion)
+        // Frontend auto-selects best display units based on magnitude
 
-        // Unit conversion factors from base units
-        const voltageFactors = {
+        // Data comes from backend in file units (user specified: V/A, mV/mA, etc.)
+        // We assume backend data is in the units user specified for their files
+        const fileVoltageUnit = this.dom.settings.voltageUnitsInput.value || 'V';
+        const fileCurrentUnit = this.dom.settings.currentUnitsInput.value || 'A';
+
+        console.log(`File units: voltage=${fileVoltageUnit}, current=${fileCurrentUnit}`);
+
+        // Convert file units to base units (V, A) first
+        const toBaseFactors = {
+            // Voltage
             'V': 1.0,
-            'mV': 1e3,    // V to mV
-            'μV': 1e6,    // V to μV
-            'nV': 1e9     // V to nV
-        };
-
-        const currentFactors = {
+            'mV': 1e-3,
+            'μV': 1e-6,
+            'nV': 1e-9,
+            // Current
             'A': 1.0,
-            'mA': 1e3,    // A to mA
-            'μA': 1e6,    // A to μA
-            'nA': 1e9     // A to nA
+            'mA': 1e-3,
+            'μA': 1e-6,
+            'nA': 1e-9
         };
 
-        const voltageFactor = voltageFactors[voltageUnits] || 1.0;
-        const currentFactor = currentFactors[currentUnits] || 1.0;
+        const voltageToBase = toBaseFactors[fileVoltageUnit] || 1.0;
+        const currentToBase = toBaseFactors[fileCurrentUnit] || 1.0;
 
-        console.log(`Converting units: voltage × ${voltageFactor} (${voltageUnits}), current × ${currentFactor} (${currentUnits})`);
+        // Convert to base units
+        const voltageBase = cvData.voltage.map(v => v * voltageToBase);  // to V
+        const currentBase = cvData.current.map(c => c * currentToBase);  // to A
+
+        // Auto-select best display units based on magnitude
+        // Voltage: always display in V (most common for CV)
+        const displayVoltageUnit = 'V';
+        const displayVoltageFactor = 1.0;
+
+        // Current: auto-select based on magnitude
+        const maxCurrent = Math.max(...currentBase.map(Math.abs));
+        let displayCurrentUnit, displayCurrentFactor;
+
+        if (maxCurrent >= 1e-3) {
+            // >= 1 mA: display in mA
+            displayCurrentUnit = 'mA';
+            displayCurrentFactor = 1e3;
+        } else if (maxCurrent >= 1e-6) {
+            // >= 1 μA: display in μA
+            displayCurrentUnit = 'μA';
+            displayCurrentFactor = 1e6;
+        } else if (maxCurrent >= 1e-9) {
+            // >= 1 nA: display in nA
+            displayCurrentUnit = 'nA';
+            displayCurrentFactor = 1e9;
+        } else {
+            // < 1 nA: display in A
+            displayCurrentUnit = 'A';
+            displayCurrentFactor = 1.0;
+        }
+
+        console.log(`Auto-selected display units: voltage=${displayVoltageUnit}, current=${displayCurrentUnit} (max=${maxCurrent.toExponential(2)}A)`);
+
+        // Store display units for axis labels
+        this._displayUnits = {
+            voltage: displayVoltageUnit,
+            current: displayCurrentUnit
+        };
 
         return {
-            voltage: cvData.voltage.map(v => v * voltageFactor),
-            current: cvData.current.map(c => c * currentFactor)
+            voltage: voltageBase.map(v => v * displayVoltageFactor),
+            current: currentBase.map(c => c * displayCurrentFactor)
         };
     }
 
