@@ -236,7 +236,9 @@ def set_session_data(session_id, key, value):
     if redis_client:
         try:
             redis_client.hset(f"session:{session_id}", key, json.dumps(value, default=str))
-            redis_client.expire(f"session:{session_id}", 86400)  # 24 hour expiry
+            # Extended expiry for large analyses: 48 hours
+            # This prevents session loss during long-running analyses (500+ files)
+            redis_client.expire(f"session:{session_id}", 172800)  # 48 hour expiry (was 24h)
             return True
         except Exception as e:
             logger.error(f"Redis set error for session {session_id}, key {key}: {e}")
@@ -1568,7 +1570,14 @@ def handle_cv_data_from_agent(data):
             session_id = 'global_agent_session'
             live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
             if not live_analysis_params:
-                logger.warning("No CV analysis parameters found in global agent session")
+                logger.warning(f"No CV analysis parameters found in global agent session for file: {original_filename}")
+                logger.warning("This may indicate session timeout or data loss. Sending acknowledgment to agent to prevent timeout.")
+                # Send processing complete acknowledgment even if we can't process
+                # This prevents agent from waiting 30 seconds for timeout
+                agent_sid = agent_session_tracker.get('agent_sid')
+                if agent_sid:
+                    socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
+                    logger.info(f"Sent processing complete ack (error) for '{original_filename}' to agent")
                 return
 
             # Get selected electrodes from analysis params
