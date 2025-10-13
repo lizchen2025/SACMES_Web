@@ -280,40 +280,58 @@ def file_matches_filters(filename):
     file_ext = current_filters['file_extension']
     if file_ext and not filename.endswith(file_ext): return False
     if not filename.startswith(current_filters['handle']): return False
-    try:
-        # Two file naming patterns:
-        # 1. SWV: handle_freqHz_{1,2}num  (e.g., SWV_15Hz_1 or SWV_15Hz__1)
-        #    - frequency MUST be extracted from filename for KDM calculation
-        # 2. CV: handle_{1,2}num  (e.g., CV_60Hz_1, 2025_10_03_CV_Test__1)
-        #    - CV doesn't use frequency, just handle + file number
 
-        # First try SWV pattern (handle + frequency in filename)
-        match_swv = re.search(r'_(\d+)Hz_{1,2}(\d+)\.', filename, re.IGNORECASE)
-        if match_swv:
-            # SWV format: extract frequency from filename
-            freq, num = int(match_swv.group(1)), int(match_swv.group(2))
-        else:
-            # CV format: handle_{1,2}num (no Hz in filename)
-            remaining = filename[len(current_filters['handle']):]
-            match_cv = re.search(r'^_{1,2}(\d+)\.', remaining, re.IGNORECASE)
-            if not match_cv:
+    # Check if this is frequency map mode
+    analysis_mode = current_filters.get('analysis_mode', 'continuous')
+
+    try:
+        if analysis_mode == 'frequency_map':
+            # Frequency Map mode: handle_freqHz.txt (NO file number)
+            # Pattern: handle_100Hz.txt
+            match_freq_map = re.search(r'_(\d+)Hz\.', filename, re.IGNORECASE)
+            if match_freq_map:
+                freq = int(match_freq_map.group(1))
+                # Check if frequency is in the list
+                if freq not in current_filters['frequencies']:
+                    return False
+                return True  # No file number check for frequency map
+            else:
                 return False
-            # CV doesn't use frequency
-            num = int(match_cv.group(1))
-            freq = None  # No frequency for CV
+        else:
+            # Continuous/CV modes (original logic)
+            # Three file naming patterns:
+            # 1. SWV: handle_freqHz_{1,2}num  (e.g., SWV_15Hz_1 or SWV_15Hz__1)
+            #    - frequency MUST be extracted from filename for KDM calculation
+            # 2. CV: handle_{1,2}num  (e.g., CV_60Hz_1, 2025_10_03_CV_Test__1)
+            #    - CV doesn't use frequency, just handle + file number
+
+            # First try SWV pattern (handle + frequency in filename)
+            match_swv = re.search(r'_(\d+)Hz_{1,2}(\d+)\.', filename, re.IGNORECASE)
+            if match_swv:
+                # SWV format: extract frequency from filename
+                freq, num = int(match_swv.group(1)), int(match_swv.group(2))
+            else:
+                # CV format: handle_{1,2}num (no Hz in filename)
+                remaining = filename[len(current_filters['handle']):]
+                match_cv = re.search(r'^_{1,2}(\d+)\.', remaining, re.IGNORECASE)
+                if not match_cv:
+                    return False
+                # CV doesn't use frequency
+                num = int(match_cv.group(1))
+                freq = None  # No frequency for CV
+
+            # Only check frequency for SWV files (freq is not None)
+            if freq is not None:
+                if freq not in current_filters['frequencies']:
+                    return False
+
+            # Check file number range (applies to both SWV and CV)
+            if not (current_filters['range_start'] <= num <= current_filters['range_end']):
+                return False
+
+            return True
     except (ValueError, IndexError):
         return False
-
-    # Only check frequency for SWV files (freq is not None)
-    if freq is not None:
-        if freq not in current_filters['frequencies']:
-            return False
-
-    # Check file number range (applies to both SWV and CV)
-    if not (current_filters['range_start'] <= num <= current_filters['range_end']):
-        return False
-
-    return True
 
 
 def send_file_to_server(file_path):
@@ -366,7 +384,6 @@ def send_file_to_server(file_path):
 
         else:
             app.log(f"[Warning] Cannot send '{filename}', not connected.")
-            global is_monitoring_active
             is_monitoring_active = False
     except Exception as e:
         app.log(f"[Error] Could not read or send file {file_path}: {e}")

@@ -17,6 +17,8 @@ export class SWVModule {
                 analysisModeInputs: document.querySelectorAll('input[name="analysisMode"]'),
                 frequencyInputLabel: document.getElementById('frequencyInputLabel'),
                 frequencyInputHint: document.getElementById('frequencyInputHint'),
+                numFilesContainer: document.getElementById('numFilesContainer'),
+                numFilesFrequencyMapHint: document.getElementById('numFilesFrequencyMapHint'),
                 fileHandleInput: document.getElementById('fileHandleInput'),
                 frequencyInput: document.getElementById('frequencyInput'),
                 numFilesInput: document.getElementById('numFilesInput'),
@@ -435,10 +437,30 @@ export class SWVModule {
     }
 
     _handleStartAnalysis() {
-        const numFiles = parseInt(this.dom.params.numFilesInput.value);
-        if (isNaN(numFiles) || numFiles < 1) { alert("Please enter a valid number of files."); return; }
         const frequencies = this.dom.params.frequencyInput.value.split(',').map(f => parseInt(f.trim())).filter(f => !isNaN(f));
-        if (frequencies.length < 2) { alert("Please enter at least two valid frequencies."); return; }
+
+        // Validation based on analysis mode
+        if (this.state.analysisMode === 'frequency_map') {
+            // Frequency map: at least 2 frequencies required, no file number check
+            if (frequencies.length < 2) {
+                alert("Please enter at least two valid frequencies for frequency map analysis.");
+                return;
+            }
+        } else {
+            // Continuous monitor: need both numFiles and frequencies
+            const numFiles = parseInt(this.dom.params.numFilesInput.value);
+            if (isNaN(numFiles) || numFiles < 1) {
+                alert("Please enter a valid number of files.");
+                return;
+            }
+            if (frequencies.length < 2) {
+                alert("Please enter at least two valid frequencies.");
+                return;
+            }
+        }
+
+        // Set numFiles appropriately
+        const numFiles = this.state.analysisMode === 'frequency_map' ? 1 : parseInt(this.dom.params.numFilesInput.value);
 
         // Parse selected electrodes (convert from 1-based to 0-based)
         const selectedElectrodesStr = this.dom.params.selectedElectrodesInput.value.trim();
@@ -453,14 +475,24 @@ export class SWVModule {
             }
         }
         
+        // Preserve analysisMode when updating state
+        const currentAnalysisMode = this.state.analysisMode;
+
         this.state = {
-            isAnalysisRunning: true, currentFrequencies: frequencies, currentNumFiles: numFiles,
+            isAnalysisRunning: true,
+            analysisMode: currentAnalysisMode,  // Preserve mode
+            currentFrequencies: frequencies,
+            currentNumFiles: numFiles,
             currentXAxisOptions: this.dom.settings.xAxisOptionsInput.value,
-            currentKdmHighFreq: Math.max(...frequencies), currentKdmLowFreq: Math.min(...frequencies),
-            rawTrendData: null, lastCalculatedData: null,
+            currentKdmHighFreq: Math.max(...frequencies),
+            currentKdmLowFreq: Math.min(...frequencies),
+            rawTrendData: null,
+            lastCalculatedData: null,
             selectedElectrodes: selectedElectrodes,
             currentElectrode: selectedElectrodes.length > 0 ? selectedElectrodes[0] : null,
-            electrodeData: {}
+            electrodeData: {},
+            frequencyMapData: {},  // Reset frequency map data
+            analyzedFrequencies: []  // Reset analyzed frequencies
         };
         
         this.dom.visualization.postProcessNormalizationPointInput.value = this.dom.params.normalizationPointInput.value;
@@ -535,20 +567,31 @@ export class SWVModule {
     }
 
     _setupFrequencyMapVisualization() {
+        console.log('Setting up Frequency Map visualization...');
+
         // Hide continuous monitor containers
         if (this.dom.visualization.continuousMonitorContainer) {
+            console.log('Hiding continuousMonitorContainer');
             this.dom.visualization.continuousMonitorContainer.classList.add('hidden');
+        } else {
+            console.warn('continuousMonitorContainer not found!');
         }
 
         // Show frequency map container
         if (this.dom.visualization.frequencyMapContainer) {
+            console.log('Showing frequencyMapContainer');
             this.dom.visualization.frequencyMapContainer.classList.remove('hidden');
+        } else {
+            console.warn('frequencyMapContainer not found!');
         }
 
         // Hide electrode controls (frequency map analyzes one electrode at a time)
         if (this.dom.visualization.electrodeControls) {
+            console.log('Hiding electrodeControls');
             this.dom.visualization.electrodeControls.style.display = 'none';
         }
+
+        console.log('Frequency Map visualization setup complete');
     }
     
     _updateIndividualPlotsUI(filename, individual_analysis) {
@@ -920,12 +963,20 @@ export class SWVModule {
             this.dom.params.frequencyInputHint.classList.remove('hidden');
             this.dom.params.frequencyInput.placeholder = 'e.g., 10,20,50,100,200,500,1000';
 
+            // Hide num files input, show frequency map hint
+            this.dom.params.numFilesContainer.classList.add('hidden');
+            this.dom.params.numFilesFrequencyMapHint.classList.remove('hidden');
+
             // Switch button text
             this.dom.startAnalysisBtn.textContent = 'Start Frequency Map Analysis';
         } else {
             // Continuous monitor mode
             this.dom.params.frequencyInputHint.classList.add('hidden');
             this.dom.params.frequencyInput.placeholder = '';
+
+            // Show num files input, hide frequency map hint
+            this.dom.params.numFilesContainer.classList.remove('hidden');
+            this.dom.params.numFilesFrequencyMapHint.classList.add('hidden');
 
             this.dom.startAnalysisBtn.textContent = 'Start Analysis & Sync';
         }

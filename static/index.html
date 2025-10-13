@@ -421,12 +421,17 @@
                     </div>
 
                     <!-- [MODIFIED] Using the original single "Number of Files" input -->
-                    <div>
+                    <div id="numFilesContainer">
                         <label for="numFilesInput" class="block text-gray-700 text-sm font-bold mb-1">Number of Files (e.g., 379):</label>
                         <input type="number" id="numFilesInput" value="379" min="1"
                                class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        <p class="text-xs text-gray-500 mt-1">For Continuous Monitor mode: Total files per frequency</p>
                     </div>
-
+                    <div id="numFilesFrequencyMapHint" class="hidden p-3 bg-purple-50 border-l-4 border-purple-400 rounded-r">
+                        <p class="text-sm text-purple-700">
+                            <strong>Frequency Map Mode:</strong> Each frequency requires only ONE file named as {handle}_{frequency}Hz.txt
+                        </p>
+                    </div>
 
                     <div>
                         <label for="selectedElectrodesInput" class="block text-gray-700 text-sm font-bold mb-1">Selected Electrodes (comma-separated, e.g., "1,2,3" or leave empty for averaging):</label>
