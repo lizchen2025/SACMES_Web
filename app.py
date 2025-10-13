@@ -889,34 +889,49 @@ def handle_disconnect():
 
     # Check if this was the global agent disconnection
     if request.sid == agent_session_tracker.get('agent_sid'):
-        # Clear agent tracker
-        agent_session_tracker['current_session'] = None
-        agent_session_tracker['agent_sid'] = None
+        # Don't immediately clear agent tracker - give a grace period for reconnection
+        # Store the disconnected SID for comparison
+        disconnected_sid = request.sid
 
-        # Also clear from session storage
-        set_session_agent_sid('global_agent_session', None)
-        logger.warning(f"Global Agent has disconnected: {request.sid}")
+        logger.warning(f"Global Agent disconnecting: {request.sid}. Grace period for reconnection...")
 
-        # Notify ALL web viewers across all sessions
-        all_web_viewer_sids = []
-        if redis_client:
-            try:
-                session_keys = redis_client.keys("session:*")
-                for session_key in session_keys:
-                    session_data = redis_client.hget(session_key, 'web_viewer_sids')
-                    if session_data:
-                        viewer_sids = json.loads(session_data)
-                        all_web_viewer_sids.extend(list(viewer_sids))
-            except Exception as e:
-                logger.error(f"Error getting all web viewers for disconnect: {e}")
+        # Schedule cleanup after a short delay to allow for reconnection
+        def delayed_agent_cleanup():
+            import time
+            time.sleep(2)  # 2 second grace period
 
-        # Also check fallback storage
-        if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
-            all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+            # Only clear if no new agent has connected
+            if agent_session_tracker.get('agent_sid') == disconnected_sid:
+                logger.warning(f"Agent {disconnected_sid} did not reconnect. Cleaning up...")
+                agent_session_tracker['current_session'] = None
+                agent_session_tracker['agent_sid'] = None
+                set_session_agent_sid('global_agent_session', None)
 
-        if all_web_viewer_sids:
-            emit('agent_status', {'status': 'disconnected'}, to=all_web_viewer_sids)
-            logger.info(f"Notified {len(all_web_viewer_sids)} web viewers of agent disconnection")
+                # Notify all web viewers
+                all_web_viewer_sids = []
+                if redis_client:
+                    try:
+                        session_keys = redis_client.keys("session:*")
+                        for session_key in session_keys:
+                            session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                            if session_data:
+                                viewer_sids = json.loads(session_data)
+                                all_web_viewer_sids.extend(list(viewer_sids))
+                    except Exception as e:
+                        logger.error(f"Error getting all web viewers for disconnect: {e}")
+
+                if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
+                    all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+
+                if all_web_viewer_sids:
+                    socketio.emit('agent_status', {'status': 'disconnected'}, to=all_web_viewer_sids)
+                    logger.info(f"Notified {len(all_web_viewer_sids)} web viewers of agent disconnection")
+            else:
+                logger.info(f"Agent {disconnected_sid} was replaced by new connection. Skipping cleanup.")
+
+        # Start the delayed cleanup in background
+        socketio.start_background_task(delayed_agent_cleanup)
+
     else:
         # Check if this was a web viewer disconnection
         web_viewer_sids = get_session_web_viewer_sids(session_id)

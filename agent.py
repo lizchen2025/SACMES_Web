@@ -346,14 +346,17 @@ def send_file_to_server(file_path):
                 # Send SWV file to SWV handler
                 sio.emit('stream_instrument_data', {'filename': filename, 'content': content})
 
-            # Wait for server processing complete acknowledgment
+            # Wait for server processing complete acknowledgment (interruptible)
             timeout_counter = 0
             max_wait_time = 30  # 30 seconds timeout
-            while not file_processing_complete and timeout_counter < max_wait_time:
+            while not file_processing_complete and timeout_counter < max_wait_time and is_monitoring_active:
                 time.sleep(0.1)
                 timeout_counter += 0.1
 
-            if file_processing_complete:
+            # Check if stopped by user/server
+            if not is_monitoring_active:
+                app.log(f"[Info] File sending interrupted by stop command for '{filename}'")
+            elif file_processing_complete:
                 app.log(f"<-- Server confirmed processing complete for '{filename}'")
             else:
                 app.log(f"[Warning] Timeout waiting for server confirmation for '{filename}'")
@@ -609,6 +612,24 @@ def on_get_cv_file_for_preview(data):
         })
 
 
+@sio.on('stop_data_stream')
+def on_stop_data_stream(data):
+    """Handle stop command from server for SWV analysis"""
+    global is_monitoring_active
+    app.log("Received STOP command from server for SWV analysis")
+    is_monitoring_active = False
+    app.log("File monitoring stopped by server")
+
+
+@sio.on('stop_cv_data_stream')
+def on_stop_cv_data_stream(data):
+    """Handle stop command from server for CV analysis"""
+    global is_monitoring_active
+    app.log("Received STOP command from server for CV analysis")
+    is_monitoring_active = False
+    app.log("File monitoring stopped by server")
+
+
 @sio.on('consent_logged')
 def on_consent_logged(data):
     status = data.get('status', 'unknown')
@@ -724,11 +745,22 @@ class AgentApp:
             self.update_status("Connecting...", "orange")
             self.log(f"Attempting to connect to server at {server_url_to_connect}...")
 
-            # Always try to connect, even if already connected (to ensure fresh connection)
+            # Check if already connected to avoid unnecessary disconnection
             if sio.connected:
-                self.log("Disconnecting from previous connection...")
-                sio.disconnect()
-                time.sleep(0.5)  # Reduced wait time
+                self.log("Already connected to server - reusing existing connection")
+                self.update_status("Connected", "green")
+
+                # Send consent data if available
+                if hasattr(self, 'consent_data'):
+                    try:
+                        self.log(f"Sending consent data: {self.consent_data}")
+                        sio.emit('agent_consent', self.consent_data)
+                        self.log("Consent data sent to server successfully.")
+                    except Exception as e:
+                        self.log(f"Could not log consent to server: {e}")
+
+                self.log("Agent is ready and waiting for analysis instructions from the server...")
+                return
 
             self.log("Preparing connection with authentication...")
             headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
