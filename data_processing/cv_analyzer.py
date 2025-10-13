@@ -781,6 +781,12 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
                     peak_width = abs(p_adj[half_peak_indices[-1]] - p_adj[half_peak_indices[0]])
                     half_peak_potential = (p_adj[half_peak_indices[-1]] + p_adj[half_peak_indices[0]]) / 2
 
+            # Prepare AUC vertices for shading
+            # For forward sweep (positive currents): use area between curve and zero
+            # For reverse sweep (negative currents): use area between curve and zero (absolute value)
+            # The key is to NOT clip negative values to zero - let them shade below the x-axis
+            auc_vertices = list(zip(p_adj, i_corrected.tolist()))
+
             # Store results for this segment
             results[scan_type] = {
                 'potentials': p_adj,
@@ -792,7 +798,7 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
                 'charge': charge,
                 'peak_width': peak_width,
                 'half_peak_potential': half_peak_potential,
-                'auc_vertices': list(zip(p_adj, np.maximum(0, i_corrected)))  # For shading
+                'auc_vertices': auc_vertices  # Vertices for AUC shading (supports negative currents)
             }
 
             logger.info(f"CV {scan_type} analysis completed successfully:")
