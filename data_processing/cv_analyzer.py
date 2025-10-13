@@ -215,9 +215,9 @@ def _read_and_segment_data(file_path, params, selected_electrode=None):
     if not potentials or not currents:
         return [], [], {}
 
-    # For CV data, assume correct units (V for potential, A for current)
-    # We'll convert current to microAmps for consistency with existing code
-    currents = [c * 1e6 for c in currents]  # Convert A to µA
+    # For CV data, keep original file units (whatever user specified)
+    # Frontend will handle unit conversion for display
+    # DO NOT convert units here - let frontend auto-select appropriate units
 
     # --- Enhanced CV Segment Detection Logic (Based on SACMES_CV.py) ---
     segment_dictionary = {}

@@ -1159,10 +1159,16 @@ export class CVModule {
     _updateSingleCVPlot(plotElement, sweepData, title) {
         if (!plotElement || !window.Plotly) return;
 
+        // Convert all data to display units before plotting
+        const convertedMain = this._convertCVDataUnits({
+            voltage: sweepData.potentials,
+            current: sweepData.currents
+        });
+
         const traces = [
             {
-                x: sweepData.potentials,
-                y: sweepData.currents,
+                x: convertedMain.voltage,
+                y: convertedMain.current,
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Raw Data',
@@ -1172,9 +1178,13 @@ export class CVModule {
 
         // Add corrected data if available
         if (sweepData.corrected_currents) {
+            const convertedCorrected = this._convertCVDataUnits({
+                voltage: sweepData.potentials,
+                current: sweepData.corrected_currents
+            });
             traces.push({
-                x: sweepData.potentials,
-                y: sweepData.corrected_currents,
+                x: convertedCorrected.voltage,
+                y: convertedCorrected.current,
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Baseline Corrected',
@@ -1184,9 +1194,13 @@ export class CVModule {
 
         // Add baseline if available
         if (sweepData.baseline) {
+            const convertedBaseline = this._convertCVDataUnits({
+                voltage: sweepData.potentials,
+                current: sweepData.baseline
+            });
             traces.push({
-                x: sweepData.potentials,
-                y: sweepData.baseline,
+                x: convertedBaseline.voltage,
+                y: convertedBaseline.current,
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Baseline',
@@ -1196,18 +1210,23 @@ export class CVModule {
 
         // Add peak marker if available
         if (sweepData.peak_potential !== undefined && sweepData.peak_current !== undefined) {
+            const convertedPeak = this._convertCVDataUnits({
+                voltage: [sweepData.peak_potential],
+                current: [sweepData.peak_current]
+            });
+
             // Use auto-selected display units for peak label
             const voltageUnits = this._displayUnits?.voltage || 'V';
             const currentUnits = this._displayUnits?.current || 'A';
 
             traces.push({
-                x: [sweepData.peak_potential],
-                y: [sweepData.peak_current],
+                x: convertedPeak.voltage,
+                y: convertedPeak.current,
                 type: 'scatter',
                 mode: 'markers+text',
                 name: 'Peak',
                 marker: { color: 'red', size: 10, symbol: 'diamond' },
-                text: [`Peak: ${sweepData.peak_potential.toFixed(3)} ${voltageUnits}, ${sweepData.peak_current.toFixed(2)} ${currentUnits}`],
+                text: [`Peak: ${convertedPeak.voltage[0].toFixed(3)} ${voltageUnits}, ${convertedPeak.current[0].toFixed(2)} ${currentUnits}`],
                 textposition: 'top center',
                 textfont: { size: 10 }
             });
@@ -1215,11 +1234,15 @@ export class CVModule {
 
         // Add AUC shading if available
         if (sweepData.auc_vertices && sweepData.auc_vertices.length > 0) {
-            const aucX = sweepData.auc_vertices.map(v => v[0]);
-            const aucY = sweepData.auc_vertices.map(v => v[1]);
+            const aucVoltages = sweepData.auc_vertices.map(v => v[0]);
+            const aucCurrents = sweepData.auc_vertices.map(v => v[1]);
+            const convertedAUC = this._convertCVDataUnits({
+                voltage: aucVoltages,
+                current: aucCurrents
+            });
             traces.push({
-                x: aucX,
-                y: aucY,
+                x: convertedAUC.voltage,
+                y: convertedAUC.current,
                 fill: 'tozeroy',
                 type: 'scatter',
                 mode: 'none',
