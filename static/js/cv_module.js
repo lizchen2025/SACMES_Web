@@ -1062,10 +1062,16 @@ export class CVModule {
         setTimeout(() => {
             const plotElement = document.getElementById(plotId);
             if (plotElement && window.Plotly) {
+                // Convert all data to display units before plotting
+                const convertedMain = this._convertCVDataUnits({
+                    voltage: sweepData.potentials,
+                    current: sweepData.currents
+                });
+
                 const traces = [
                     {
-                        x: sweepData.potentials,
-                        y: sweepData.currents,
+                        x: convertedMain.voltage,
+                        y: convertedMain.current,
                         type: 'scatter',
                         mode: 'lines',
                         name: 'Raw Data',
@@ -1075,9 +1081,13 @@ export class CVModule {
 
                 // Add corrected data if available
                 if (sweepData.corrected_currents) {
+                    const convertedCorrected = this._convertCVDataUnits({
+                        voltage: sweepData.potentials,
+                        current: sweepData.corrected_currents
+                    });
                     traces.push({
-                        x: sweepData.potentials,
-                        y: sweepData.corrected_currents,
+                        x: convertedCorrected.voltage,
+                        y: convertedCorrected.current,
                         type: 'scatter',
                         mode: 'lines',
                         name: 'Baseline Corrected',
@@ -1087,9 +1097,13 @@ export class CVModule {
 
                 // Add baseline if available
                 if (sweepData.baseline) {
+                    const convertedBaseline = this._convertCVDataUnits({
+                        voltage: sweepData.potentials,
+                        current: sweepData.baseline
+                    });
                     traces.push({
-                        x: sweepData.potentials,
-                        y: sweepData.baseline,
+                        x: convertedBaseline.voltage,
+                        y: convertedBaseline.current,
                         type: 'scatter',
                         mode: 'lines',
                         name: 'Baseline',
@@ -1097,13 +1111,17 @@ export class CVModule {
                     });
                 }
 
+                // Use auto-selected display units for axis labels
+                const voltageUnits = this._displayUnits?.voltage || 'V';
+                const currentUnits = this._displayUnits?.current || 'A';
+
                 const layout = {
                     xaxis: {
-                        title: 'Potential (V)',
+                        title: `Potential (${voltageUnits})`,
                         autorange: true
                     },
                     yaxis: {
-                        title: 'Current (A)',
+                        title: `Current (${currentUnits})`,
                         autorange: true
                     },
                     showlegend: true,
@@ -1547,9 +1565,16 @@ export class CVModule {
             const color = colors[voltageIndex % colors.length];
 
             if (forwardData.length > 0) {
+                // Convert probe currents to display units
+                const forwardCurrents = forwardData.map(p => p.y);
+                const convertedForward = this._convertCVDataUnits({
+                    voltage: new Array(forwardCurrents.length).fill(voltage),
+                    current: forwardCurrents
+                });
+
                 traces.push({
                     x: forwardData.map(p => p.x),
-                    y: forwardData.map(p => p.y),
+                    y: convertedForward.current,
                     type: 'scatter',
                     mode: 'lines+markers',
                     name: `${voltage}V Forward`,
@@ -1559,9 +1584,16 @@ export class CVModule {
             }
 
             if (reverseData.length > 0) {
+                // Convert probe currents to display units
+                const reverseCurrents = reverseData.map(p => p.y);
+                const convertedReverse = this._convertCVDataUnits({
+                    voltage: new Array(reverseCurrents.length).fill(voltage),
+                    current: reverseCurrents
+                });
+
                 traces.push({
                     x: reverseData.map(p => p.x),
-                    y: reverseData.map(p => p.y),
+                    y: convertedReverse.current,
                     type: 'scatter',
                     mode: 'lines+markers',
                     name: `${voltage}V Reverse`,
