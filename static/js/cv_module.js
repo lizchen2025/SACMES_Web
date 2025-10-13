@@ -1419,11 +1419,11 @@ export class CVModule {
                 if (result.peak_separation !== undefined && result.peak_separation !== null) {
                     peakSeparations.push({ x: fileNum, y: result.peak_separation });
                 }
-                if (result.forward && result.forward.peak_height !== undefined) {
-                    forwardPeakHeights.push({ x: fileNum, y: result.forward.peak_height });
+                if (result.forward && result.forward.peak_current !== undefined) {
+                    forwardPeakHeights.push({ x: fileNum, y: result.forward.peak_current });
                 }
-                if (result.reverse && result.reverse.peak_height !== undefined) {
-                    reversePeakHeights.push({ x: fileNum, y: result.reverse.peak_height });
+                if (result.reverse && result.reverse.peak_current !== undefined) {
+                    reversePeakHeights.push({ x: fileNum, y: result.reverse.peak_current });
                 }
                 if (result.forward && result.forward.charge !== undefined) {
                     forwardAUCs.push({ x: fileNum, y: result.forward.charge });
