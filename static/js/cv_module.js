@@ -813,8 +813,13 @@ export class CVModule {
 
     _setupCVAnalysisTimeout() {
         // Set up periodic checks and timeouts for CV analysis
-        const maxWaitTime = 30000; // 30 seconds maximum wait
+        // Dynamic timeout based on number of files: 2 seconds per file + 60 seconds base
+        const baseTimeout = 60000; // 60 seconds base
+        const timePerFile = 2000; // 2 seconds per file
+        const maxWaitTime = baseTimeout + (this.state.currentNumFiles * timePerFile);
         const checkInterval = 2000; // Check every 2 seconds
+
+        console.log(`CV Analysis: Setting timeout to ${maxWaitTime}ms for ${this.state.currentNumFiles} files`);
 
         let checkCount = 0;
         const maxChecks = maxWaitTime / checkInterval;
@@ -830,22 +835,23 @@ export class CVModule {
             const hasAnyResults = Object.keys(this.state.cvResults).length > 0;
             const timeElapsed = Date.now() - this.state.analysisStartTime;
 
-            // Force visualization switch if:
-            // 1. We have substantial results and 60 seconds have passed
-            // 2. Maximum wait time has been reached
+            // Get total number of results across all electrodes
             const numResults = Object.keys(this.state.cvResults).reduce((total, electrode) => {
                 return total + Object.keys(this.state.cvResults[electrode] || {}).length;
             }, 0);
 
             const hasSubstantialResults = numResults >= Math.min(10, this.state.currentNumFiles * 0.2);
 
-            if (hasSubstantialResults && timeElapsed > 60000) {
-                console.log(`CV analysis: Force switching to visualization after ${timeElapsed}ms with ${numResults} results`);
-                this._completeCVAnalysis('timeout_with_data');
-                return;
-            } else if (timeElapsed > maxWaitTime) {
-                console.log(`CV analysis: Force switching to visualization after ${timeElapsed}ms timeout`);
-                this._completeCVAnalysis('timeout_no_data');
+            // Only timeout if we've exceeded the dynamic wait time
+            // No early timeout based on 60 seconds anymore
+            if (timeElapsed > maxWaitTime) {
+                if (hasSubstantialResults) {
+                    console.log(`CV analysis: Timeout after ${timeElapsed}ms with ${numResults}/${this.state.currentNumFiles} files`);
+                    this._completeCVAnalysis('timeout_with_data');
+                } else {
+                    console.log(`CV analysis: Timeout after ${timeElapsed}ms with no data`);
+                    this._completeCVAnalysis('timeout_no_data');
+                }
                 return;
             }
 
