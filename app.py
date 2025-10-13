@@ -531,6 +531,124 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
         logger.info(f"CV_BACKGROUND_TASK: Finished job for '{original_filename}'.")
 
 
+def get_all_web_viewer_sids():
+    """Helper function to get all web viewer SIDs across all sessions"""
+    all_sids = []
+    if redis_client:
+        try:
+            session_keys = redis_client.keys("session:*")
+            for session_key in session_keys:
+                if session_key.decode() != 'session:global_agent_session':
+                    session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                    if session_data:
+                        viewer_sids = json.loads(session_data)
+                        all_sids.extend(list(viewer_sids))
+        except Exception as e:
+            logger.error(f"Error getting all web viewers: {e}")
+
+    # Fallback to in-memory storage
+    if not all_sids and fallback_data.get('web_viewer_sids'):
+        all_sids.extend(list(fallback_data['web_viewer_sids']))
+
+    return all_sids
+
+
+def process_frequency_map_file(original_filename, content, frequency, params, session_id='global_agent_session'):
+    """Process a single file for frequency map analysis"""
+    temp_filepath = None
+
+    try:
+        logger.info(f"FREQUENCY_MAP: Processing '{original_filename}' at {frequency}Hz")
+
+        # Create temporary file
+        secure_name = secure_filename(f"freqmap_{frequency}Hz_{session_id}_{original_filename}")
+        temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], secure_name)
+
+        with open(temp_filepath, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        # Call existing SWV analysis function
+        params_copy = params.copy()
+        params_copy['frequency'] = frequency
+
+        selected_electrode = params.get('selected_electrode')
+        analysis_result = analyze_swv_data(temp_filepath, params_copy, selected_electrode)
+
+        # Handle electrode validation errors
+        if analysis_result and analysis_result.get('status') == 'error' and 'detected_electrodes' in analysis_result:
+            validation_error_sent = get_session_data(session_id, 'validation_error_sent', False)
+            if not validation_error_sent:
+                set_session_data(session_id, 'validation_error_sent', True)
+                logger.error(f"Frequency map electrode validation error: {analysis_result.get('message')}")
+
+                all_web_viewer_sids = get_all_web_viewer_sids()
+                if all_web_viewer_sids:
+                    socketio.emit('electrode_validation_error', {
+                        'message': analysis_result.get('message'),
+                        'detected_electrodes': analysis_result.get('detected_electrodes'),
+                        'requested_electrode': analysis_result.get('requested_electrode')
+                    }, to=all_web_viewer_sids)
+            return
+
+        if analysis_result and analysis_result.get('status') in ['success', 'warning']:
+            # Calculate charge (Charge = Peak / Frequency * 100000 to convert to µC)
+            peak_value = analysis_result.get('peak_value', 0)
+            charge = (peak_value / frequency) * 100000 if frequency > 0 else 0
+
+            # Store results
+            frequency_map_data = get_session_data(session_id, 'frequency_map_data', {})
+            if 'results' not in frequency_map_data:
+                frequency_map_data['results'] = {}
+
+            electrode_key = str(selected_electrode) if selected_electrode is not None else 'averaged'
+            if electrode_key not in frequency_map_data['results']:
+                frequency_map_data['results'][electrode_key] = {}
+
+            frequency_map_data['results'][electrode_key][str(frequency)] = {
+                'potentials': analysis_result.get('potentials', []),
+                'raw_currents': analysis_result.get('raw_currents', []),
+                'smoothed_currents': analysis_result.get('smoothed_currents', []),
+                'regression_line': analysis_result.get('regression_line', []),
+                'adjusted_potentials': analysis_result.get('adjusted_potentials', []),
+                'peak_value': peak_value,
+                'charge': charge,
+                'frequency': frequency,
+                'filename': original_filename
+            }
+
+            set_session_data(session_id, 'frequency_map_data', frequency_map_data)
+
+            logger.info(f"FREQUENCY_MAP: Stored result for {frequency}Hz, charge={charge:.2f}µC, peak={peak_value:.4e}A")
+
+            # Send update to all web viewers
+            all_web_viewer_sids = get_all_web_viewer_sids()
+            if all_web_viewer_sids:
+                socketio.emit('frequency_map_update', {
+                    'filename': original_filename,
+                    'frequency': frequency,
+                    'electrode_index': selected_electrode,
+                    'data': frequency_map_data['results'][electrode_key][str(frequency)]
+                }, to=all_web_viewer_sids)
+                logger.info(f"FREQUENCY_MAP: Sent update to {len(all_web_viewer_sids)} web viewers")
+
+        # Send processing complete acknowledgment to agent
+        agent_sid = agent_session_tracker.get('agent_sid')
+        if agent_sid:
+            socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
+            logger.info(f"FREQUENCY_MAP: Sent processing complete ack for '{original_filename}' to agent")
+
+    except Exception as e:
+        logger.error(f"FREQUENCY_MAP: Error processing '{original_filename}': {e}", exc_info=True)
+        # Send acknowledgment even if processing failed
+        agent_sid = agent_session_tracker.get('agent_sid')
+        if agent_sid:
+            socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
+    finally:
+        if temp_filepath and os.path.exists(temp_filepath):
+            os.remove(temp_filepath)
+        logger.info(f"FREQUENCY_MAP: Finished processing '{original_filename}'")
+
+
 def process_file_in_background(original_filename, content, params_for_this_file, session_id):
     logger.info(f"BACKGROUND_TASK: Started processing for '{original_filename}' in session {session_id}")
     filename = secure_filename(f"{session_id}_{original_filename}")
@@ -1106,6 +1224,81 @@ def handle_stop_cv_analysis_session(data):
     logger.info(f"CV Analysis session stopped for session {session_id} and states reset.")
 
 
+@socketio.on('start_frequency_map_session')
+def handle_start_frequency_map_session(data):
+    """
+    Start frequency map analysis session
+    Expected data structure:
+    {
+        'analysisParams': {...},
+        'frequencies': [10, 20, 50, 100, ...],
+        'filters': {...}
+    }
+    """
+    session_id = get_session_id()
+    logger.info(f"Received 'start_frequency_map_session' from {request.sid}, Session: {session_id}")
+
+    if 'analysisParams' in data:
+        # Store frequency map specific params
+        data['analysisParams']['analysis_mode'] = 'frequency_map'
+        set_session_data(session_id, 'live_analysis_params', data['analysisParams'])
+        set_session_data(session_id, 'frequency_map_data', {
+            'frequencies': data.get('frequencies', []),
+            'results': {}  # {electrode_key: {frequency: {data}}}
+        })
+        set_session_data(session_id, 'validation_error_sent', False)
+        logger.info(f"Frequency Map session started for session {session_id} with frequencies: {data.get('frequencies', [])}")
+
+    # Use global agent tracker
+    agent_sid = agent_session_tracker.get('agent_sid')
+
+    # Fallback: check global agent session
+    if not agent_sid:
+        agent_sid = get_session_agent_sid('global_agent_session')
+        if agent_sid:
+            agent_session_tracker['agent_sid'] = agent_sid
+            logger.info(f"Retrieved agent SID from storage for frequency map: {agent_sid}")
+
+    if 'filters' in data and agent_sid:
+        filters = data['filters']
+        filters['analysis_mode'] = 'frequency_map'
+        filters['frequencies'] = data.get('frequencies', [])
+        filters['file_extension'] = data['analysisParams'].get('file_extension', '.txt')
+
+        # Store in global agent session for data processing
+        set_session_data('global_agent_session', 'live_analysis_params', data['analysisParams'])
+        set_session_data('global_agent_session', 'frequency_map_data', {
+            'frequencies': data.get('frequencies', []),
+            'results': {}
+        })
+        set_session_data('global_agent_session', 'validation_error_sent', False)
+
+        logger.info(f"Sending frequency map filters to global agent {agent_sid}: {filters}")
+        emit('set_filters', filters, to=agent_sid)
+        emit('ack_start_frequency_map_session', {'status': 'success', 'message': 'Frequency map instructions sent.'})
+    elif not agent_sid:
+        logger.warning("No global agent found for frequency map")
+        emit('ack_start_frequency_map_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
+
+
+@socketio.on('stop_frequency_map_session')
+def handle_stop_frequency_map_session(data):
+    session_id = get_session_id()
+    logger.info(f"Received 'stop_frequency_map_session' from {request.sid}, Session: {session_id}")
+
+    # Reset frequency map states
+    set_session_data(session_id, 'live_analysis_params', {})
+    set_session_data(session_id, 'frequency_map_data', {})
+    set_session_data(session_id, 'validation_error_sent', False)
+
+    # Notify agent to stop if connected
+    agent_sid = get_session_agent_sid(session_id)
+    if agent_sid:
+        emit('stop_data_stream', {}, to=agent_sid)
+
+    logger.info(f"Frequency Map session stopped for session {session_id} and states reset.")
+
+
 @socketio.on('stream_instrument_data')
 def handle_instrument_data(data):
     # Verify this is from the global agent
@@ -1134,45 +1327,93 @@ def handle_instrument_data(data):
         logger.warning("No analysis parameters found in global agent session")
         return
 
+    # Check analysis mode
+    analysis_mode = live_analysis_params.get('analysis_mode', 'continuous')
+
     # Support both old format (_60Hz_1.) and new format (_60Hz_1 or CV_60Hz_1)
     match = re.search(r'_(\d+)Hz', original_filename, re.IGNORECASE)
     if not match:
         logger.warning(f"Filename does not match expected pattern: {original_filename}")
         return
 
+    frequency = int(match.group(1))
+
     # Get selected electrodes from analysis params
     selected_electrodes = live_analysis_params.get('selected_electrodes', [])
 
-    if selected_electrodes:
-        # Process each selected electrode in parallel
-        for electrode_idx in selected_electrodes:
+    if analysis_mode == 'frequency_map':
+        # Frequency Map mode: Process file for frequency map visualization
+        logger.info(f"Processing in FREQUENCY MAP mode: {original_filename} at {frequency}Hz")
+
+        if selected_electrodes:
+            # Process each selected electrode
+            for electrode_idx in selected_electrodes:
+                params_for_this_file = live_analysis_params.copy()
+                params_for_this_file['selected_electrode'] = electrode_idx
+                params_for_this_file.setdefault('low_xstart', None)
+                params_for_this_file.setdefault('low_xend', None)
+                params_for_this_file.setdefault('high_xstart', None)
+                params_for_this_file.setdefault('high_xend', None)
+
+                socketio.start_background_task(
+                    target=process_frequency_map_file,
+                    original_filename=original_filename,
+                    content=file_content,
+                    frequency=frequency,
+                    params=params_for_this_file,
+                    session_id='global_agent_session'
+                )
+        else:
+            # Averaged electrode data
             params_for_this_file = live_analysis_params.copy()
-            params_for_this_file['frequency'] = int(match.group(1))
-            params_for_this_file['selected_electrode'] = electrode_idx
+            params_for_this_file.setdefault('low_xstart', None)
+            params_for_this_file.setdefault('low_xend', None)
+            params_for_this_file.setdefault('high_xstart', None)
+            params_for_this_file.setdefault('high_xend', None)
+
+            socketio.start_background_task(
+                target=process_frequency_map_file,
+                original_filename=original_filename,
+                content=file_content,
+                frequency=frequency,
+                params=params_for_this_file,
+                session_id='global_agent_session'
+            )
+
+    else:
+        # Continuous Monitor mode: Original behavior
+        logger.info(f"Processing in CONTINUOUS MONITOR mode: {original_filename}")
+
+        if selected_electrodes:
+            # Process each selected electrode in parallel
+            for electrode_idx in selected_electrodes:
+                params_for_this_file = live_analysis_params.copy()
+                params_for_this_file['frequency'] = frequency
+                params_for_this_file['selected_electrode'] = electrode_idx
+                params_for_this_file.setdefault('low_xstart', None)
+                params_for_this_file.setdefault('low_xend', None)
+                params_for_this_file.setdefault('high_xstart', None)
+                params_for_this_file.setdefault('high_xend', None)
+
+                socketio.start_background_task(target=process_file_in_background,
+                                             original_filename=f"{original_filename}_electrode_{electrode_idx}",
+                                             content=file_content,
+                                             params_for_this_file=params_for_this_file,
+                                             session_id='global_agent_session')
+        else:
+            # Original averaging behavior
+            params_for_this_file = live_analysis_params.copy()
+            params_for_this_file['frequency'] = frequency
             params_for_this_file.setdefault('low_xstart', None)
             params_for_this_file.setdefault('low_xend', None)
             params_for_this_file.setdefault('high_xstart', None)
             params_for_this_file.setdefault('high_xend', None)
 
             socketio.start_background_task(target=process_file_in_background,
-                                         original_filename=f"{original_filename}_electrode_{electrode_idx}",
+                                         original_filename=original_filename,
                                          content=file_content,
                                          params_for_this_file=params_for_this_file,
                                          session_id='global_agent_session')
-    else:
-        # Original averaging behavior
-        params_for_this_file = live_analysis_params.copy()
-        params_for_this_file['frequency'] = int(match.group(1))
-        params_for_this_file.setdefault('low_xstart', None)
-        params_for_this_file.setdefault('low_xend', None)
-        params_for_this_file.setdefault('high_xstart', None)
-        params_for_this_file.setdefault('high_xend', None)
-
-        socketio.start_background_task(target=process_file_in_background,
-                                     original_filename=original_filename,
-                                     content=file_content,
-                                     params_for_this_file=params_for_this_file,
-                                     session_id='global_agent_session')
 
 
 @socketio.on('stream_cv_data')

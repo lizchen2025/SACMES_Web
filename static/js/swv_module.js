@@ -14,6 +14,9 @@ export class SWVModule {
             agentStatus: document.getElementById('agentStatus'),
             folderStatus: document.getElementById('folderStatus'),
             params: {
+                analysisModeInputs: document.querySelectorAll('input[name="analysisMode"]'),
+                frequencyInputLabel: document.getElementById('frequencyInputLabel'),
+                frequencyInputHint: document.getElementById('frequencyInputHint'),
                 fileHandleInput: document.getElementById('fileHandleInput'),
                 frequencyInput: document.getElementById('frequencyInput'),
                 numFilesInput: document.getElementById('numFilesInput'),
@@ -51,6 +54,14 @@ export class SWVModule {
             visualization: {
                 visualizationArea: document.getElementById('visualizationArea'),
                 electrodeControls: document.getElementById('electrodeControls'),
+                continuousMonitorContainer: document.getElementById('continuousMonitorContainer'),
+                frequencyMapContainer: document.getElementById('frequencyMapContainer'),
+                frequencyMapVoltammogramPlot: document.getElementById('frequencyMapVoltammogramPlot'),
+                frequencyMapChargePlot: document.getElementById('frequencyMapChargePlot'),
+                currentFrequencyLabel: document.getElementById('currentFrequencyLabel'),
+                analyzedFrequenciesCount: document.getElementById('analyzedFrequenciesCount'),
+                latestFrequency: document.getElementById('latestFrequency'),
+                latestCharge: document.getElementById('latestCharge'),
                 individualPlotsContainer: document.getElementById('individualPlotsContainer'),
                 trendPlotsContainer: document.getElementById('trendPlotsContainer'),
                 adjustmentControls: document.getElementById('adjustmentControls'),
@@ -70,6 +81,7 @@ export class SWVModule {
 
         this.state = {
             isAnalysisRunning: false,
+            analysisMode: 'continuous', // 'continuous' or 'frequency_map'
             currentFrequencies: [],
             currentNumFiles: 0,
             currentXAxisOptions: "File Number",
@@ -79,15 +91,26 @@ export class SWVModule {
             lastCalculatedData: null, // Holds the last fully calculated trend object
             selectedElectrodes: [], // List of selected electrodes
             currentElectrode: null, // Currently displayed electrode (null for averaged)
-            electrodeData: {} // Raw data for each electrode
+            electrodeData: {}, // Raw data for each electrode
+            frequencyMapData: {}, // {frequency: {potentials, currents, charge, etc.}}
+            analyzedFrequencies: [] // List of frequencies already analyzed in frequency map mode
         };
 
         this._setupEventListeners();
         this._setupSocketHandlers();
+        this._setupFrequencyMapSocketHandlers();
         this._setupFilterModeToggle();
     }
 
     _setupEventListeners() {
+        // Analysis mode toggle
+        this.dom.params.analysisModeInputs.forEach(input => {
+            input.addEventListener('change', (e) => {
+                this.state.analysisMode = e.target.value;
+                this._updateUIForMode(e.target.value);
+            });
+        });
+
         this.dom.swvBtn.addEventListener('click', () => this.uiManager.showScreen('swvAnalysisScreen'));
         this.dom.startAnalysisBtn.addEventListener('click', this._handleStartAnalysis.bind(this));
         this.dom.backToWelcomeBtn.addEventListener('click', () => this.uiManager.showScreen('welcomeScreen'));
@@ -472,20 +495,60 @@ export class SWVModule {
             selected_electrodes: this.state.selectedElectrodes // Add all selected electrodes
         };
         const filters = { handle: this.dom.params.fileHandleInput.value.trim(), frequencies: this.state.currentFrequencies, range_start: 1, range_end: numFiles };
-        
+
         this.dom.startAnalysisBtn.textContent = 'Analysis Running...';
         this.dom.startAnalysisBtn.disabled = true;
         this.dom.folderStatus.textContent = "Sending instructions to server...";
-        this._setupVisualizationLayout();
-        this._setupElectrodeControls();
-        this.uiManager.showScreen('visualizationArea');
-        this.dom.visualization.adjustmentControls.classList.remove('hidden');
-        this.dom.visualization.exportDataBtn.classList.remove('hidden');
-        this.dom.visualization.exportStatus.textContent = '';
-        // Clear warnings at the start of analysis
-        this.dom.visualization.peakDetectionWarnings.classList.add('hidden');
-        this.dom.visualization.warningsList.innerHTML = '';
-        this.socketManager.emit('start_analysis_session', { filters, analysisParams });
+
+        // Check analysis mode and setup appropriate visualization
+        if (this.state.analysisMode === 'frequency_map') {
+            // Frequency Map mode
+            this._setupFrequencyMapVisualization();
+            this.uiManager.showScreen('visualizationArea');
+
+            // Hide continuous monitor specific controls
+            this.dom.visualization.adjustmentControls.classList.add('hidden');
+            this.dom.visualization.exportDataBtn.classList.add('hidden');
+
+            // Clear frequency map data
+            this.state.frequencyMapData = {};
+            this.state.analyzedFrequencies = [];
+            this.dom.visualization.analyzedFrequenciesCount.textContent = '0';
+            this.dom.visualization.latestFrequency.textContent = '-';
+            this.dom.visualization.latestCharge.textContent = '-';
+            this.dom.visualization.currentFrequencyLabel.textContent = 'No frequency selected';
+
+            this.socketManager.emit('start_frequency_map_session', { filters, analysisParams, frequencies: this.state.currentFrequencies });
+        } else {
+            // Continuous Monitor mode (original behavior)
+            this._setupVisualizationLayout();
+            this._setupElectrodeControls();
+            this.uiManager.showScreen('visualizationArea');
+            this.dom.visualization.adjustmentControls.classList.remove('hidden');
+            this.dom.visualization.exportDataBtn.classList.remove('hidden');
+            this.dom.visualization.exportStatus.textContent = '';
+            // Clear warnings at the start of analysis
+            this.dom.visualization.peakDetectionWarnings.classList.add('hidden');
+            this.dom.visualization.warningsList.innerHTML = '';
+            this.socketManager.emit('start_analysis_session', { filters, analysisParams });
+        }
+    }
+
+    _setupFrequencyMapVisualization() {
+        // Hide continuous monitor containers
+        if (this.dom.visualization.continuousMonitorContainer) {
+            this.dom.visualization.continuousMonitorContainer.classList.add('hidden');
+        }
+
+        // Show frequency map container
+        if (this.dom.visualization.frequencyMapContainer) {
+            this.dom.visualization.frequencyMapContainer.classList.remove('hidden');
+        }
+
+        // Hide electrode controls (frequency map analyzes one electrode at a time)
+        if (this.dom.visualization.electrodeControls) {
+            this.dom.visualization.electrodeControls.style.display = 'none';
+        }
     }
     
     _updateIndividualPlotsUI(filename, individual_analysis) {
@@ -721,6 +784,16 @@ export class SWVModule {
         // Clean up any CV remnants before setting up SWV visualization
         this._cleanupCVRemnants();
 
+        // Show continuous monitor containers
+        if (this.dom.visualization.continuousMonitorContainer) {
+            this.dom.visualization.continuousMonitorContainer.classList.remove('hidden');
+        }
+
+        // Hide frequency map container
+        if (this.dom.visualization.frequencyMapContainer) {
+            this.dom.visualization.frequencyMapContainer.classList.add('hidden');
+        }
+
         const { individualPlotsContainer } = this.dom.visualization;
         const { currentKdmHighFreq, currentKdmLowFreq } = this.state;
         if (individualPlotsContainer) {
@@ -838,6 +911,149 @@ export class SWVModule {
         });
 
         warningsContainer.classList.remove('hidden');
+    }
+
+    _updateUIForMode(mode) {
+        // Update UI elements based on analysis mode
+        if (mode === 'frequency_map') {
+            // Update frequency input hint
+            this.dom.params.frequencyInputHint.classList.remove('hidden');
+            this.dom.params.frequencyInput.placeholder = 'e.g., 10,20,50,100,200,500,1000';
+
+            // Switch button text
+            this.dom.startAnalysisBtn.textContent = 'Start Frequency Map Analysis';
+        } else {
+            // Continuous monitor mode
+            this.dom.params.frequencyInputHint.classList.add('hidden');
+            this.dom.params.frequencyInput.placeholder = '';
+
+            this.dom.startAnalysisBtn.textContent = 'Start Analysis & Sync';
+        }
+    }
+
+    _setupFrequencyMapSocketHandlers() {
+        // Handle frequency map update from server
+        this.socketManager.on('frequency_map_update', (data) => {
+            if (!this.state.isAnalysisRunning || this.state.analysisMode !== 'frequency_map') return;
+
+            console.log('Received frequency map update:', data);
+
+            const { frequency, data: freqData } = data;
+
+            // Store frequency data
+            this.state.frequencyMapData[frequency] = freqData;
+
+            // Add to analyzed frequencies list if not already there
+            if (!this.state.analyzedFrequencies.includes(frequency)) {
+                this.state.analyzedFrequencies.push(frequency);
+            }
+
+            // Update statistics
+            this.dom.visualization.analyzedFrequenciesCount.textContent = this.state.analyzedFrequencies.length;
+            this.dom.visualization.latestFrequency.textContent = frequency;
+            this.dom.visualization.latestCharge.textContent = freqData.charge.toFixed(2);
+
+            // Update voltammogram plot (top)
+            this._updateFrequencyMapVoltammogram(freqData);
+
+            // Update frequency-charge plot (bottom)
+            this._updateFrequencyChargeChart();
+        });
+
+        // Handle acknowledgment for frequency map session start
+        this.socketManager.on('ack_start_frequency_map_session', (data) => {
+            if (data.status === 'success') {
+                this.dom.folderStatus.textContent = 'Frequency map analysis started. Agent is scanning files...';
+            } else {
+                this.dom.folderStatus.textContent = data.message;
+                this.state.isAnalysisRunning = false;
+                this.dom.startAnalysisBtn.disabled = false;
+                this.dom.startAnalysisBtn.textContent = 'Start Frequency Map Analysis';
+            }
+        });
+    }
+
+    _updateFrequencyMapVoltammogram(freqData) {
+        const plotDiv = this.dom.visualization.frequencyMapVoltammogramPlot;
+
+        // Prepare voltammogram traces
+        const traces = [];
+
+        // Smoothed data trace
+        if (freqData.smoothed_currents && freqData.smoothed_currents.length > 0) {
+            traces.push({
+                x: freqData.potentials,
+                y: freqData.smoothed_currents.map(c => c * 1e6), // Convert to µA
+                type: 'scatter',
+                mode: 'markers',
+                name: 'Smoothed Data',
+                marker: { size: 3, color: 'black' }
+            });
+        }
+
+        // Regression line trace
+        if (freqData.regression_line && freqData.regression_line.length > 0) {
+            traces.push({
+                x: freqData.adjusted_potentials || freqData.potentials,
+                y: freqData.regression_line.map(c => c * 1e6), // Convert to µA
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Baseline',
+                line: { color: 'red', width: 2 }
+            });
+        }
+
+        const layout = {
+            title: `Voltammogram at ${freqData.frequency} Hz`,
+            xaxis: {
+                title: 'Potential (V)',
+                autorange: 'reversed' // Texas convention
+            },
+            yaxis: { title: 'Current (µA)' },
+            showlegend: true,
+            legend: { x: 0.7, y: 1 },
+            margin: { l: 60, r: 30, t: 50, b: 50 },
+            hovermode: 'closest'
+        };
+
+        Plotly.react(plotDiv, traces, layout, { responsive: true });
+
+        // Update label
+        this.dom.visualization.currentFrequencyLabel.textContent =
+            `Current: ${freqData.frequency} Hz | Peak: ${(freqData.peak_value * 1e6).toFixed(4)} µA | Charge: ${freqData.charge.toFixed(2)} µC`;
+    }
+
+    _updateFrequencyChargeChart() {
+        const plotDiv = this.dom.visualization.frequencyMapChargePlot;
+
+        // Sort data by frequency
+        const sortedFrequencies = this.state.analyzedFrequencies.slice().sort((a, b) => a - b);
+        const charges = sortedFrequencies.map(freq => this.state.frequencyMapData[freq].charge);
+
+        const trace = {
+            x: sortedFrequencies,
+            y: charges,
+            type: 'scatter',
+            mode: 'markers+lines',
+            name: 'Charge vs Frequency',
+            marker: { size: 8, color: 'blue' },
+            line: { color: 'blue', width: 2 }
+        };
+
+        const layout = {
+            title: 'Frequency Map: Charge vs Frequency',
+            xaxis: {
+                title: 'Frequency (Hz)',
+                type: 'log', // Logarithmic scale
+                autorange: true
+            },
+            yaxis: { title: 'Charge (µC)' },
+            showlegend: false,
+            margin: { l: 60, r: 30, t: 50, b: 50 },
+            hovermode: 'closest'
+        };
+
+        Plotly.react(plotDiv, [trace], layout, { responsive: true });
     }
 }
 
