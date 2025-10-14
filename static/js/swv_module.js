@@ -64,6 +64,8 @@ export class SWVModule {
                 analyzedFrequenciesCount: document.getElementById('analyzedFrequenciesCount'),
                 latestFrequency: document.getElementById('latestFrequency'),
                 latestCharge: document.getElementById('latestCharge'),
+                exportFrequencyMapDataBtn: document.getElementById('exportFrequencyMapDataBtn'),
+                exportFrequencyMapStatus: document.getElementById('exportFrequencyMapStatus'),
                 individualPlotsContainer: document.getElementById('individualPlotsContainer'),
                 trendPlotsContainer: document.getElementById('trendPlotsContainer'),
                 adjustmentControls: document.getElementById('adjustmentControls'),
@@ -139,6 +141,23 @@ export class SWVModule {
                 });
             }
         });
+
+        // Frequency Map export button
+        if (this.dom.visualization.exportFrequencyMapDataBtn) {
+            this.dom.visualization.exportFrequencyMapDataBtn.addEventListener('click', () => {
+                const electrodeInfo = this.state.currentElectrode !== null ? `_Electrode_${this.state.currentElectrode + 1}` : '_Averaged';
+                const defaultFilename = `SACMES_FrequencyMap${electrodeInfo}_${new Date().toISOString().slice(0, 10)}.csv`;
+                const filename = prompt("Please enter a filename for the CSV export:", defaultFilename);
+                if (filename) {
+                    this.dom.visualization.exportFrequencyMapDataBtn.dataset.filename = filename;
+                    this.dom.visualization.exportFrequencyMapStatus.textContent = 'Generating export file...';
+                    // Send current electrode info to server for correct data export
+                    this.socketManager.emit('request_export_frequency_map_data', {
+                        current_electrode: this.state.currentElectrode
+                    });
+                }
+            });
+        }
 
         // Use a single handler for all adjustment updates
         this.dom.visualization.updateInjectionPointBtn.addEventListener('click', () => this._handlePostProcessUpdate());
@@ -985,30 +1004,49 @@ export class SWVModule {
     _setupFrequencyMapSocketHandlers() {
         // Handle frequency map update from server
         this.socketManager.on('frequency_map_update', (data) => {
-            if (!this.state.isAnalysisRunning || this.state.analysisMode !== 'frequency_map') return;
+            if (!this.state.isAnalysisRunning || this.state.analysisMode !== 'frequency_map') {
+                console.log('Ignoring frequency_map_update: not in frequency map mode or analysis stopped');
+                return;
+            }
 
             console.log('Received frequency map update:', data);
 
             const { frequency, data: freqData } = data;
 
+            // Check if this frequency was already processed (prevent duplicates)
+            if (this.state.frequencyMapData[frequency]) {
+                console.warn(`Duplicate update for frequency ${frequency}Hz - ignoring`);
+                return;
+            }
+
             // Store frequency data
             this.state.frequencyMapData[frequency] = freqData;
 
-            // Add to analyzed frequencies list if not already there
-            if (!this.state.analyzedFrequencies.includes(frequency)) {
-                this.state.analyzedFrequencies.push(frequency);
-            }
+            // Add to analyzed frequencies list
+            this.state.analyzedFrequencies.push(frequency);
+            this.state.analyzedFrequencies.sort((a, b) => a - b); // Keep sorted
 
             // Update statistics
             this.dom.visualization.analyzedFrequenciesCount.textContent = this.state.analyzedFrequencies.length;
             this.dom.visualization.latestFrequency.textContent = frequency;
             this.dom.visualization.latestCharge.textContent = freqData.charge.toFixed(2);
 
-            // Update voltammogram plot (top)
+            console.log(`Processed ${this.state.analyzedFrequencies.length} / ${this.state.currentFrequencies.length} frequencies`);
+
+            // Update voltammogram plot (top) - only for NEW frequency
             this._updateFrequencyMapVoltammogram(freqData);
 
-            // Update frequency-charge plot (bottom)
+            // Update frequency-charge plot (bottom) - cumulative
             this._updateFrequencyChargeChart();
+
+            // Check if all frequencies have been analyzed
+            if (this.state.analyzedFrequencies.length === this.state.currentFrequencies.length) {
+                console.log('All frequencies analyzed!');
+                this.dom.folderStatus.textContent = `Analysis complete! Analyzed ${this.state.analyzedFrequencies.length} frequencies.`;
+                this.state.isAnalysisRunning = false;
+                this.dom.startAnalysisBtn.disabled = false;
+                this.dom.startAnalysisBtn.textContent = 'Start Frequency Map Analysis';
+            }
         });
 
         // Handle acknowledgment for frequency map session start
@@ -1020,6 +1058,17 @@ export class SWVModule {
                 this.state.isAnalysisRunning = false;
                 this.dom.startAnalysisBtn.disabled = false;
                 this.dom.startAnalysisBtn.textContent = 'Start Frequency Map Analysis';
+            }
+        });
+
+        // Handle frequency map export response
+        this.socketManager.on('export_frequency_map_data_response', (data) => {
+            if (data.status === 'success') {
+                const filename = this.dom.visualization.exportFrequencyMapDataBtn.dataset.filename || 'frequency_map_export.csv';
+                this.dom.visualization.exportFrequencyMapStatus.textContent = `Export successful! Downloading ${filename}...`;
+                this._triggerCsvDownload(data.data, filename);
+            } else {
+                this.dom.visualization.exportFrequencyMapStatus.textContent = `Export failed: ${data.message}`;
             }
         });
     }

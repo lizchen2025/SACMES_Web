@@ -604,7 +604,19 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
             if electrode_key not in frequency_map_data['results']:
                 frequency_map_data['results'][electrode_key] = {}
 
-            frequency_map_data['results'][electrode_key][str(frequency)] = {
+            # Check if this frequency was already processed (prevent duplicate emissions)
+            freq_str = str(frequency)
+            already_processed = freq_str in frequency_map_data['results'][electrode_key]
+
+            if already_processed:
+                logger.info(f"FREQUENCY_MAP: Frequency {frequency}Hz already processed, skipping duplicate")
+                # Still send ack to agent but don't emit update
+                agent_sid = agent_session_tracker.get('agent_sid')
+                if agent_sid:
+                    socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
+                return
+
+            frequency_map_data['results'][electrode_key][freq_str] = {
                 'potentials': analysis_result.get('potentials', []),
                 'raw_currents': analysis_result.get('raw_currents', []),
                 'smoothed_currents': analysis_result.get('smoothed_currents', []),
@@ -1906,6 +1918,26 @@ def handle_cv_export_request(data):
         emit('export_cv_data_response', {'status': 'error', 'message': f'CV export failed: {str(e)}'})
 
 
+@socketio.on('request_export_frequency_map_data')
+def handle_frequency_map_export_request(data):
+    """
+    Handles a request from the client to export Frequency Map data to CSV.
+    """
+    logger.info(f"Received 'request_export_frequency_map_data' from {request.sid} with data: {data}")
+    try:
+        # Get current electrode from request data
+        current_electrode = data.get('current_electrode') if data else None
+        session_id = get_session_id()
+        csv_data = generate_frequency_map_csv_data(session_id, current_electrode)
+        if csv_data:
+            emit('export_frequency_map_data_response', {'status': 'success', 'data': csv_data})
+        else:
+            emit('export_frequency_map_data_response', {'status': 'error', 'message': 'No Frequency Map data available to export.'})
+    except Exception as e:
+        logger.error(f"Failed to generate Frequency Map CSV for export: {e}", exc_info=True)
+        emit('export_frequency_map_data_response', {'status': 'error', 'message': f'Frequency Map export failed: {str(e)}'})
+
+
 @socketio.on('request_electrode_warnings')
 def handle_electrode_warnings_request(data):
     """
@@ -2202,6 +2234,126 @@ def generate_cv_csv_data(current_electrode=None):
                     ])
 
                 writer.writerow(row)
+
+    return string_io.getvalue()
+
+
+def generate_frequency_map_csv_data(session_id='global_agent_session', current_electrode=None):
+    """
+    Generates a CSV formatted string from Frequency Map analysis data.
+
+    Args:
+        session_id: Session ID to retrieve data from
+        current_electrode: The electrode index to export data for (None for averaged data).
+
+    Returns:
+        CSV formatted string with frequency, peak, and charge data
+    """
+    # Get frequency map data from session
+    frequency_map_data = get_session_data(session_id, 'frequency_map_data', {})
+
+    if not frequency_map_data or 'results' not in frequency_map_data:
+        return ""
+
+    # Get analysis parameters
+    live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
+
+    # Get electrode key
+    electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
+
+    # Get results for this electrode
+    electrode_results = frequency_map_data['results'].get(electrode_key, {})
+
+    if not electrode_results:
+        return ""
+
+    string_io = io.StringIO()
+    writer = csv.writer(string_io)
+
+    # Write metadata section
+    writer.writerow(['# SACMES Frequency Map Analysis Report'])
+    writer.writerow(['# Export Date:', str(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))])
+    electrode_info = f"Electrode {current_electrode + 1}" if current_electrode is not None else "Averaged"
+    writer.writerow(['# Electrode:', electrode_info])
+    writer.writerow([])
+
+    # Write analysis parameters section
+    writer.writerow(['# Analysis Parameters'])
+    if live_analysis_params:
+        # Filter settings
+        sg_mode = live_analysis_params.get('sg_mode', 'auto')
+        hampel_mode = live_analysis_params.get('hampel_mode', 'disabled')
+
+        writer.writerow(['Hampel Filter Mode:', hampel_mode])
+        if hampel_mode == 'manual':
+            writer.writerow(['Hampel Window:', live_analysis_params.get('hampel_window', 'N/A')])
+            writer.writerow(['Hampel Threshold:', live_analysis_params.get('hampel_threshold', 'N/A')])
+        elif hampel_mode == 'auto':
+            writer.writerow(['Hampel Window:', 'Auto (1/10 FWHM)'])
+            writer.writerow(['Hampel Threshold:', 'Auto (3×MAD)'])
+
+        writer.writerow(['SG Filter Mode:', sg_mode])
+        if sg_mode == 'manual':
+            writer.writerow(['SG Window:', live_analysis_params.get('sg_window', 'N/A')])
+            writer.writerow(['SG Degree:', live_analysis_params.get('sg_degree', 'N/A')])
+        else:
+            writer.writerow(['SG Window:', 'Auto (1/3 FWHM)'])
+            writer.writerow(['SG Degree:', 'Auto (2)'])
+
+        writer.writerow(['Polyfit Degree:', live_analysis_params.get('polyfit_degree', 'N/A')])
+        writer.writerow(['Cutoff Frequency (Hz):', live_analysis_params.get('cutoff_frequency', 'N/A')])
+
+    writer.writerow([])
+
+    # Write frequency map data header
+    writer.writerow(['# Frequency Map Data'])
+    header = [
+        'Frequency_Hz',
+        'Peak_Current_A',
+        'Peak_Current_uA',
+        'Charge_uC',
+        'Filename'
+    ]
+    writer.writerow(header)
+
+    # Sort frequencies in ascending order
+    frequencies = sorted([int(freq) for freq in electrode_results.keys()])
+
+    # Write data rows
+    for freq in frequencies:
+        freq_key = str(freq)
+        result = electrode_results.get(freq_key, {})
+
+        if result:
+            peak_value_A = result.get('peak_value', 0)
+            peak_value_uA = peak_value_A * 1e6  # Convert to µA
+            charge_uC = result.get('charge', 0)
+            filename = result.get('filename', '')
+
+            row = [
+                freq,
+                f"{peak_value_A:.6e}",  # Scientific notation
+                f"{peak_value_uA:.4f}",  # 4 decimal places
+                f"{charge_uC:.4f}",  # 4 decimal places
+                filename
+            ]
+            writer.writerow(row)
+
+    writer.writerow([])
+
+    # Write summary statistics
+    writer.writerow(['# Summary Statistics'])
+
+    if frequencies:
+        charges = [electrode_results[str(freq)].get('charge', 0) for freq in frequencies]
+        peaks_uA = [electrode_results[str(freq)].get('peak_value', 0) * 1e6 for freq in frequencies]
+
+        writer.writerow(['Total Frequencies Analyzed:', len(frequencies)])
+        writer.writerow(['Frequency Range (Hz):', f"{min(frequencies)} - {max(frequencies)}"])
+        writer.writerow(['Average Charge (µC):', f"{sum(charges) / len(charges):.4f}"])
+        writer.writerow(['Average Peak Current (µA):', f"{sum(peaks_uA) / len(peaks_uA):.4f}"])
+        writer.writerow(['Max Charge (µC):', f"{max(charges):.4f}"])
+        writer.writerow(['Min Charge (µC):', f"{min(charges):.4f}"])
 
     return string_io.getvalue()
 

@@ -406,30 +406,47 @@ def monitor_directory_loop(directory):
                                   file_matches_filters(f) and f not in processed_files]
 
             if new_matching_files:
-                files_by_number = defaultdict(list)
-                for filename in new_matching_files:
-                    # Extract file number for grouping
-                    if filename.startswith(current_filters['handle']):
-                        # For files starting with handle (like CV_60Hz_1.txt or CV_60Hz__1.txt)
-                        remaining = filename[len(current_filters['handle']):]
-                        match = re.search(r'_{1,2}(\d+)\.', remaining, re.IGNORECASE)
-                        if match:
-                            num = int(match.group(1))
-                            files_by_number[num].append(filename)
-                    else:
-                        # For older format files like _60Hz_1. or _60Hz__1.
-                        match = re.search(r'(?:^|_)(\d+)Hz.*?_{1,2}(\d+)(?:\.|$)', filename, re.IGNORECASE)
-                        if match:
-                            files_by_number[int(match.group(2))].append(filename)
                 app.log(f"Found {len(new_matching_files)} new matching file(s) to process...")
-                for num in sorted(files_by_number.keys()):
-                    for filename in sorted(files_by_number[num]):
+
+                # Check if this is frequency map mode
+                analysis_mode = current_filters.get('analysis_mode', 'continuous')
+
+                if analysis_mode == 'frequency_map':
+                    # Frequency map mode: no file numbering, send files directly sorted by name
+                    app.log("Frequency Map mode: sending files without number grouping")
+                    for filename in sorted(new_matching_files):
                         if not is_monitoring_active:
                             app.log("Monitoring stopped, aborting file sending.")
                             return
                         app.log(f"Sending file: {filename}")
                         send_file_to_server(os.path.join(directory, filename))
                         processed_files.add(filename)
+                else:
+                    # Continuous/CV mode: group by file number
+                    files_by_number = defaultdict(list)
+                    for filename in new_matching_files:
+                        # Extract file number for grouping
+                        if filename.startswith(current_filters['handle']):
+                            # For files starting with handle (like CV_60Hz_1.txt or CV_60Hz__1.txt)
+                            remaining = filename[len(current_filters['handle']):]
+                            match = re.search(r'_{1,2}(\d+)\.', remaining, re.IGNORECASE)
+                            if match:
+                                num = int(match.group(1))
+                                files_by_number[num].append(filename)
+                        else:
+                            # For older format files like _60Hz_1. or _60Hz__1.
+                            match = re.search(r'(?:^|_)(\d+)Hz.*?_{1,2}(\d+)(?:\.|$)', filename, re.IGNORECASE)
+                            if match:
+                                files_by_number[int(match.group(2))].append(filename)
+
+                    for num in sorted(files_by_number.keys()):
+                        for filename in sorted(files_by_number[num]):
+                            if not is_monitoring_active:
+                                app.log("Monitoring stopped, aborting file sending.")
+                                return
+                            app.log(f"Sending file: {filename}")
+                            send_file_to_server(os.path.join(directory, filename))
+                            processed_files.add(filename)
             else:
                 # Show a few example files to help with debugging
                 if len(all_files) > 0:
