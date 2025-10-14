@@ -591,9 +591,9 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
             return
 
         if analysis_result and analysis_result.get('status') in ['success', 'warning']:
-            # Calculate charge (Charge = Peak / Frequency * 100000 to convert to µC)
+            # Calculate charge in Coulombs: Charge (C) = Peak (A) / Frequency (Hz)
             peak_value = analysis_result.get('peak_value', 0)
-            charge = (peak_value / frequency) * 100000 if frequency > 0 else 0
+            charge = (peak_value / frequency) if frequency > 0 else 0
 
             # Store results
             frequency_map_data = get_session_data(session_id, 'frequency_map_data', {})
@@ -2310,8 +2310,7 @@ def generate_frequency_map_csv_data(session_id='global_agent_session', current_e
     header = [
         'Frequency_Hz',
         'Peak_Current_A',
-        'Peak_Current_uA',
-        'Charge_uC',
+        'Charge_C',
         'Filename'
     ]
     writer.writerow(header)
@@ -2326,15 +2325,13 @@ def generate_frequency_map_csv_data(session_id='global_agent_session', current_e
 
         if result:
             peak_value_A = result.get('peak_value', 0)
-            peak_value_uA = peak_value_A * 1e6  # Convert to µA
-            charge_uC = result.get('charge', 0)
+            charge_C = result.get('charge', 0)
             filename = result.get('filename', '')
 
             row = [
                 freq,
-                f"{peak_value_A:.6e}",  # Scientific notation
-                f"{peak_value_uA:.4f}",  # 4 decimal places
-                f"{charge_uC:.4f}",  # 4 decimal places
+                f"{peak_value_A:.6e}",  # Scientific notation in Amperes
+                f"{charge_C:.6e}",  # Scientific notation in Coulombs
                 filename
             ]
             writer.writerow(row)
@@ -2346,14 +2343,14 @@ def generate_frequency_map_csv_data(session_id='global_agent_session', current_e
 
     if frequencies:
         charges = [electrode_results[str(freq)].get('charge', 0) for freq in frequencies]
-        peaks_uA = [electrode_results[str(freq)].get('peak_value', 0) * 1e6 for freq in frequencies]
+        peaks_A = [electrode_results[str(freq)].get('peak_value', 0) for freq in frequencies]
 
         writer.writerow(['Total Frequencies Analyzed:', len(frequencies)])
         writer.writerow(['Frequency Range (Hz):', f"{min(frequencies)} - {max(frequencies)}"])
-        writer.writerow(['Average Charge (µC):', f"{sum(charges) / len(charges):.4f}"])
-        writer.writerow(['Average Peak Current (µA):', f"{sum(peaks_uA) / len(peaks_uA):.4f}"])
-        writer.writerow(['Max Charge (µC):', f"{max(charges):.4f}"])
-        writer.writerow(['Min Charge (µC):', f"{min(charges):.4f}"])
+        writer.writerow(['Average Charge (C):', f"{sum(charges) / len(charges):.6e}"])
+        writer.writerow(['Average Peak Current (A):', f"{sum(peaks_A) / len(peaks_A):.6e}"])
+        writer.writerow(['Max Charge (C):', f"{max(charges):.6e}"])
+        writer.writerow(['Min Charge (C):', f"{min(charges):.6e}"])
 
     return string_io.getvalue()
 

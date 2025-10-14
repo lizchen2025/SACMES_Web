@@ -82,7 +82,7 @@ def ReadData(myfile, voltage_column_index, current_column_start_index, spacing_i
                     # Ensure current_col_index is within bounds before accessing
                     if current_col_index < len(check_split_list):
                         current_value_str = check_split_list[current_col_index].replace(",", "").strip()
-                        current_value = float(current_value_str) * 1e6  # Convert to microAmps
+                        current_value = float(current_value_str)  # Keep in Amperes (A)
                         currents_for_this_line.append(current_value)
                     else:
                         # If a current column is missing, append None or 0 and log a warning

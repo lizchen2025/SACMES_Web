@@ -2112,14 +2112,14 @@ export class CVModule {
 
         // FIXED DISPLAY UNITS: Always V and μA (simple and consistent)
         const displayVoltageUnit = 'V';
-        const displayCurrentUnit = 'μA';
+        const displayCurrentUnit = 'A';
 
-        // Convert to display units
-        const voltageDisplay = voltageBase;  // V (no conversion needed)
-        const currentDisplay = currentBase.map(c => c * 1e6);  // A to μA
+        // Keep in base units (no conversion)
+        const voltageDisplay = voltageBase;  // V
+        const currentDisplay = currentBase;  // A
 
         console.log(`Display: ${displayVoltageUnit}, ${displayCurrentUnit}`);
-        console.log(`Sample: V=${voltageDisplay[0]?.toFixed(3)}, I=${currentDisplay[0]?.toFixed(3)} μA`);
+        console.log(`Sample: V=${voltageDisplay[0]?.toFixed(3)}, I=${currentDisplay[0]?.toExponential(4)} A`);
 
         // Store display units for axis labels
         this._displayUnits = {

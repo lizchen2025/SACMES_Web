@@ -1106,7 +1106,7 @@ export class SWVModule {
         if (freqData.smoothed_currents && freqData.smoothed_currents.length > 0) {
             traces.push({
                 x: freqData.potentials,
-                y: freqData.smoothed_currents.map(c => c * 1e6), // Convert to µA
+                y: freqData.smoothed_currents, // Keep in Amperes (A)
                 type: 'scatter',
                 mode: 'markers',
                 name: 'Smoothed Data',
@@ -1118,7 +1118,7 @@ export class SWVModule {
         if (freqData.regression_line && freqData.regression_line.length > 0) {
             traces.push({
                 x: freqData.adjusted_potentials || freqData.potentials,
-                y: freqData.regression_line.map(c => c * 1e6), // Convert to µA
+                y: freqData.regression_line, // Keep in Amperes (A)
                 type: 'scatter',
                 mode: 'lines',
                 name: 'Baseline',
@@ -1132,7 +1132,7 @@ export class SWVModule {
                 title: 'Potential (V)',
                 autorange: 'reversed' // Texas convention
             },
-            yaxis: { title: 'Current (µA)' },
+            yaxis: { title: 'Current (A)' },
             showlegend: true,
             legend: { x: 0.7, y: 1 },
             margin: { l: 60, r: 30, t: 50, b: 50 },
@@ -1143,7 +1143,7 @@ export class SWVModule {
 
         // Update label
         this.dom.visualization.currentFrequencyLabel.textContent =
-            `Current: ${freqData.frequency} Hz | Peak: ${(freqData.peak_value * 1e6).toFixed(4)} µA | Charge: ${freqData.charge.toFixed(2)} µC`;
+            `Current: ${freqData.frequency} Hz | Peak: ${freqData.peak_value.toExponential(4)} A | Charge: ${freqData.charge.toExponential(4)} C`;
     }
 
     _updateFrequencyChargeChart() {
@@ -1179,7 +1179,7 @@ export class SWVModule {
                 type: 'log', // Logarithmic scale
                 autorange: true
             },
-            yaxis: { title: 'Charge (µC)' },
+            yaxis: { title: 'Charge (C)' },
             showlegend: false,
             margin: { l: 60, r: 30, t: 50, b: 50 },
             hovermode: 'closest'
@@ -1201,7 +1201,7 @@ export class SWVModule {
             const latestData = electrodeFreqData[latestFreq];
             if (latestData) {
                 this.dom.visualization.latestFrequency.textContent = latestFreq;
-                this.dom.visualization.latestCharge.textContent = latestData.charge.toFixed(2);
+                this.dom.visualization.latestCharge.textContent = latestData.charge.toExponential(4);
             }
         } else {
             this.dom.visualization.latestFrequency.textContent = '-';
