@@ -699,7 +699,13 @@ export class SWVModule {
         const resizeInterval = parseInt(this.dom.settings.resizeIntervalInput.value);
         const freqStrs = this.state.currentFrequencies.map(String);
         const xAxisTitle = (this.state.currentXAxisOptions === "Experiment Time") ? 'Experiment Time (min)' : 'File Number';
-        PlotlyPlotter.renderFullTrendPlot('peakCurrentTrendPlot', trendData, freqStrs, xAxisTitle, `Peak Current (${this.dom.settings.currentUnitsInput.value})`, this.state.currentNumFiles, '', 'peak', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
+
+        // Determine Y-axis title based on analysis mode (Peak or AUC)
+        const selectedOptions = this.dom.settings.selectedOptionsInput.value;
+        const isAUCMode = selectedOptions === "Area Under the Curve";
+        const firstPlotYTitle = isAUCMode ? 'AUC (a.u.)' : `Peak Current (${this.dom.settings.currentUnitsInput.value})`;
+
+        PlotlyPlotter.renderFullTrendPlot('peakCurrentTrendPlot', trendData, freqStrs, xAxisTitle, firstPlotYTitle, this.state.currentNumFiles, '', 'peak', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
         PlotlyPlotter.renderFullTrendPlot('normalizedPeakTrendPlot', trendData, freqStrs, xAxisTitle, 'Normalized Current', this.state.currentNumFiles, '', 'normalized', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
         PlotlyPlotter.renderFullTrendPlot('kdmTrendPlot', trendData, freqStrs, xAxisTitle, 'KDM Value', this.state.currentNumFiles, '', 'kdm', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
     }
@@ -1099,7 +1105,18 @@ export class SWVModule {
     _updateFrequencyMapVoltammogram(freqData) {
         const plotDiv = this.dom.visualization.frequencyMapVoltammogramPlot;
 
-        // Prepare voltammogram traces
+        // Check if all frequencies are analyzed for current electrode
+        const electrodeKey = this.state.currentElectrode !== null ? this.state.currentElectrode.toString() : 'averaged';
+        const analyzedFreqs = this.state.analyzedFrequencies[electrodeKey] || [];
+        const allFrequenciesComplete = analyzedFreqs.length === this.state.currentFrequencies.length;
+
+        if (allFrequenciesComplete) {
+            // Show overlay plot with all frequencies
+            this._updateFrequencyMapOverlay();
+            return;
+        }
+
+        // Show individual frequency plot (before all complete)
         const traces = [];
 
         // Smoothed data trace
@@ -1144,6 +1161,53 @@ export class SWVModule {
         // Update label
         this.dom.visualization.currentFrequencyLabel.textContent =
             `Current: ${freqData.frequency} Hz | Peak: ${freqData.peak_value.toExponential(4)} A | Charge: ${freqData.charge.toExponential(4)} C`;
+    }
+
+    _updateFrequencyMapOverlay() {
+        // Show all frequencies overlaid on one plot (no baselines)
+        const plotDiv = this.dom.visualization.frequencyMapVoltammogramPlot;
+        const electrodeKey = this.state.currentElectrode !== null ? this.state.currentElectrode.toString() : 'averaged';
+        const electrodeFreqData = this.state.frequencyMapData[electrodeKey] || {};
+        const analyzedFreqs = this.state.analyzedFrequencies[electrodeKey] || [];
+
+        // Generate color palette for different frequencies
+        const colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan'];
+
+        const traces = [];
+        const sortedFreqs = analyzedFreqs.slice().sort((a, b) => a - b);
+
+        sortedFreqs.forEach((freq, index) => {
+            const freqData = electrodeFreqData[freq];
+            if (freqData && freqData.smoothed_currents && freqData.smoothed_currents.length > 0) {
+                traces.push({
+                    x: freqData.potentials,
+                    y: freqData.smoothed_currents,
+                    type: 'scatter',
+                    mode: 'markers',
+                    name: `${freq} Hz`,
+                    marker: { size: 3, color: colors[index % colors.length] }
+                });
+            }
+        });
+
+        const layout = {
+            title: 'Frequency Map: All Frequencies Overlay',
+            xaxis: {
+                title: 'Potential (V)',
+                autorange: 'reversed' // Texas convention
+            },
+            yaxis: { title: 'Current (A)' },
+            showlegend: true,
+            legend: { x: 1.05, y: 1, xanchor: 'left' },
+            margin: { l: 60, r: 120, t: 50, b: 50 },
+            hovermode: 'closest'
+        };
+
+        Plotly.react(plotDiv, traces, layout, { responsive: true });
+
+        // Update label
+        this.dom.visualization.currentFrequencyLabel.textContent =
+            `Analysis Complete - Showing all ${sortedFreqs.length} frequencies`;
     }
 
     _updateFrequencyChargeChart() {
@@ -1245,12 +1309,20 @@ export class SWVModule {
         // Update statistics
         this._updateFrequencyMapStats();
 
-        // If this electrode has data, show the latest voltammogram
+        // Check if all frequencies are complete for this electrode
+        const allFrequenciesComplete = analyzedFreqs.length === this.state.currentFrequencies.length;
+
         if (analyzedFreqs.length > 0) {
-            const latestFreq = analyzedFreqs[analyzedFreqs.length - 1];
-            const latestData = electrodeFreqData[latestFreq];
-            if (latestData) {
-                this._updateFrequencyMapVoltammogram(latestData);
+            if (allFrequenciesComplete) {
+                // Show overlay of all frequencies
+                this._updateFrequencyMapOverlay();
+            } else {
+                // Show latest individual voltammogram
+                const latestFreq = analyzedFreqs[analyzedFreqs.length - 1];
+                const latestData = electrodeFreqData[latestFreq];
+                if (latestData) {
+                    this._updateFrequencyMapVoltammogram(latestData);
+                }
             }
         } else {
             // No data yet for this electrode, show waiting message
