@@ -510,8 +510,8 @@ export class SWVModule {
             selectedElectrodes: selectedElectrodes,
             currentElectrode: selectedElectrodes.length > 0 ? selectedElectrodes[0] : null,
             electrodeData: {},
-            frequencyMapData: {},  // Reset frequency map data
-            analyzedFrequencies: []  // Reset analyzed frequencies
+            frequencyMapData: {},  // Reset frequency map data {electrode: {frequency: data}}
+            analyzedFrequencies: {}  // Reset analyzed frequencies {electrode: [frequencies]}
         };
         
         this.dom.visualization.postProcessNormalizationPointInput.value = this.dom.params.normalizationPointInput.value;
@@ -555,19 +555,23 @@ export class SWVModule {
         if (this.state.analysisMode === 'frequency_map') {
             // Frequency Map mode
             this._setupFrequencyMapVisualization();
+            this._setupElectrodeControls();  // Show electrode controls
             this.uiManager.showScreen('visualizationArea');
 
             // Hide continuous monitor specific controls
             this.dom.visualization.adjustmentControls.classList.add('hidden');
             this.dom.visualization.exportDataBtn.classList.add('hidden');
 
-            // Clear frequency map data
-            this.state.frequencyMapData = {};
-            this.state.analyzedFrequencies = [];
-            this.dom.visualization.analyzedFrequenciesCount.textContent = '0';
-            this.dom.visualization.latestFrequency.textContent = '-';
-            this.dom.visualization.latestCharge.textContent = '-';
-            this.dom.visualization.currentFrequencyLabel.textContent = 'No frequency selected';
+            // Clear frequency map data for current electrode
+            const electrodeKey = this.state.currentElectrode !== null ? this.state.currentElectrode.toString() : 'averaged';
+            if (!this.state.frequencyMapData[electrodeKey]) {
+                this.state.frequencyMapData[electrodeKey] = {};
+            }
+            if (!this.state.analyzedFrequencies[electrodeKey]) {
+                this.state.analyzedFrequencies[electrodeKey] = [];
+            }
+
+            this._updateFrequencyMapStats();
 
             this.socketManager.emit('start_frequency_map_session', { filters, analysisParams, frequencies: this.state.currentFrequencies });
         } else {
@@ -604,10 +608,10 @@ export class SWVModule {
             console.warn('frequencyMapContainer not found!');
         }
 
-        // Hide electrode controls (frequency map analyzes one electrode at a time)
+        // Show electrode controls for frequency map (multi-electrode support)
         if (this.dom.visualization.electrodeControls) {
-            console.log('Hiding electrodeControls');
-            this.dom.visualization.electrodeControls.style.display = 'none';
+            console.log('Showing electrodeControls for frequency map');
+            this.dom.visualization.electrodeControls.style.display = 'flex';
         }
 
         console.log('Frequency Map visualization setup complete');
@@ -705,11 +709,16 @@ export class SWVModule {
         if (!electrodeControls) return;
 
         // Ensure electrode controls are visible
-        electrodeControls.style.display = 'block';
+        electrodeControls.style.display = 'flex';
 
         // Clear existing buttons
         const existingButtons = electrodeControls.querySelectorAll('.electrode-btn');
         existingButtons.forEach(btn => btn.remove());
+
+        // Determine which switch function to use based on analysis mode
+        const switchFunction = this.state.analysisMode === 'frequency_map'
+            ? (idx) => this._switchFrequencyMapElectrode(idx)
+            : (idx) => this._switchElectrode(idx);
 
         // Add "Averaged" button if no specific electrodes selected
         if (this.state.selectedElectrodes.length === 0) {
@@ -728,7 +737,7 @@ export class SWVModule {
                         : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                 }`;
                 btn.textContent = `Electrode ${electrodeIdx + 1}`;  // Display as 1-based
-                btn.onclick = () => this._switchElectrode(electrodeIdx);
+                btn.onclick = () => switchFunction(electrodeIdx);
                 electrodeControls.appendChild(btn);
             });
         }
@@ -1011,38 +1020,52 @@ export class SWVModule {
 
             console.log('Received frequency map update:', data);
 
-            const { frequency, data: freqData } = data;
+            const { frequency, electrode_index, data: freqData } = data;
 
-            // Check if this frequency was already processed (prevent duplicates)
-            if (this.state.frequencyMapData[frequency]) {
-                console.warn(`Duplicate update for frequency ${frequency}Hz - ignoring`);
+            // Determine electrode key
+            const electrodeKey = electrode_index !== null ? electrode_index.toString() : 'averaged';
+
+            // Initialize electrode data structures if needed
+            if (!this.state.frequencyMapData[electrodeKey]) {
+                this.state.frequencyMapData[electrodeKey] = {};
+            }
+            if (!this.state.analyzedFrequencies[electrodeKey]) {
+                this.state.analyzedFrequencies[electrodeKey] = [];
+            }
+
+            // Check if this frequency was already processed for this electrode (prevent duplicates)
+            if (this.state.frequencyMapData[electrodeKey][frequency]) {
+                console.warn(`Duplicate update for electrode ${electrodeKey}, frequency ${frequency}Hz - ignoring`);
                 return;
             }
 
-            // Store frequency data
-            this.state.frequencyMapData[frequency] = freqData;
+            // Store frequency data for this electrode
+            this.state.frequencyMapData[electrodeKey][frequency] = freqData;
 
-            // Add to analyzed frequencies list
-            this.state.analyzedFrequencies.push(frequency);
-            this.state.analyzedFrequencies.sort((a, b) => a - b); // Keep sorted
+            // Add to analyzed frequencies list for this electrode
+            this.state.analyzedFrequencies[electrodeKey].push(frequency);
+            this.state.analyzedFrequencies[electrodeKey].sort((a, b) => a - b); // Keep sorted
 
-            // Update statistics
-            this.dom.visualization.analyzedFrequenciesCount.textContent = this.state.analyzedFrequencies.length;
-            this.dom.visualization.latestFrequency.textContent = frequency;
-            this.dom.visualization.latestCharge.textContent = freqData.charge.toFixed(2);
+            console.log(`Electrode ${electrodeKey}: Processed ${this.state.analyzedFrequencies[electrodeKey].length} / ${this.state.currentFrequencies.length} frequencies`);
+            console.log(`Expected frequencies: [${this.state.currentFrequencies.sort((a, b) => a - b).join(', ')}]`);
+            console.log(`Analyzed frequencies: [${this.state.analyzedFrequencies[electrodeKey].join(', ')}]`);
 
-            console.log(`Processed ${this.state.analyzedFrequencies.length} / ${this.state.currentFrequencies.length} frequencies`);
+            // Only update visualization if this is the currently displayed electrode
+            if (electrode_index === this.state.currentElectrode) {
+                this._updateFrequencyMapStats();
 
-            // Update voltammogram plot (top) - only for NEW frequency
-            this._updateFrequencyMapVoltammogram(freqData);
+                // Update voltammogram plot (top) - only for NEW frequency
+                this._updateFrequencyMapVoltammogram(freqData);
 
-            // Update frequency-charge plot (bottom) - cumulative
-            this._updateFrequencyChargeChart();
+                // Update frequency-charge plot (bottom) - cumulative
+                this._updateFrequencyChargeChart();
+            }
 
-            // Check if all frequencies have been analyzed
-            if (this.state.analyzedFrequencies.length === this.state.currentFrequencies.length) {
-                console.log('All frequencies analyzed!');
-                this.dom.folderStatus.textContent = `Analysis complete! Analyzed ${this.state.analyzedFrequencies.length} frequencies.`;
+            // Check if all frequencies have been analyzed for ALL electrodes
+            const allElectrodesComplete = this._checkAllElectrodesComplete();
+            if (allElectrodesComplete) {
+                console.log('All frequencies analyzed for all electrodes!');
+                this.dom.folderStatus.textContent = `Analysis complete! All electrodes analyzed.`;
                 this.state.isAnalysisRunning = false;
                 this.dom.startAnalysisBtn.disabled = false;
                 this.dom.startAnalysisBtn.textContent = 'Start Frequency Map Analysis';
@@ -1126,9 +1149,18 @@ export class SWVModule {
     _updateFrequencyChargeChart() {
         const plotDiv = this.dom.visualization.frequencyMapChargePlot;
 
+        // Get data for current electrode
+        const electrodeKey = this.state.currentElectrode !== null ? this.state.currentElectrode.toString() : 'averaged';
+        const electrodeFreqData = this.state.frequencyMapData[electrodeKey] || {};
+        const analyzedFreqs = this.state.analyzedFrequencies[electrodeKey] || [];
+
+        if (analyzedFreqs.length === 0) {
+            return; // No data to plot yet
+        }
+
         // Sort data by frequency
-        const sortedFrequencies = this.state.analyzedFrequencies.slice().sort((a, b) => a - b);
-        const charges = sortedFrequencies.map(freq => this.state.frequencyMapData[freq].charge);
+        const sortedFrequencies = analyzedFreqs.slice().sort((a, b) => a - b);
+        const charges = sortedFrequencies.map(freq => electrodeFreqData[freq].charge);
 
         const trace = {
             x: sortedFrequencies,
@@ -1155,5 +1187,79 @@ export class SWVModule {
 
         Plotly.react(plotDiv, [trace], layout, { responsive: true });
     }
+
+    _updateFrequencyMapStats() {
+        // Update stats for current electrode
+        const electrodeKey = this.state.currentElectrode !== null ? this.state.currentElectrode.toString() : 'averaged';
+        const analyzedFreqs = this.state.analyzedFrequencies[electrodeKey] || [];
+        const electrodeFreqData = this.state.frequencyMapData[electrodeKey] || {};
+
+        this.dom.visualization.analyzedFrequenciesCount.textContent = analyzedFreqs.length;
+
+        if (analyzedFreqs.length > 0) {
+            const latestFreq = analyzedFreqs[analyzedFreqs.length - 1];
+            const latestData = electrodeFreqData[latestFreq];
+            if (latestData) {
+                this.dom.visualization.latestFrequency.textContent = latestFreq;
+                this.dom.visualization.latestCharge.textContent = latestData.charge.toFixed(2);
+            }
+        } else {
+            this.dom.visualization.latestFrequency.textContent = '-';
+            this.dom.visualization.latestCharge.textContent = '-';
+        }
+    }
+
+    _checkAllElectrodesComplete() {
+        // Check if all expected electrodes have analyzed all frequencies
+        const expectedElectrodes = this.state.selectedElectrodes.length > 0
+            ? this.state.selectedElectrodes
+            : [null]; // null represents averaged
+
+        for (const electrode of expectedElectrodes) {
+            const electrodeKey = electrode !== null ? electrode.toString() : 'averaged';
+            const analyzedFreqs = this.state.analyzedFrequencies[electrodeKey] || [];
+
+            if (analyzedFreqs.length < this.state.currentFrequencies.length) {
+                return false; // This electrode hasn't finished yet
+            }
+        }
+
+        return true; // All electrodes complete
+    }
+
+    _switchFrequencyMapElectrode(electrodeIdx) {
+        // Switch electrode in frequency map mode
+        if (this.state.currentElectrode === electrodeIdx) return;
+
+        console.log(`Switching frequency map to electrode ${electrodeIdx}`);
+        this.state.currentElectrode = electrodeIdx;
+
+        // Update electrode button states
+        this._setupElectrodeControls();
+
+        // Get data for this electrode
+        const electrodeKey = electrodeIdx !== null ? electrodeIdx.toString() : 'averaged';
+        const electrodeFreqData = this.state.frequencyMapData[electrodeKey] || {};
+        const analyzedFreqs = this.state.analyzedFrequencies[electrodeKey] || [];
+
+        // Update statistics
+        this._updateFrequencyMapStats();
+
+        // If this electrode has data, show the latest voltammogram
+        if (analyzedFreqs.length > 0) {
+            const latestFreq = analyzedFreqs[analyzedFreqs.length - 1];
+            const latestData = electrodeFreqData[latestFreq];
+            if (latestData) {
+                this._updateFrequencyMapVoltammogram(latestData);
+            }
+        } else {
+            // No data yet for this electrode, show waiting message
+            this.dom.visualization.currentFrequencyLabel.textContent = 'No data for this electrode yet';
+        }
+
+        // Update charge chart
+        this._updateFrequencyChargeChart();
+    }
 }
+
 
