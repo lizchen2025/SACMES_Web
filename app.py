@@ -824,13 +824,18 @@ def process_file_in_background(original_filename, content, params_for_this_file,
 
 
 # --- *** NEW *** HELPER FUNCTION TO GENERATE CSV DATA ---
-def generate_csv_data(current_electrode=None):
+def generate_csv_data(current_electrode=None, session_id='global_agent_session'):
     """
     Generates a CSV formatted string from the current trend data with filter parameters and QC metrics.
 
     Args:
         current_electrode: The electrode index to export data for (None for averaged data).
+        session_id: The session ID to get data from.
     """
+    # Get session data
+    live_trend_data = get_session_data(session_id, 'live_trend_data', {})
+    live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
+
     if not live_trend_data or not live_analysis_params:
         return ""
 
@@ -945,11 +950,15 @@ def generate_csv_data(current_electrode=None):
     return string_io.getvalue()
 
 
-def generate_csv_data_all_electrodes():
+def generate_csv_data_all_electrodes(session_id='global_agent_session'):
     """
     Generates a CSV formatted string with all electrodes data combined, including mean and std.
-    Similar to frequency map all electrodes export but for continuous monitor mode.
+    Filter parameters are hidden, QC warnings are listed at the end.
     """
+    # Get session data
+    live_trend_data = get_session_data(session_id, 'live_trend_data', {})
+    live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
+
     if not live_trend_data or not live_analysis_params:
         return ""
 
@@ -968,24 +977,7 @@ def generate_csv_data_all_electrodes():
     writer.writerow(['# Export Date:', str(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))])
     electrode_list = ', '.join([f'E{int(k)+1}' for k in all_electrode_keys])
     writer.writerow(['# Electrodes:', electrode_list])
-    writer.writerow([])
-
-    # Write filter parameters section
-    writer.writerow(['# Filter Parameters'])
-    filter_mode = live_analysis_params.get('filter_mode', 'auto')
-    writer.writerow(['Filter Mode:', filter_mode])
-
-    if filter_mode == 'manual':
-        writer.writerow(['Hampel Window:', live_analysis_params.get('hampel_window', 'N/A')])
-        writer.writerow(['Hampel Threshold:', live_analysis_params.get('hampel_threshold', 'N/A')])
-        writer.writerow(['SG Window:', live_analysis_params.get('sg_window', 'N/A')])
-        writer.writerow(['SG Degree:', live_analysis_params.get('sg_degree', 'N/A')])
-    else:
-        writer.writerow(['Hampel Window:', 'Auto (1/10 FWHM)'])
-        writer.writerow(['Hampel Threshold:', 'Auto (3×MAD)'])
-        writer.writerow(['SG Window:', 'Auto (1/3 FWHM)'])
-        writer.writerow(['SG Degree:', 'Auto (2)'])
-
+    writer.writerow(['# Number of Files:', num_files])
     writer.writerow([])
 
     # Prepare trend data for all electrodes
@@ -1120,6 +1112,63 @@ def generate_csv_data_all_electrodes():
             row.extend(['N/A', 'N/A'])
 
         writer.writerow(row)
+
+    # Section 5: QC Warnings
+    # Collect all QC warnings where status is not 'Pass'
+    writer.writerow([])
+    writer.writerow(['# Quality Control Warnings'])
+    writer.writerow(['# Only files/electrodes/frequencies with QC flags are listed below'])
+    writer.writerow([])
+
+    qc_data = live_trend_data.get('qc_metrics', {})
+    warnings_found = False
+
+    # Check each electrode
+    for electrode_key in all_electrode_keys:
+        electrode_qc = qc_data.get(electrode_key, {})
+        if not electrode_qc:
+            continue
+
+        electrode_label = f'E{int(electrode_key)+1}'
+
+        # Check each frequency
+        for freq in frequencies:
+            freq_qc = electrode_qc.get(freq, {})
+            if not freq_qc:
+                continue
+
+            # Check each file
+            for i in range(num_files):
+                file_num = i + 1
+                file_key = str(file_num)
+                file_qc = freq_qc.get(file_key, {})
+
+                qc_status = file_qc.get('qc_status', 'Pass')
+
+                # Only report if NOT Pass
+                if qc_status and qc_status != 'Pass':
+                    if not warnings_found:
+                        # Write header
+                        writer.writerow(['Electrode', 'Frequency_Hz', 'File_Number', 'QC_Status', 'SNR_Improvement', 'Peak_Retention', 'Residual_Metric'])
+                        warnings_found = True
+
+                    # Write warning row
+                    snr = file_qc.get('snr_improvement', 'N/A')
+                    peak_ret = file_qc.get('peak_retention', 'N/A')
+                    residual = file_qc.get('residual_metric', 'N/A')
+
+                    writer.writerow([
+                        electrode_label,
+                        freq,
+                        file_num,
+                        qc_status,
+                        f'{snr:.3f}' if isinstance(snr, (int, float)) else snr,
+                        f'{peak_ret:.3f}' if isinstance(peak_ret, (int, float)) else peak_ret,
+                        f'{residual:.3f}' if isinstance(residual, (int, float)) else residual
+                    ])
+
+    if not warnings_found:
+        writer.writerow(['No QC warnings detected. All data passed quality control.'])
 
     return string_io.getvalue()
 
@@ -2893,33 +2942,7 @@ def generate_frequency_map_all_electrodes_csv(session_id='global_agent_session')
     writer.writerow(['# SACMES Frequency Map Analysis Report - All Electrodes'])
     writer.writerow(['# Export Date:', str(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))])
     writer.writerow(['# Electrodes:', ', '.join([f"E{int(k)+1}" if k != 'averaged' else 'Averaged' for k in electrode_keys])])
-    writer.writerow([])
-
-    # Write analysis parameters
-    writer.writerow(['# Analysis Parameters'])
-    if live_analysis_params:
-        sg_mode = live_analysis_params.get('sg_mode', 'auto')
-        hampel_mode = live_analysis_params.get('hampel_mode', 'disabled')
-
-        writer.writerow(['Hampel Filter Mode:', hampel_mode])
-        if hampel_mode == 'manual':
-            writer.writerow(['Hampel Window:', live_analysis_params.get('hampel_window', 'N/A')])
-            writer.writerow(['Hampel Threshold:', live_analysis_params.get('hampel_threshold', 'N/A')])
-        elif hampel_mode == 'auto':
-            writer.writerow(['Hampel Window:', 'Auto (1/10 FWHM)'])
-            writer.writerow(['Hampel Threshold:', 'Auto (3×MAD)'])
-
-        writer.writerow(['SG Filter Mode:', sg_mode])
-        if sg_mode == 'manual':
-            writer.writerow(['SG Window:', live_analysis_params.get('sg_window', 'N/A')])
-            writer.writerow(['SG Degree:', live_analysis_params.get('sg_degree', 'N/A')])
-        else:
-            writer.writerow(['SG Window:', 'Auto (1/3 FWHM)'])
-            writer.writerow(['SG Degree:', 'Auto (2)'])
-
-        writer.writerow(['Polyfit Degree:', live_analysis_params.get('polyfit_degree', 'N/A')])
-        writer.writerow(['Cutoff Frequency (Hz):', live_analysis_params.get('cutoff_frequency', 'N/A')])
-
+    writer.writerow(['# Number of Frequencies:', len(frequencies)])
     writer.writerow([])
 
     # Write Peak Current data
