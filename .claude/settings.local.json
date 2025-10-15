@@ -5,7 +5,8 @@
       "Bash(node:*)",
       "Bash(findstr:*)",
       "Bash(netstat:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(dir:*)"
     ],
     "deny": [],
     "ask": []
