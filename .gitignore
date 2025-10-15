@@ -9,8 +9,9 @@ dist/
 build/
 *.spec
 *.exe
-# But allow agent in downloads folder
+# But allow agent files in downloads folder
 !static/downloads/*.exe
+!static/downloads/*.zip
 
 # UPX Tool
 upx-*/
