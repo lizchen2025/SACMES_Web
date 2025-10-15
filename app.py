@@ -2704,7 +2704,93 @@ def generate_cv_csv_data_all_electrodes():
         writer.writerow(row)
     writer.writerow([])
 
-    # Section 6: Summary Statistics per Electrode
+    # Section 6: Probe Data (if available)
+    if probe_voltages:
+        # Forward Probe Currents
+        for i, voltage in enumerate(probe_voltages):
+            probe_num = i + 1
+            writer.writerow([f'# Probe {probe_num} Forward Current at {voltage}V (A)'])
+            header = ['File_Number'] + [f'E{int(k)+1}_Probe{probe_num}_Fwd_A' for k in all_electrode_keys] + ['Mean_Probe_Fwd_A', 'Std_Probe_Fwd_A']
+            writer.writerow(header)
+
+            for file_num in file_numbers:
+                file_key = str(file_num)
+                row = [file_num]
+                probe_currents = []
+
+                for electrode_key in all_electrode_keys:
+                    cv_electrode_results = live_cv_results.get(electrode_key, {})
+                    result = cv_electrode_results.get(file_key, {})
+                    if result and result.get('status') == 'success':
+                        probe_data = result.get('probe_data', {})
+                        forward_probe_currents = probe_data.get('forward', [])
+                        if i < len(forward_probe_currents):
+                            current = forward_probe_currents[i].get('current')
+                            probe_currents.append(current if current is not None else 0)
+                            row.append(f'{current:.6e}' if current is not None else 'N/A')
+                        else:
+                            probe_currents.append(0)
+                            row.append('N/A')
+                    else:
+                        probe_currents.append(0)
+                        row.append('N/A')
+
+                # Calculate mean and std
+                valid_currents = [c for c in probe_currents if c is not None and c != 0]
+                if valid_currents:
+                    mean_current = np.mean(valid_currents)
+                    std_current = np.std(valid_currents, ddof=1) if len(valid_currents) > 1 else 0
+                    row.append(f'{mean_current:.6e}')
+                    row.append(f'{std_current:.6e}')
+                else:
+                    row.extend(['N/A', 'N/A'])
+
+                writer.writerow(row)
+            writer.writerow([])
+
+        # Reverse Probe Currents
+        for i, voltage in enumerate(probe_voltages):
+            probe_num = i + 1
+            writer.writerow([f'# Probe {probe_num} Reverse Current at {voltage}V (A)'])
+            header = ['File_Number'] + [f'E{int(k)+1}_Probe{probe_num}_Rev_A' for k in all_electrode_keys] + ['Mean_Probe_Rev_A', 'Std_Probe_Rev_A']
+            writer.writerow(header)
+
+            for file_num in file_numbers:
+                file_key = str(file_num)
+                row = [file_num]
+                probe_currents = []
+
+                for electrode_key in all_electrode_keys:
+                    cv_electrode_results = live_cv_results.get(electrode_key, {})
+                    result = cv_electrode_results.get(file_key, {})
+                    if result and result.get('status') == 'success':
+                        probe_data = result.get('probe_data', {})
+                        reverse_probe_currents = probe_data.get('reverse', [])
+                        if i < len(reverse_probe_currents):
+                            current = reverse_probe_currents[i].get('current')
+                            probe_currents.append(current if current is not None else 0)
+                            row.append(f'{current:.6e}' if current is not None else 'N/A')
+                        else:
+                            probe_currents.append(0)
+                            row.append('N/A')
+                    else:
+                        probe_currents.append(0)
+                        row.append('N/A')
+
+                # Calculate mean and std
+                valid_currents = [c for c in probe_currents if c is not None and c != 0]
+                if valid_currents:
+                    mean_current = np.mean(valid_currents)
+                    std_current = np.std(valid_currents, ddof=1) if len(valid_currents) > 1 else 0
+                    row.append(f'{mean_current:.6e}')
+                    row.append(f'{std_current:.6e}')
+                else:
+                    row.extend(['N/A', 'N/A'])
+
+                writer.writerow(row)
+            writer.writerow([])
+
+    # Section 7: Summary Statistics per Electrode
     writer.writerow(['# Summary Statistics per Electrode'])
     summary_header = ['Electrode', 'Avg_Forward_Peak_A', 'Std_Forward_Peak_A', 'Avg_Forward_Charge_C', 'Std_Forward_Charge_C',
                       'Avg_Reverse_Peak_A', 'Std_Reverse_Peak_A', 'Avg_Reverse_Charge_C', 'Std_Reverse_Charge_C',
