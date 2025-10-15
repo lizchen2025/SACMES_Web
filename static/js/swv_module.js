@@ -129,16 +129,13 @@ export class SWVModule {
         });
         
         this.dom.visualization.exportDataBtn.addEventListener('click', () => {
-            const electrodeInfo = this.state.currentElectrode !== null ? `_Electrode_${this.state.currentElectrode + 1}` : '_Averaged';  // Display as 1-based
-            const defaultFilename = `SACMES_Analysis${electrodeInfo}_${new Date().toISOString().slice(0, 10)}.csv`;
+            const defaultFilename = `SACMES_SWV_AllElectrodes_${new Date().toISOString().slice(0, 10)}.csv`;
             const filename = prompt("Please enter a filename for the CSV export:", defaultFilename);
             if (filename) {
                 this.dom.visualization.exportDataBtn.dataset.filename = filename;
                 this.dom.visualization.exportStatus.textContent = 'Generating export file...';
-                // Send current electrode info to server for correct data export
-                this.socketManager.emit('request_export_data', {
-                    current_electrode: this.state.currentElectrode
-                });
+                // Export all electrodes
+                this.socketManager.emit('request_export_data', {});
             }
         });
 

@@ -945,6 +945,185 @@ def generate_csv_data(current_electrode=None):
     return string_io.getvalue()
 
 
+def generate_csv_data_all_electrodes():
+    """
+    Generates a CSV formatted string with all electrodes data combined, including mean and std.
+    Similar to frequency map all electrodes export but for continuous monitor mode.
+    """
+    if not live_trend_data or not live_analysis_params:
+        return ""
+
+    string_io = io.StringIO()
+    writer = csv.writer(string_io)
+
+    frequencies = [str(f) for f in live_analysis_params.get('frequencies', [])]
+    num_files = live_analysis_params.get('num_files', 0)
+    num_electrodes = live_analysis_params.get('num_electrodes', 1)
+
+    # Get all electrode keys (excluding 'averaged' if present)
+    all_electrode_keys = [str(i) for i in range(num_electrodes)]
+
+    # Write metadata section
+    writer.writerow(['# SACMES Continuous Monitor Analysis Report - All Electrodes'])
+    writer.writerow(['# Export Date:', str(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))])
+    electrode_list = ', '.join([f'E{int(k)+1}' for k in all_electrode_keys])
+    writer.writerow(['# Electrodes:', electrode_list])
+    writer.writerow([])
+
+    # Write filter parameters section
+    writer.writerow(['# Filter Parameters'])
+    filter_mode = live_analysis_params.get('filter_mode', 'auto')
+    writer.writerow(['Filter Mode:', filter_mode])
+
+    if filter_mode == 'manual':
+        writer.writerow(['Hampel Window:', live_analysis_params.get('hampel_window', 'N/A')])
+        writer.writerow(['Hampel Threshold:', live_analysis_params.get('hampel_threshold', 'N/A')])
+        writer.writerow(['SG Window:', live_analysis_params.get('sg_window', 'N/A')])
+        writer.writerow(['SG Degree:', live_analysis_params.get('sg_degree', 'N/A')])
+    else:
+        writer.writerow(['Hampel Window:', 'Auto (1/10 FWHM)'])
+        writer.writerow(['Hampel Threshold:', 'Auto (3×MAD)'])
+        writer.writerow(['SG Window:', 'Auto (1/3 FWHM)'])
+        writer.writerow(['SG Degree:', 'Auto (2)'])
+
+    writer.writerow([])
+
+    # Prepare trend data for all electrodes
+    all_trends = {}
+    for electrode_key in all_electrode_keys:
+        all_trends[electrode_key] = calculate_trends(
+            live_trend_data.get('raw_peaks', {}),
+            live_analysis_params,
+            electrode_key
+        )
+
+    # Section 1: Peak Current for each frequency
+    for freq in frequencies:
+        writer.writerow([f'# Peak Current {freq}Hz (A)'])
+        header = ['File_Number'] + [f'E{int(k)+1}_Peak_A' for k in all_electrode_keys] + ['Mean_Peak_A', 'Std_Peak_A']
+        writer.writerow(header)
+
+        for i in range(num_files):
+            file_num = i + 1
+            row = [file_num]
+
+            # Collect peak values from all electrodes
+            peak_values = []
+            for electrode_key in all_electrode_keys:
+                peak_value = all_trends[electrode_key].get('peak_current_trends', {}).get(freq, [None] * num_files)[i]
+                peak_values.append(peak_value if peak_value is not None else 0)
+                row.append(f'{peak_value:.6e}' if peak_value is not None else 'N/A')
+
+            # Calculate mean and std
+            valid_peaks = [p for p in peak_values if p is not None and p != 0]
+            if valid_peaks:
+                mean_peak = np.mean(valid_peaks)
+                std_peak = np.std(valid_peaks, ddof=1) if len(valid_peaks) > 1 else 0
+                row.append(f'{mean_peak:.6e}')
+                row.append(f'{std_peak:.6e}')
+            else:
+                row.extend(['N/A', 'N/A'])
+
+            writer.writerow(row)
+        writer.writerow([])
+
+    # Section 2: Normalized Peak for each frequency
+    for freq in frequencies:
+        writer.writerow([f'# Normalized Peak {freq}Hz'])
+        header = ['File_Number'] + [f'E{int(k)+1}_Normalized' for k in all_electrode_keys] + ['Mean_Normalized', 'Std_Normalized']
+        writer.writerow(header)
+
+        for i in range(num_files):
+            file_num = i + 1
+            row = [file_num]
+
+            # Collect normalized values from all electrodes
+            norm_values = []
+            for electrode_key in all_electrode_keys:
+                norm_value = all_trends[electrode_key].get('normalized_peak_trends', {}).get(freq, [None] * num_files)[i]
+                norm_values.append(norm_value if norm_value is not None else 0)
+                row.append(f'{norm_value:.6f}' if norm_value is not None else 'N/A')
+
+            # Calculate mean and std
+            valid_norms = [n for n in norm_values if n is not None and n != 0]
+            if valid_norms:
+                mean_norm = np.mean(valid_norms)
+                std_norm = np.std(valid_norms, ddof=1) if len(valid_norms) > 1 else 0
+                row.append(f'{mean_norm:.6f}')
+                row.append(f'{std_norm:.6f}')
+            else:
+                row.extend(['N/A', 'N/A'])
+
+            writer.writerow(row)
+        writer.writerow([])
+
+    # Section 3: KDM
+    writer.writerow(['# KDM (Peak Current Deviation Metric)'])
+    header = ['File_Number'] + [f'E{int(k)+1}_KDM' for k in all_electrode_keys] + ['Mean_KDM', 'Std_KDM']
+    writer.writerow(header)
+
+    for i in range(num_files):
+        file_num = i + 1
+        row = [file_num]
+
+        # Collect KDM values from all electrodes
+        kdm_values = []
+        for electrode_key in all_electrode_keys:
+            kdm_value = all_trends[electrode_key].get('kdm_trend', [None] * num_files)[i]
+            kdm_values.append(kdm_value if kdm_value is not None else 0)
+            row.append(f'{kdm_value:.6f}' if kdm_value is not None else 'N/A')
+
+        # Calculate mean and std
+        valid_kdms = [k for k in kdm_values if k is not None and k != 0]
+        if valid_kdms:
+            mean_kdm = np.mean(valid_kdms)
+            std_kdm = np.std(valid_kdms, ddof=1) if len(valid_kdms) > 1 else 0
+            row.append(f'{mean_kdm:.6f}')
+            row.append(f'{std_kdm:.6f}')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        writer.writerow(row)
+    writer.writerow([])
+
+    # Section 4: Summary Statistics per Electrode
+    writer.writerow(['# Summary Statistics per Electrode'])
+    summary_header = ['Electrode']
+    for freq in frequencies:
+        summary_header.extend([f'Avg_Peak_{freq}Hz_A', f'Std_Peak_{freq}Hz_A'])
+    summary_header.extend(['Avg_KDM', 'Std_KDM'])
+    writer.writerow(summary_header)
+
+    for electrode_key in all_electrode_keys:
+        electrode_label = f'E{int(electrode_key)+1}'
+        row = [electrode_label]
+
+        trends = all_trends[electrode_key]
+
+        # Add peak current stats for each frequency
+        for freq in frequencies:
+            peak_trend = trends.get('peak_current_trends', {}).get(freq, [])
+            valid_peaks = [p for p in peak_trend if p is not None]
+            if valid_peaks:
+                row.append(f'{np.mean(valid_peaks):.6e}')
+                row.append(f'{np.std(valid_peaks, ddof=1):.6e}' if len(valid_peaks) > 1 else '0.000000e+00')
+            else:
+                row.extend(['N/A', 'N/A'])
+
+        # Add KDM stats
+        kdm_trend = trends.get('kdm_trend', [])
+        valid_kdms = [k for k in kdm_trend if k is not None]
+        if valid_kdms:
+            row.append(f'{np.mean(valid_kdms):.6f}')
+            row.append(f'{np.std(valid_kdms, ddof=1):.6f}' if len(valid_kdms) > 1 else '0.000000')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        writer.writerow(row)
+
+    return string_io.getvalue()
+
+
 # --- Socket.IO Event Handlers (Connect, Disconnect, Start Session are Unchanged) ---
 # Global session tracker for agent-web viewer communication
 agent_session_tracker = {'current_session': None, 'agent_sid': None}
@@ -1885,12 +2064,12 @@ def handle_cv_data_from_agent(data):
 def handle_export_request(data):
     """
     Handles a request from the client to export data to CSV.
+    Now exports all electrodes by default.
     """
     logger.info(f"Received 'request_export_data' from {request.sid} with data: {data}")
     try:
-        # Get current electrode from request data
-        current_electrode = data.get('current_electrode') if data else None
-        csv_data = generate_csv_data(current_electrode)
+        # Export all electrodes
+        csv_data = generate_csv_data_all_electrodes()
         if csv_data:
             emit('export_data_response', {'status': 'success', 'data': csv_data})
         else:
@@ -1904,12 +2083,12 @@ def handle_export_request(data):
 def handle_cv_export_request(data):
     """
     Handles a request from the client to export CV data to CSV.
+    Now exports all electrodes by default.
     """
     logger.info(f"Received 'request_export_cv_data' from {request.sid} with data: {data}")
     try:
-        # Get current electrode from request data
-        current_electrode = data.get('current_electrode') if data else None
-        csv_data = generate_cv_csv_data(current_electrode)
+        # Export all electrodes
+        csv_data = generate_cv_csv_data_all_electrodes()
         if csv_data:
             emit('export_cv_data_response', {'status': 'success', 'data': csv_data})
         else:
@@ -2240,6 +2419,317 @@ def generate_cv_csv_data(current_electrode=None):
                     ])
 
                 writer.writerow(row)
+
+    return string_io.getvalue()
+
+
+def generate_cv_csv_data_all_electrodes():
+    """
+    Generates a CSV formatted string with all electrodes CV data combined, including mean and std.
+    """
+    # Get CV results from session data
+    session_id = 'global_agent_session'
+    live_trend_data = get_session_data(session_id, 'live_trend_data', {})
+    live_cv_results = live_trend_data.get('cv_results', {})
+
+    if not live_cv_results:
+        return ""
+
+    # Also get analysis parameters from session
+    live_cv_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
+    num_electrodes = live_cv_analysis_params.get('num_electrodes', 1)
+
+    # Get all electrode keys (excluding 'averaged' if present)
+    all_electrode_keys = [str(i) for i in range(num_electrodes)]
+
+    string_io = io.StringIO()
+    writer = csv.writer(string_io)
+
+    # Write metadata section
+    writer.writerow(['# SACMES CV Analysis Report - All Electrodes'])
+    writer.writerow(['# Export Date:', str(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))])
+    electrode_list = ', '.join([f'E{int(k)+1}' for k in all_electrode_keys])
+    writer.writerow(['# Electrodes:', electrode_list])
+    writer.writerow([])
+
+    # Write analysis parameters section
+    writer.writerow(['# Analysis Parameters'])
+    if live_cv_analysis_params:
+        writer.writerow(['Scan Rate (V/s):', live_cv_analysis_params.get('scan_rate', 'N/A')])
+        writer.writerow(['Mass Transport:', live_cv_analysis_params.get('mass_transport', 'N/A')])
+        writer.writerow(['Analysis Type:', live_cv_analysis_params.get('SelectedOptions', 'N/A')])
+        sg_mode = live_cv_analysis_params.get('sg_mode', 'auto')
+        writer.writerow(['SG Filter Mode:', sg_mode])
+        if sg_mode == 'manual':
+            writer.writerow(['SG Window:', live_cv_analysis_params.get('sg_window', 'N/A')])
+            writer.writerow(['SG Degree:', live_cv_analysis_params.get('sg_degree', 'N/A')])
+        else:
+            writer.writerow(['SG Window:', 'Auto (20% of data length)'])
+            writer.writerow(['SG Degree:', 'Auto (2)'])
+
+        # Add probe voltage information
+        probe_voltages = live_cv_analysis_params.get('probe_voltages', [])
+        if probe_voltages:
+            probe_voltages_str = ', '.join([f"{v} V" for v in probe_voltages])
+            writer.writerow(['Probe Voltages:', probe_voltages_str])
+        else:
+            writer.writerow(['Probe Voltages:', 'None'])
+    writer.writerow([])
+
+    # Get all file numbers across all electrodes
+    all_file_numbers = set()
+    for electrode_key in all_electrode_keys:
+        cv_electrode_results = live_cv_results.get(electrode_key, {})
+        all_file_numbers.update([int(f) for f in cv_electrode_results.keys()])
+    file_numbers = sorted(all_file_numbers)
+
+    probe_voltages = live_cv_analysis_params.get('probe_voltages', []) if live_cv_analysis_params else []
+
+    # Section 1: Forward Peak Current (A)
+    writer.writerow(['# Forward Peak Current (A)'])
+    header = ['File_Number'] + [f'E{int(k)+1}_Forward_Peak_A' for k in all_electrode_keys] + ['Mean_Forward_Peak_A', 'Std_Forward_Peak_A']
+    writer.writerow(header)
+
+    for file_num in file_numbers:
+        file_key = str(file_num)
+        row = [file_num]
+        forward_peaks = []
+
+        for electrode_key in all_electrode_keys:
+            cv_electrode_results = live_cv_results.get(electrode_key, {})
+            result = cv_electrode_results.get(file_key, {})
+            if result and result.get('status') == 'success':
+                forward_current = result.get('forward', {}).get('peak_current', None)
+                forward_peaks.append(forward_current if forward_current is not None else 0)
+                row.append(f'{forward_current:.6e}' if forward_current is not None else 'N/A')
+            else:
+                forward_peaks.append(0)
+                row.append('N/A')
+
+        # Calculate mean and std
+        valid_peaks = [p for p in forward_peaks if p is not None and p != 0]
+        if valid_peaks:
+            mean_peak = np.mean(valid_peaks)
+            std_peak = np.std(valid_peaks, ddof=1) if len(valid_peaks) > 1 else 0
+            row.append(f'{mean_peak:.6e}')
+            row.append(f'{std_peak:.6e}')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        writer.writerow(row)
+    writer.writerow([])
+
+    # Section 2: Forward AUC Charge (C)
+    writer.writerow(['# Forward AUC Charge (C)'])
+    header = ['File_Number'] + [f'E{int(k)+1}_Forward_Charge_C' for k in all_electrode_keys] + ['Mean_Forward_Charge_C', 'Std_Forward_Charge_C']
+    writer.writerow(header)
+
+    for file_num in file_numbers:
+        file_key = str(file_num)
+        row = [file_num]
+        forward_charges = []
+
+        for electrode_key in all_electrode_keys:
+            cv_electrode_results = live_cv_results.get(electrode_key, {})
+            result = cv_electrode_results.get(file_key, {})
+            if result and result.get('status') == 'success':
+                forward_charge = result.get('forward', {}).get('charge', None)
+                forward_charges.append(forward_charge if forward_charge is not None else 0)
+                row.append(f'{forward_charge:.6e}' if forward_charge is not None else 'N/A')
+            else:
+                forward_charges.append(0)
+                row.append('N/A')
+
+        # Calculate mean and std
+        valid_charges = [c for c in forward_charges if c is not None and c != 0]
+        if valid_charges:
+            mean_charge = np.mean(valid_charges)
+            std_charge = np.std(valid_charges, ddof=1) if len(valid_charges) > 1 else 0
+            row.append(f'{mean_charge:.6e}')
+            row.append(f'{std_charge:.6e}')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        writer.writerow(row)
+    writer.writerow([])
+
+    # Section 3: Reverse Peak Current (A)
+    writer.writerow(['# Reverse Peak Current (A)'])
+    header = ['File_Number'] + [f'E{int(k)+1}_Reverse_Peak_A' for k in all_electrode_keys] + ['Mean_Reverse_Peak_A', 'Std_Reverse_Peak_A']
+    writer.writerow(header)
+
+    for file_num in file_numbers:
+        file_key = str(file_num)
+        row = [file_num]
+        reverse_peaks = []
+
+        for electrode_key in all_electrode_keys:
+            cv_electrode_results = live_cv_results.get(electrode_key, {})
+            result = cv_electrode_results.get(file_key, {})
+            if result and result.get('status') == 'success':
+                reverse_current = result.get('reverse', {}).get('peak_current', None)
+                reverse_peaks.append(reverse_current if reverse_current is not None else 0)
+                row.append(f'{reverse_current:.6e}' if reverse_current is not None else 'N/A')
+            else:
+                reverse_peaks.append(0)
+                row.append('N/A')
+
+        # Calculate mean and std
+        valid_peaks = [p for p in reverse_peaks if p is not None and p != 0]
+        if valid_peaks:
+            mean_peak = np.mean(valid_peaks)
+            std_peak = np.std(valid_peaks, ddof=1) if len(valid_peaks) > 1 else 0
+            row.append(f'{mean_peak:.6e}')
+            row.append(f'{std_peak:.6e}')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        writer.writerow(row)
+    writer.writerow([])
+
+    # Section 4: Reverse AUC Charge (C)
+    writer.writerow(['# Reverse AUC Charge (C)'])
+    header = ['File_Number'] + [f'E{int(k)+1}_Reverse_Charge_C' for k in all_electrode_keys] + ['Mean_Reverse_Charge_C', 'Std_Reverse_Charge_C']
+    writer.writerow(header)
+
+    for file_num in file_numbers:
+        file_key = str(file_num)
+        row = [file_num]
+        reverse_charges = []
+
+        for electrode_key in all_electrode_keys:
+            cv_electrode_results = live_cv_results.get(electrode_key, {})
+            result = cv_electrode_results.get(file_key, {})
+            if result and result.get('status') == 'success':
+                reverse_charge = result.get('reverse', {}).get('charge', None)
+                reverse_charges.append(reverse_charge if reverse_charge is not None else 0)
+                row.append(f'{reverse_charge:.6e}' if reverse_charge is not None else 'N/A')
+            else:
+                reverse_charges.append(0)
+                row.append('N/A')
+
+        # Calculate mean and std
+        valid_charges = [c for c in reverse_charges if c is not None and c != 0]
+        if valid_charges:
+            mean_charge = np.mean(valid_charges)
+            std_charge = np.std(valid_charges, ddof=1) if len(valid_charges) > 1 else 0
+            row.append(f'{mean_charge:.6e}')
+            row.append(f'{std_charge:.6e}')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        writer.writerow(row)
+    writer.writerow([])
+
+    # Section 5: Peak Separation (V)
+    writer.writerow(['# Peak Separation (V)'])
+    header = ['File_Number'] + [f'E{int(k)+1}_Peak_Sep_V' for k in all_electrode_keys] + ['Mean_Peak_Sep_V', 'Std_Peak_Sep_V']
+    writer.writerow(header)
+
+    for file_num in file_numbers:
+        file_key = str(file_num)
+        row = [file_num]
+        peak_seps = []
+
+        for electrode_key in all_electrode_keys:
+            cv_electrode_results = live_cv_results.get(electrode_key, {})
+            result = cv_electrode_results.get(file_key, {})
+            if result and result.get('status') == 'success':
+                peak_sep = result.get('peak_separation', None)
+                peak_seps.append(peak_sep if peak_sep is not None else 0)
+                row.append(f'{peak_sep:.6f}' if peak_sep is not None else 'N/A')
+            else:
+                peak_seps.append(0)
+                row.append('N/A')
+
+        # Calculate mean and std
+        valid_seps = [s for s in peak_seps if s is not None and s != 0]
+        if valid_seps:
+            mean_sep = np.mean(valid_seps)
+            std_sep = np.std(valid_seps, ddof=1) if len(valid_seps) > 1 else 0
+            row.append(f'{mean_sep:.6f}')
+            row.append(f'{std_sep:.6f}')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        writer.writerow(row)
+    writer.writerow([])
+
+    # Section 6: Summary Statistics per Electrode
+    writer.writerow(['# Summary Statistics per Electrode'])
+    summary_header = ['Electrode', 'Avg_Forward_Peak_A', 'Std_Forward_Peak_A', 'Avg_Forward_Charge_C', 'Std_Forward_Charge_C',
+                      'Avg_Reverse_Peak_A', 'Std_Reverse_Peak_A', 'Avg_Reverse_Charge_C', 'Std_Reverse_Charge_C',
+                      'Avg_Peak_Sep_V', 'Std_Peak_Sep_V']
+    writer.writerow(summary_header)
+
+    for electrode_key in all_electrode_keys:
+        electrode_label = f'E{int(electrode_key)+1}'
+        row = [electrode_label]
+
+        cv_electrode_results = live_cv_results.get(electrode_key, {})
+
+        # Collect all data for this electrode
+        forward_peaks = []
+        forward_charges = []
+        reverse_peaks = []
+        reverse_charges = []
+        peak_seps = []
+
+        for file_num in file_numbers:
+            file_key = str(file_num)
+            result = cv_electrode_results.get(file_key, {})
+            if result and result.get('status') == 'success':
+                forward_data = result.get('forward', {})
+                reverse_data = result.get('reverse', {})
+
+                fp = forward_data.get('peak_current')
+                if fp is not None:
+                    forward_peaks.append(fp)
+                fc = forward_data.get('charge')
+                if fc is not None:
+                    forward_charges.append(fc)
+                rp = reverse_data.get('peak_current')
+                if rp is not None:
+                    reverse_peaks.append(rp)
+                rc = reverse_data.get('charge')
+                if rc is not None:
+                    reverse_charges.append(rc)
+                ps = result.get('peak_separation')
+                if ps is not None:
+                    peak_seps.append(ps)
+
+        # Calculate stats
+        if forward_peaks:
+            row.append(f'{np.mean(forward_peaks):.6e}')
+            row.append(f'{np.std(forward_peaks, ddof=1):.6e}' if len(forward_peaks) > 1 else '0.000000e+00')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        if forward_charges:
+            row.append(f'{np.mean(forward_charges):.6e}')
+            row.append(f'{np.std(forward_charges, ddof=1):.6e}' if len(forward_charges) > 1 else '0.000000e+00')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        if reverse_peaks:
+            row.append(f'{np.mean(reverse_peaks):.6e}')
+            row.append(f'{np.std(reverse_peaks, ddof=1):.6e}' if len(reverse_peaks) > 1 else '0.000000e+00')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        if reverse_charges:
+            row.append(f'{np.mean(reverse_charges):.6e}')
+            row.append(f'{np.std(reverse_charges, ddof=1):.6e}' if len(reverse_charges) > 1 else '0.000000e+00')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        if peak_seps:
+            row.append(f'{np.mean(peak_seps):.6f}')
+            row.append(f'{np.std(peak_seps, ddof=1):.6f}' if len(peak_seps) > 1 else '0.000000')
+        else:
+            row.extend(['N/A', 'N/A'])
+
+        writer.writerow(row)
 
     return string_io.getvalue()
 

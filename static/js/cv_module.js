@@ -2162,16 +2162,13 @@ export class CVModule {
     }
 
     _handleCVExport() {
-        const electrodeInfo = this.state.currentElectrode !== null ? `_Electrode_${this.state.currentElectrode + 1}` : '_Averaged';
-        const defaultFilename = `CV_Analysis${electrodeInfo}_${new Date().toISOString().slice(0, 10)}.csv`;
+        const defaultFilename = `CV_AllElectrodes_${new Date().toISOString().slice(0, 10)}.csv`;
         const filename = prompt("Please enter a filename for the CV export:", defaultFilename);
         if (filename) {
             this.dom.visualization.exportCVDataBtn.dataset.filename = filename;
             this.dom.visualization.exportStatus.textContent = 'Generating CV export file...';
-            // Send current electrode info to server for correct data export
-            this.socketManager.emit('request_export_cv_data', {
-                current_electrode: this.state.currentElectrode
-            });
+            // Export all electrodes
+            this.socketManager.emit('request_export_cv_data', {});
         }
     }
 
