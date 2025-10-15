@@ -1,0 +1,5 @@
+# Agent requirements
+# Compatible with Python 3.8+
+
+python-socketio>=5.0.0,<6.0.0
+requests>=2.25.0
