@@ -65,7 +65,6 @@ export class SWVModule {
                 latestFrequency: document.getElementById('latestFrequency'),
                 latestCharge: document.getElementById('latestCharge'),
                 exportFrequencyMapDataBtn: document.getElementById('exportFrequencyMapDataBtn'),
-                exportFrequencyMapAllElectrodesBtn: document.getElementById('exportFrequencyMapAllElectrodesBtn'),
                 exportFrequencyMapStatus: document.getElementById('exportFrequencyMapStatus'),
                 individualPlotsContainer: document.getElementById('individualPlotsContainer'),
                 trendPlotsContainer: document.getElementById('trendPlotsContainer'),
@@ -143,30 +142,13 @@ export class SWVModule {
             }
         });
 
-        // Frequency Map export button
+        // Frequency Map export all electrodes button
         if (this.dom.visualization.exportFrequencyMapDataBtn) {
             this.dom.visualization.exportFrequencyMapDataBtn.addEventListener('click', () => {
-                const electrodeInfo = this.state.currentElectrode !== null ? `_Electrode_${this.state.currentElectrode + 1}` : '_Averaged';
-                const defaultFilename = `SACMES_FrequencyMap${electrodeInfo}_${new Date().toISOString().slice(0, 10)}.csv`;
-                const filename = prompt("Please enter a filename for the CSV export:", defaultFilename);
-                if (filename) {
-                    this.dom.visualization.exportFrequencyMapDataBtn.dataset.filename = filename;
-                    this.dom.visualization.exportFrequencyMapStatus.textContent = 'Generating export file...';
-                    // Send current electrode info to server for correct data export
-                    this.socketManager.emit('request_export_frequency_map_data', {
-                        current_electrode: this.state.currentElectrode
-                    });
-                }
-            });
-        }
-
-        // Frequency Map export all electrodes button
-        if (this.dom.visualization.exportFrequencyMapAllElectrodesBtn) {
-            this.dom.visualization.exportFrequencyMapAllElectrodesBtn.addEventListener('click', () => {
                 const defaultFilename = `SACMES_FrequencyMap_AllElectrodes_${new Date().toISOString().slice(0, 10)}.csv`;
                 const filename = prompt("Please enter a filename for the CSV export:", defaultFilename);
                 if (filename) {
-                    this.dom.visualization.exportFrequencyMapAllElectrodesBtn.dataset.filename = filename;
+                    this.dom.visualization.exportFrequencyMapDataBtn.dataset.filename = filename;
                     this.dom.visualization.exportFrequencyMapStatus.textContent = 'Generating export file...';
                     this.socketManager.emit('request_export_frequency_map_data', {
                         export_all: true
@@ -1109,10 +1091,7 @@ export class SWVModule {
         // Handle frequency map export response
         this.socketManager.on('export_frequency_map_data_response', (data) => {
             if (data.status === 'success') {
-                // Check both buttons for filename (one for single electrode, one for all electrodes)
-                const filename = this.dom.visualization.exportFrequencyMapDataBtn.dataset.filename ||
-                                 this.dom.visualization.exportFrequencyMapAllElectrodesBtn.dataset.filename ||
-                                 'frequency_map_export.csv';
+                const filename = this.dom.visualization.exportFrequencyMapDataBtn.dataset.filename || 'frequency_map_export.csv';
                 this.dom.visualization.exportFrequencyMapStatus.textContent = `Export successful! Downloading ${filename}...`;
                 this._triggerCsvDownload(data.data, filename);
             } else {

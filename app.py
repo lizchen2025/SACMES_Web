@@ -14,6 +14,7 @@ import uuid
 import redis
 import json
 import threading
+import numpy as np
 from datetime import datetime
 from flask import Flask, send_from_directory, request, session
 from flask_socketio import SocketIO, emit
