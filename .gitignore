@@ -1,5 +1,7 @@
-# Python
+# Python environment
 venv/
+env/
+agent_build_env/
 *.pyc
 __pycache__/
 .env
@@ -7,8 +9,46 @@ __pycache__/
 # Build artifacts
 dist/
 build/
-*.spec
 *.exe
+*.spec
 
-# UPX Tool
-upx-*/
+# Agent files (not needed on server)
+agent.py
+agent.json
+kill_agent_processes.bat
+
+# Build scripts (not needed on server)
+build_*.bat
+cleanup_build.bat
+test_dependencies.bat
+
+# Requirements (not needed on server)
+requirements_agent_minimal.txt
+
+# Documentation (not needed on server)
+*.md
+README.md
+CHANGELOG.md
+
+# Desktop application (not needed on server)
+SACMES_SWV_FrequencyMap.py
+
+# Temporary uploads
+temp_uploads/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+nul
+
+# Log files
+*.log
+
+# Icon (not needed on server)
+*.ico

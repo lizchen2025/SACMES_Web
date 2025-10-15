@@ -1,8 +1,19 @@
-Flask
-Flask-SocketIO
-eventlet
-numpy
-scipy
-gunicorn
-redis
-uuid
+# SACMES Web Server Requirements
+# Python 3.8+ compatible
+
+# Web framework
+Flask>=2.0.0
+Flask-SocketIO>=5.0.0
+
+# Async support
+eventlet>=0.33.0
+
+# Scientific computing for data processing
+numpy>=1.19.0
+scipy>=1.5.0
+
+# Production server
+gunicorn>=20.1.0
+
+# Session management (optional - for Redis-based sessions)
+redis>=4.0.0

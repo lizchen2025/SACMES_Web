@@ -5,7 +5,12 @@
       "Bash(node:*)",
       "Bash(findstr:*)",
       "Bash(netstat:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(if [ -d \"dist\" ])",
+      "Bash(then rm -rf dist)",
+      "Bash(fi)",
+      "Bash(if [ -d \"build\" ])",
+      "Bash(then rm -rf build)"
     ],
     "deny": [],
     "ask": []

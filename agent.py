@@ -500,11 +500,26 @@ def on_set_filters(data):
     app.log(f"Updated current filters: {current_filters}")
     app.log(f"Monitor directory: {app.watch_directory.get()}")
 
+    # Gracefully stop existing thread if running
     if agent_thread and agent_thread.is_alive():
         app.log("Stopping previous monitoring thread...")
         is_monitoring_active = False
-        agent_thread.join()
 
+        # Wait for thread to finish with timeout
+        max_wait = 5
+        wait_interval = 0.2
+        elapsed = 0
+
+        while agent_thread.is_alive() and elapsed < max_wait:
+            time.sleep(wait_interval)
+            elapsed += wait_interval
+
+        if agent_thread.is_alive():
+            app.log("[Warning] Previous thread did not stop in time, starting new one anyway")
+        else:
+            app.log("Previous thread stopped successfully")
+
+    # Start new monitoring
     is_monitoring_active = True
     directory = app.watch_directory.get()
 
@@ -833,19 +848,39 @@ class AgentApp:
     def stop_monitoring(self):
         self.log("Stopping process...")
         self.stop_monitoring_logic()
-        if sio.connected:
-            sio.disconnect()
+        # Do NOT disconnect - keep connection alive for reconnection
+        self.log("Connection maintained for quick restart")
 
     def stop_monitoring_logic(self):
         global is_monitoring_active, agent_thread
+        self.log("Setting monitoring flag to False...")
         is_monitoring_active = False
+
+        # Give the thread a moment to see the flag change
+        time.sleep(0.1)
+
         if agent_thread and agent_thread.is_alive():
-            agent_thread.join(timeout=POLLING_INTERVAL_SECONDS + 1)
+            self.log("Waiting for monitoring thread to stop...")
+            # Use a shorter timeout and check periodically
+            max_wait = 5  # seconds
+            wait_interval = 0.2
+            elapsed = 0
+
+            while agent_thread.is_alive() and elapsed < max_wait:
+                time.sleep(wait_interval)
+                elapsed += wait_interval
+
+            if agent_thread.is_alive():
+                self.log("[Warning] Monitoring thread did not stop gracefully")
+            else:
+                self.log("Monitoring thread stopped successfully")
+
+        # Re-enable UI controls
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
         self.select_button.config(state=tk.NORMAL)
-        self.url_entry.config(state=tk.NORMAL)  # Re-enable URL entry
-        self.log("Monitoring has been stopped.")
+        self.url_entry.config(state=tk.NORMAL)
+        self.log("Monitoring stopped. Ready to reconnect.")
 
     def log(self, message):
         self.root.after(0, self._log_message, message)
