@@ -11,8 +11,12 @@ build/
 !agent_minimal.spec
 *.exe
 *.msi
-*.bat
 agent_build_env/
+
+# Agent package files - keep source, ignore runtime
+python_embed/
+*.zip
+!static/downloads/*.zip
 
 # UPX Tool
 upx-*/
@@ -25,6 +29,9 @@ upx-*/
 .idea/
 *.swp
 *.swo
+
+# But include GitHub Actions workflows
+!.github/
 
 # OS
 .DS_Store

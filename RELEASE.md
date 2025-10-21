@@ -1,6 +1,36 @@
 # GitHub Release Instructions
 
-## Creating a New Release
+## Automatic Release (Recommended)
+
+GitHub Actions will automatically build and release the agent when you create a version tag:
+
+1. **Update agent code** as needed
+
+2. **Commit and push changes**:
+   ```bash
+   git add .
+   git commit -m "Update agent for version 1.0.0"
+   git push origin mul
+   ```
+
+3. **Create and push a version tag**:
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+
+4. **Wait for automatic build**:
+   - GitHub Actions will automatically build the agent
+   - Create a release at https://github.com/lizchen2025/SACMES_Web/releases
+   - Upload the executable to the release
+
+5. **Check the release**:
+   - Go to https://github.com/lizchen2025/SACMES_Web/releases
+   - Verify the new release is published with the executable
+
+## Manual Release (If needed)
+
+If you prefer to build locally:
 
 1. Build the agent executable:
    ```bash
