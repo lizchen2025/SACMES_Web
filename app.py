@@ -662,19 +662,26 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
         # Track electrode completion for this file
         file_processing_key = f"file_processing_{original_filename}"
         file_progress = get_session_data(session_id, file_processing_key, {'completed': 0, 'total': total_electrodes})
-        file_progress['completed'] += 1
-        set_session_data(session_id, file_processing_key, file_progress)
 
-        logger.info(f"FREQUENCY_MAP: Electrode progress for '{original_filename}': {file_progress['completed']}/{file_progress['total']}")
+        # Check if file_progress is None (race condition where it was already cleaned up)
+        if file_progress is None:
+            file_progress = {'completed': 0, 'total': total_electrodes}
+            logger.warning(f"FREQUENCY_MAP: File progress was None for '{original_filename}', reinitializing")
+
+        file_progress['completed'] += 1
 
         # Only send acknowledgment when all electrodes are processed
         if file_progress['completed'] >= file_progress['total']:
             agent_sid = agent_session_tracker.get('agent_sid')
             if agent_sid:
                 socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
-                logger.info(f"FREQUENCY_MAP: All electrodes complete - sent ack for '{original_filename}' to agent")
+                logger.info(f"FREQUENCY_MAP: All electrodes complete ({file_progress['completed']}/{file_progress['total']}) - sent ack for '{original_filename}' to agent")
             # Clean up tracking data
             set_session_data(session_id, file_processing_key, None)
+        else:
+            # Still processing, update the count
+            set_session_data(session_id, file_processing_key, file_progress)
+            logger.info(f"FREQUENCY_MAP: Electrode progress for '{original_filename}': {file_progress['completed']}/{file_progress['total']}")
 
     except Exception as e:
         logger.error(f"FREQUENCY_MAP: Error processing '{original_filename}': {e}", exc_info=True)
@@ -682,17 +689,26 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
         # Track electrode completion even on error
         file_processing_key = f"file_processing_{original_filename}"
         file_progress = get_session_data(session_id, file_processing_key, {'completed': 0, 'total': total_electrodes})
+
+        # Check if file_progress is None (race condition)
+        if file_progress is None:
+            file_progress = {'completed': 0, 'total': total_electrodes}
+            logger.warning(f"FREQUENCY_MAP: File progress was None for '{original_filename}' (in error handler), reinitializing")
+
         file_progress['completed'] += 1
-        set_session_data(session_id, file_processing_key, file_progress)
 
         # Only send acknowledgment when all electrodes are processed (or failed)
         if file_progress['completed'] >= file_progress['total']:
             agent_sid = agent_session_tracker.get('agent_sid')
             if agent_sid:
                 socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
-                logger.info(f"FREQUENCY_MAP: All electrodes complete (with errors) - sent ack for '{original_filename}' to agent")
+                logger.info(f"FREQUENCY_MAP: All electrodes complete ({file_progress['completed']}/{file_progress['total']}, with errors) - sent ack for '{original_filename}' to agent")
             # Clean up tracking data
             set_session_data(session_id, file_processing_key, None)
+        else:
+            # Still processing, update the count
+            set_session_data(session_id, file_processing_key, file_progress)
+            logger.info(f"FREQUENCY_MAP: Electrode progress for '{original_filename}' (error): {file_progress['completed']}/{file_progress['total']}")
     finally:
         if temp_filepath and os.path.exists(temp_filepath):
             os.remove(temp_filepath)

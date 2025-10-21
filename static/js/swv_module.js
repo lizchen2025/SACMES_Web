@@ -1053,22 +1053,28 @@ export class SWVModule {
 
             // Check if all frequencies complete for THIS electrode
             const electrodeComplete = this.state.analyzedFrequencies[electrodeKey].length === this.state.currentFrequencies.length;
+            console.log(` Electrode ${electrodeKey}: Complete? ${electrodeComplete} (${this.state.analyzedFrequencies[electrodeKey].length}/${this.state.currentFrequencies.length})`);
+            console.log(` Current electrode: ${this.state.currentElectrode}, Update electrode: ${electrode_index}`);
 
             // Only update visualization if this is the currently displayed electrode
             if (electrode_index === this.state.currentElectrode) {
+                console.log(`Updating visualization for current electrode ${electrodeKey}`);
                 this._updateFrequencyMapStats();
 
                 if (electrodeComplete) {
                     // Show overlay if all frequencies are complete for current electrode
-                    console.log(`All frequencies complete for electrode ${electrodeKey} - showing overlay`);
+                    console.log(`🎉 All frequencies complete for electrode ${electrodeKey} - SHOWING OVERLAY`);
                     this._updateFrequencyMapOverlay();
                 } else {
                     // Update voltammogram plot (top) - only for NEW frequency
+                    console.log(` Showing individual frequency ${frequency}Hz for electrode ${electrodeKey}`);
                     this._updateFrequencyMapVoltammogram(freqData);
                 }
 
                 // Update frequency-charge plot (bottom) - cumulative
                 this._updateFrequencyChargeChart();
+            } else {
+                console.log(`⏭Not current electrode - skipping visualization update (current: ${this.state.currentElectrode}, received: ${electrode_index})`);
             }
 
             // Check if all frequencies have been analyzed for ALL electrodes
@@ -1157,11 +1163,16 @@ export class SWVModule {
     }
 
     _updateFrequencyMapOverlay() {
+        console.log('🎨 _updateFrequencyMapOverlay called');
         // Show all frequencies overlaid on one plot (no baselines)
         const plotDiv = this.dom.visualization.frequencyMapVoltammogramPlot;
         const electrodeKey = this.state.currentElectrode !== null ? this.state.currentElectrode.toString() : 'averaged';
         const electrodeFreqData = this.state.frequencyMapData[electrodeKey] || {};
         const analyzedFreqs = this.state.analyzedFrequencies[electrodeKey] || [];
+
+        console.log(`   Electrode: ${electrodeKey}`);
+        console.log(`   Analyzed frequencies: ${analyzedFreqs.length} [${analyzedFreqs.join(', ')}]`);
+        console.log(`   Frequency data keys: [${Object.keys(electrodeFreqData).join(', ')}]`);
 
         // Generate color palette for different frequencies
         const colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan'];
@@ -1172,6 +1183,7 @@ export class SWVModule {
         sortedFreqs.forEach((freq, index) => {
             const freqData = electrodeFreqData[freq];
             if (freqData && freqData.smoothed_currents && freqData.smoothed_currents.length > 0) {
+                console.log(`   ✓ Adding trace for ${freq}Hz (${freqData.smoothed_currents.length} points, color: ${colors[index % colors.length]})`);
                 traces.push({
                     x: freqData.potentials,
                     y: freqData.smoothed_currents,
@@ -1180,8 +1192,12 @@ export class SWVModule {
                     name: `${freq} Hz`,
                     marker: { size: 3, color: colors[index % colors.length] }
                 });
+            } else {
+                console.warn(`   ✗ Missing data for ${freq}Hz`);
             }
         });
+
+        console.log(`   Total traces: ${traces.length}`);
 
         const layout = {
             title: 'Frequency Map: All Frequencies Overlay',
@@ -1196,11 +1212,13 @@ export class SWVModule {
             hovermode: 'closest'
         };
 
+        console.log(`   Calling Plotly.react with ${traces.length} traces`);
         Plotly.react(plotDiv, traces, layout, { responsive: true });
 
         // Update label
         this.dom.visualization.currentFrequencyLabel.textContent =
             `Analysis Complete - Showing all ${sortedFreqs.length} frequencies`;
+        console.log(`   ✓ Overlay plot complete!`);
     }
 
     _updateFrequencyChargeChart() {
