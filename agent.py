@@ -18,7 +18,7 @@ from tkinter import filedialog, scrolledtext, messagebox
 # --- Configuration ---
 # REMOVED: SERVER_URL is now a GUI variable
 AUTH_TOKEN = "your_super_secret_token_here"
-POLLING_INTERVAL_SECONDS = 2
+POLLING_INTERVAL_SECONDS = 0.5
 SEND_DELAY_SECONDS = 0.05
 
 # --- ID Management System ---
@@ -368,8 +368,8 @@ def send_file_to_server(file_path):
             timeout_counter = 0
             max_wait_time = 30  # 30 seconds timeout
             while not file_processing_complete and timeout_counter < max_wait_time and is_monitoring_active:
-                time.sleep(0.1)
-                timeout_counter += 0.1
+                time.sleep(0.05)  # Faster check interval for responsive stop
+                timeout_counter += 0.05
 
             # Check if stopped by user/server
             if not is_monitoring_active:
@@ -833,14 +833,13 @@ class AgentApp:
     def stop_monitoring(self):
         self.log("Stopping process...")
         self.stop_monitoring_logic()
-        if sio.connected:
-            sio.disconnect()
+        # Keep connection alive - don't disconnect to avoid reconnection issues
 
     def stop_monitoring_logic(self):
         global is_monitoring_active, agent_thread
         is_monitoring_active = False
         if agent_thread and agent_thread.is_alive():
-            agent_thread.join(timeout=POLLING_INTERVAL_SECONDS + 1)
+            agent_thread.join(timeout=0.5)  # Quick timeout for immediate UI response
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
         self.select_button.config(state=tk.NORMAL)

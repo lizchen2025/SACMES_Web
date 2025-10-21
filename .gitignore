@@ -8,10 +8,24 @@ __pycache__/
 dist/
 build/
 *.spec
+!agent_minimal.spec
 *.exe
-# But allow agent files in downloads folder
-!static/downloads/*.exe
-!static/downloads/*.zip
+*.msi
+*.bat
+agent_build_env/
 
 # UPX Tool
 upx-*/
+
+# cx_Freeze build
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

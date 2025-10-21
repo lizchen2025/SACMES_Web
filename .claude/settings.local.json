@@ -8,7 +8,11 @@
       "Bash(awk:*)",
       "Bash(dir:*)",
       "Bash(zip:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(pip show:*)",
+      "Bash(where python)",
+      "Bash(D:minicondapython.exe -m pip show cx_Freeze)",
+      "Bash(del setup.py)"
     ],
     "deny": [],
     "ask": []
