@@ -617,7 +617,7 @@ export class CVModule {
                 .map(e => parseInt(e.trim()) - 1)  // Convert from 1-based to 0-based
                 .filter(e => !isNaN(e) && e >= 0);
             if (selectedElectrodes.length === 0) {
-                alert("Please enter valid electrode numbers (starting from 1) or leave empty for averaging.");
+                alert("Please enter valid electrode numbers (starting from 1).");
                 return;
             }
         }

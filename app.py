@@ -559,12 +559,22 @@ def get_all_web_viewer_sids():
     return all_sids
 
 
-def process_frequency_map_file(original_filename, content, frequency, params, session_id):
-    """Process a single file for frequency map analysis"""
+def process_frequency_map_file(original_filename, content, frequency, params, session_id, total_electrodes=1, electrode_index=0):
+    """Process a single file for frequency map analysis
+
+    Args:
+        original_filename: Name of the file being processed
+        content: File content
+        frequency: Frequency in Hz
+        params: Analysis parameters
+        session_id: Session ID
+        total_electrodes: Total number of electrodes being processed for this file
+        electrode_index: Index of current electrode (0-based)
+    """
     temp_filepath = None
 
     try:
-        logger.info(f"FREQUENCY_MAP: Processing '{original_filename}' at {frequency}Hz")
+        logger.info(f"FREQUENCY_MAP: Processing '{original_filename}' at {frequency}Hz (electrode {electrode_index+1}/{total_electrodes})")
 
         # Create temporary file
         secure_name = secure_filename(f"freqmap_{frequency}Hz_{session_id}_{original_filename}")
@@ -649,18 +659,40 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
                 }, to=all_web_viewer_sids)
                 logger.info(f"FREQUENCY_MAP: Sent update to {len(all_web_viewer_sids)} web viewers")
 
-        # Send processing complete acknowledgment to agent
-        agent_sid = agent_session_tracker.get('agent_sid')
-        if agent_sid:
-            socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
-            logger.info(f"FREQUENCY_MAP: Sent processing complete ack for '{original_filename}' to agent")
+        # Track electrode completion for this file
+        file_processing_key = f"file_processing_{original_filename}"
+        file_progress = get_session_data(session_id, file_processing_key, {'completed': 0, 'total': total_electrodes})
+        file_progress['completed'] += 1
+        set_session_data(session_id, file_processing_key, file_progress)
+
+        logger.info(f"FREQUENCY_MAP: Electrode progress for '{original_filename}': {file_progress['completed']}/{file_progress['total']}")
+
+        # Only send acknowledgment when all electrodes are processed
+        if file_progress['completed'] >= file_progress['total']:
+            agent_sid = agent_session_tracker.get('agent_sid')
+            if agent_sid:
+                socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
+                logger.info(f"FREQUENCY_MAP: All electrodes complete - sent ack for '{original_filename}' to agent")
+            # Clean up tracking data
+            set_session_data(session_id, file_processing_key, None)
 
     except Exception as e:
         logger.error(f"FREQUENCY_MAP: Error processing '{original_filename}': {e}", exc_info=True)
-        # Send acknowledgment even if processing failed
-        agent_sid = agent_session_tracker.get('agent_sid')
-        if agent_sid:
-            socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
+
+        # Track electrode completion even on error
+        file_processing_key = f"file_processing_{original_filename}"
+        file_progress = get_session_data(session_id, file_processing_key, {'completed': 0, 'total': total_electrodes})
+        file_progress['completed'] += 1
+        set_session_data(session_id, file_processing_key, file_progress)
+
+        # Only send acknowledgment when all electrodes are processed (or failed)
+        if file_progress['completed'] >= file_progress['total']:
+            agent_sid = agent_session_tracker.get('agent_sid')
+            if agent_sid:
+                socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
+                logger.info(f"FREQUENCY_MAP: All electrodes complete (with errors) - sent ack for '{original_filename}' to agent")
+            # Clean up tracking data
+            set_session_data(session_id, file_processing_key, None)
     finally:
         if temp_filepath and os.path.exists(temp_filepath):
             os.remove(temp_filepath)
@@ -1604,7 +1636,8 @@ def handle_instrument_data(data):
 
         if selected_electrodes:
             # Process each selected electrode
-            for electrode_idx in selected_electrodes:
+            total_electrodes = len(selected_electrodes)
+            for idx, electrode_idx in enumerate(selected_electrodes):
                 params_for_this_file = live_analysis_params.copy()
                 params_for_this_file['selected_electrode'] = electrode_idx
                 params_for_this_file.setdefault('low_xstart', None)
@@ -1618,10 +1651,12 @@ def handle_instrument_data(data):
                     content=file_content,
                     frequency=frequency,
                     params=params_for_this_file,
-                    session_id=agent_session_id
+                    session_id=agent_session_id,
+                    total_electrodes=total_electrodes,
+                    electrode_index=idx
                 )
         else:
-            # Averaged electrode data
+            # Averaged electrode data (single task)
             params_for_this_file = live_analysis_params.copy()
             params_for_this_file.setdefault('low_xstart', None)
             params_for_this_file.setdefault('low_xend', None)
@@ -1634,7 +1669,9 @@ def handle_instrument_data(data):
                 content=file_content,
                 frequency=frequency,
                 params=params_for_this_file,
-                session_id=agent_session_id
+                session_id=agent_session_id,
+                total_electrodes=1,
+                electrode_index=0
             )
 
     else:
