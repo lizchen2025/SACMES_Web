@@ -335,7 +335,7 @@ def file_matches_filters(filename):
 
 
 def send_file_to_server(file_path):
-    global file_processing_complete, pending_file_ack
+    global file_processing_complete, pending_file_ack, is_monitoring_active
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
@@ -391,7 +391,7 @@ def send_file_to_server(file_path):
 
 
 def monitor_directory_loop(directory):
-    global processed_files
+    global processed_files, is_monitoring_active
     app.log(f"--- Started monitoring folder: '{directory}' ---")
     app.log(f"Current filters: {current_filters}")
 

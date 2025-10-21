@@ -439,8 +439,8 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
                     try:
                         session_keys = redis_client.keys("session:*")
                         for session_key in session_keys:
-                            if session_key.decode() != 'session:global_agent_session':
-                                session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                            # session_key is already a string due to decode_responses=True
+                            session_data = redis_client.hget(session_key, 'web_viewer_sids')
                                 if session_data:
                                     viewer_sids = json.loads(session_data)
                                     all_web_viewer_sids.extend(list(viewer_sids))
@@ -490,8 +490,8 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
             try:
                 session_keys = redis_client.keys("session:*")
                 for session_key in session_keys:
-                    if session_key.decode() != 'session:global_agent_session':  # Skip agent session
-                        session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                    # session_key is already a string due to decode_responses=True
+                    session_data = redis_client.hget(session_key, 'web_viewer_sids')
                         if session_data:
                             viewer_sids = json.loads(session_data)
                             all_web_viewer_sids.extend(list(viewer_sids))
@@ -499,8 +499,12 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
                 logger.error(f"Error getting all web viewers for CV update: {e}")
 
         # Also check fallback storage
-        if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
-            all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+        # Check fallback data for all sessions
+        if not all_web_viewer_sids:
+            with session_lock:
+                for sess_id, sess_data in fallback_data.items():
+                    if isinstance(sess_data, dict) and 'web_viewer_sids' in sess_data:
+                        all_web_viewer_sids.extend(list(sess_data['web_viewer_sids']))
 
         if all_web_viewer_sids:
             # Send CV update
@@ -538,17 +542,20 @@ def get_all_web_viewer_sids():
         try:
             session_keys = redis_client.keys("session:*")
             for session_key in session_keys:
-                if session_key.decode() != 'session:global_agent_session':
-                    session_data = redis_client.hget(session_key, 'web_viewer_sids')
-                    if session_data:
-                        viewer_sids = json.loads(session_data)
-                        all_sids.extend(list(viewer_sids))
+                # session_key is already a string due to decode_responses=True
+                session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                if session_data:
+                    viewer_sids = json.loads(session_data)
+                    all_sids.extend(list(viewer_sids))
         except Exception as e:
             logger.error(f"Error getting all web viewers: {e}")
 
-    # Fallback to in-memory storage
-    if not all_sids and fallback_data.get('web_viewer_sids'):
-        all_sids.extend(list(fallback_data['web_viewer_sids']))
+    # Fallback to in-memory storage for all sessions
+    if not all_sids:
+        with session_lock:
+            for sess_id, sess_data in fallback_data.items():
+                if isinstance(sess_data, dict) and 'web_viewer_sids' in sess_data:
+                    all_sids.extend(list(sess_data['web_viewer_sids']))
 
     return all_sids
 
@@ -686,8 +693,8 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                     try:
                         session_keys = redis_client.keys("session:*")
                         for session_key in session_keys:
-                            if session_key.decode() != 'session:global_agent_session':
-                                session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                            # session_key is already a string due to decode_responses=True
+                            session_data = redis_client.hget(session_key, 'web_viewer_sids')
                                 if session_data:
                                     viewer_sids = json.loads(session_data)
                                     all_web_viewer_sids.extend(list(viewer_sids))
@@ -785,8 +792,8 @@ def process_file_in_background(original_filename, content, params_for_this_file,
             try:
                 session_keys = redis_client.keys("session:*")
                 for session_key in session_keys:
-                    if session_key.decode() != 'session:global_agent_session':  # Skip agent session
-                        session_data = redis_client.hget(session_key, 'web_viewer_sids')
+                    # session_key is already a string due to decode_responses=True
+                    session_data = redis_client.hget(session_key, 'web_viewer_sids')
                         if session_data:
                             viewer_sids = json.loads(session_data)
                             all_web_viewer_sids.extend(list(viewer_sids))
@@ -794,8 +801,12 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                 logger.error(f"Error getting all web viewers for analysis update: {e}")
 
         # Also check fallback storage
-        if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
-            all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+        # Check fallback data for all sessions
+        if not all_web_viewer_sids:
+            with session_lock:
+                for sess_id, sess_data in fallback_data.items():
+                    if isinstance(sess_data, dict) and 'web_viewer_sids' in sess_data:
+                        all_web_viewer_sids.extend(list(sess_data['web_viewer_sids']))
 
         if all_web_viewer_sids:
             # Send update with electrode-specific information
@@ -1218,8 +1229,12 @@ def handle_connect():
                 logger.error(f"Error getting all web viewers: {e}")
 
         # Also check fallback storage
-        if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
-            all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+        # Check fallback data for all sessions
+        if not all_web_viewer_sids:
+            with session_lock:
+                for sess_id, sess_data in fallback_data.items():
+                    if isinstance(sess_data, dict) and 'web_viewer_sids' in sess_data:
+                        all_web_viewer_sids.extend(list(sess_data['web_viewer_sids']))
 
         if all_web_viewer_sids:
             emit('agent_status', {'status': 'connected'}, to=all_web_viewer_sids)
