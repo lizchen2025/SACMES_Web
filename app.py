@@ -441,9 +441,9 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
                         for session_key in session_keys:
                             # session_key is already a string due to decode_responses=True
                             session_data = redis_client.hget(session_key, 'web_viewer_sids')
-                                if session_data:
-                                    viewer_sids = json.loads(session_data)
-                                    all_web_viewer_sids.extend(list(viewer_sids))
+                            if session_data:
+                                viewer_sids = json.loads(session_data)
+                                all_web_viewer_sids.extend(list(viewer_sids))
                     except Exception as e:
                         logger.error(f"Error getting all web viewers for CV validation error: {e}")
 
@@ -492,13 +492,12 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
                 for session_key in session_keys:
                     # session_key is already a string due to decode_responses=True
                     session_data = redis_client.hget(session_key, 'web_viewer_sids')
-                        if session_data:
-                            viewer_sids = json.loads(session_data)
-                            all_web_viewer_sids.extend(list(viewer_sids))
+                    if session_data:
+                        viewer_sids = json.loads(session_data)
+                        all_web_viewer_sids.extend(list(viewer_sids))
             except Exception as e:
                 logger.error(f"Error getting all web viewers for CV update: {e}")
 
-        # Also check fallback storage
         # Check fallback data for all sessions
         if not all_web_viewer_sids:
             with session_lock:
@@ -695,9 +694,9 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                         for session_key in session_keys:
                             # session_key is already a string due to decode_responses=True
                             session_data = redis_client.hget(session_key, 'web_viewer_sids')
-                                if session_data:
-                                    viewer_sids = json.loads(session_data)
-                                    all_web_viewer_sids.extend(list(viewer_sids))
+                            if session_data:
+                                viewer_sids = json.loads(session_data)
+                                all_web_viewer_sids.extend(list(viewer_sids))
                     except Exception as e:
                         logger.error(f"Error getting all web viewers for validation error: {e}")
 
@@ -794,13 +793,12 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                 for session_key in session_keys:
                     # session_key is already a string due to decode_responses=True
                     session_data = redis_client.hget(session_key, 'web_viewer_sids')
-                        if session_data:
-                            viewer_sids = json.loads(session_data)
-                            all_web_viewer_sids.extend(list(viewer_sids))
+                    if session_data:
+                        viewer_sids = json.loads(session_data)
+                        all_web_viewer_sids.extend(list(viewer_sids))
             except Exception as e:
                 logger.error(f"Error getting all web viewers for analysis update: {e}")
 
-        # Also check fallback storage
         # Check fallback data for all sessions
         if not all_web_viewer_sids:
             with session_lock:
@@ -1228,7 +1226,6 @@ def handle_connect():
             except Exception as e:
                 logger.error(f"Error getting all web viewers: {e}")
 
-        # Also check fallback storage
         # Check fallback data for all sessions
         if not all_web_viewer_sids:
             with session_lock:
