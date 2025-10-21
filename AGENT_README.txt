@@ -14,9 +14,9 @@ QUICK START
 2. Double-click "start_agent.bat"
 
 3. On first run, the agent will automatically:
-   - Download a portable Python environment (25 MB)
+   - Download a full Python environment with GUI support (30 MB)
    - Install required packages (5 MB)
-   - This takes about 30-60 seconds with a good internet connection
+   - This takes about 1-2 minutes with a good internet connection
 
 4. After setup, the agent window will open automatically
 

@@ -54,7 +54,8 @@ The file will be available at: https://your-server/downloads/SACMES_Agent.zip
 1. Download SACMES_Agent.zip from the web interface
 2. Extract to any folder
 3. Double-click start_agent.bat
-4. First run automatically downloads Python (~25 MB) and dependencies (~5 MB)
+4. First run automatically downloads Python (~30 MB) and dependencies (~5 MB)
+   - Includes full Python with tkinter for GUI support
 5. Agent window opens automatically
 
 ## Benefits of This Approach
