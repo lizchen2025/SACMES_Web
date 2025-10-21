@@ -14,23 +14,40 @@ The SACMES_Agent.zip includes:
 - README.txt: User instructions
 - Netzlab.ico: Application icon
 
-## Automatic Packaging
+## Packaging the Agent
 
-GitHub Actions automatically creates the ZIP file when agent files are updated:
+When you update agent files, package them for distribution:
 
-1. Edit agent files (agent.py, start_agent.bat, etc.)
-2. Commit and push to mul branch
-3. GitHub Actions automatically packages to static/downloads/SACMES_Agent.zip
-4. The file is available at: https://your-server/downloads/SACMES_Agent.zip
+### Windows (Recommended)
 
-## Manual Packaging
+Simply run the packaging script:
 
-If needed, manually create the package:
+```bash
+package_agent.bat
+```
+
+This will create static/downloads/SACMES_Agent.zip automatically.
+
+### Manual Packaging
+
+Or use PowerShell directly:
 
 ```bash
 # From project root
 powershell -Command "Compress-Archive -Path 'agent.py','start_agent.bat','install_python.bat','AGENT_README.txt','Netzlab.ico' -DestinationPath 'static/downloads/SACMES_Agent.zip' -Force"
 ```
+
+### After Packaging
+
+Commit and deploy:
+
+```bash
+git add static/downloads/SACMES_Agent.zip
+git commit -m "Update agent package"
+git push origin mul
+```
+
+The file will be available at: https://your-server/downloads/SACMES_Agent.zip
 
 ## User Installation Process
 
