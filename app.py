@@ -202,14 +202,8 @@ session_lock = threading.Lock()
 active_sessions = {}  # {session_id: {'agent_sid': sid, 'web_viewer_sids': set(), ...}}
 
 # Global fallback for when Redis is not available
-fallback_data = {
-    'agent_sid': None,
-    'web_viewer_sids': set(),
-    'live_analysis_params': {},
-    'live_trend_data': {},
-    'live_peak_detection_warnings': {},
-    'validation_error_sent': False
-}
+# Changed to per-session storage to prevent data pollution between users
+fallback_data = {}  # {session_id: {'agent_sid': None, 'web_viewer_sids': set(), ...}}
 
 # --- Session Management Helper Functions ---
 def get_session_id():
@@ -229,8 +223,11 @@ def get_session_data(session_id, key, default=None):
         except Exception as e:
             logger.error(f"Redis get error for session {session_id}, key {key}: {e}")
 
-    # Fallback to in-memory storage
-    return fallback_data.get(key, default)
+    # Fallback to in-memory storage (per-session)
+    with session_lock:
+        if session_id not in fallback_data:
+            fallback_data[session_id] = {}
+        return fallback_data[session_id].get(key, default)
 
 def set_session_data(session_id, key, value):
     """Set session-specific data in Redis or fallback"""
@@ -244,8 +241,11 @@ def set_session_data(session_id, key, value):
         except Exception as e:
             logger.error(f"Redis set error for session {session_id}, key {key}: {e}")
 
-    # Fallback to in-memory storage
-    fallback_data[key] = value
+    # Fallback to in-memory storage (per-session)
+    with session_lock:
+        if session_id not in fallback_data:
+            fallback_data[session_id] = {}
+        fallback_data[session_id][key] = value
     return False
 
 def clear_session_data(session_id):
@@ -262,14 +262,9 @@ def clear_session_data(session_id):
         if session_id in active_sessions:
             del active_sessions[session_id]
 
-    # Clear fallback data (this affects all users when Redis is down)
-    for key in fallback_data:
-        if isinstance(fallback_data[key], dict):
-            fallback_data[key] = {}
-        elif isinstance(fallback_data[key], set):
-            fallback_data[key] = set()
-        else:
-            fallback_data[key] = None
+        # Clear fallback data for this specific session only
+        if session_id in fallback_data:
+            del fallback_data[session_id]
 
 def get_real_client_ip():
     """Get real client IP address, considering proxies and load balancers"""
@@ -452,8 +447,12 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
                     except Exception as e:
                         logger.error(f"Error getting all web viewers for CV validation error: {e}")
 
-                if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
-                    all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+                # Check fallback data for all sessions
+                if not all_web_viewer_sids:
+                    with session_lock:
+                        for sess_id, sess_data in fallback_data.items():
+                            if isinstance(sess_data, dict) and 'web_viewer_sids' in sess_data:
+                                all_web_viewer_sids.extend(list(sess_data['web_viewer_sids']))
 
                 if all_web_viewer_sids:
                     socketio.emit('electrode_validation_error', {
@@ -554,7 +553,7 @@ def get_all_web_viewer_sids():
     return all_sids
 
 
-def process_frequency_map_file(original_filename, content, frequency, params, session_id='global_agent_session'):
+def process_frequency_map_file(original_filename, content, frequency, params, session_id):
     """Process a single file for frequency map analysis"""
     temp_filepath = None
 
@@ -695,8 +694,12 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                     except Exception as e:
                         logger.error(f"Error getting all web viewers for validation error: {e}")
 
-                if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
-                    all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+                # Check fallback data for all sessions
+                if not all_web_viewer_sids:
+                    with session_lock:
+                        for sess_id, sess_data in fallback_data.items():
+                            if isinstance(sess_data, dict) and 'web_viewer_sids' in sess_data:
+                                all_web_viewer_sids.extend(list(sess_data['web_viewer_sids']))
 
                 if all_web_viewer_sids:
                     socketio.emit('electrode_validation_error', {
@@ -824,7 +827,7 @@ def process_file_in_background(original_filename, content, params_for_this_file,
 
 
 # --- *** NEW *** HELPER FUNCTION TO GENERATE CSV DATA ---
-def generate_csv_data(current_electrode=None, session_id='global_agent_session'):
+def generate_csv_data(session_id, current_electrode=None):
     """
     Generates a CSV formatted string from the current trend data with filter parameters and QC metrics.
 
@@ -950,10 +953,13 @@ def generate_csv_data(current_electrode=None, session_id='global_agent_session')
     return string_io.getvalue()
 
 
-def generate_csv_data_all_electrodes(session_id='global_agent_session'):
+def generate_csv_data_all_electrodes(session_id):
     """
     Generates a CSV formatted string with all electrodes data combined, including mean and std.
     Filter parameters are hidden, QC warnings are listed at the end.
+
+    Args:
+        session_id: The session ID to get data from.
     """
     # Get session data
     live_trend_data = get_session_data(session_id, 'live_trend_data', {})
@@ -1184,8 +1190,9 @@ def handle_connect():
     token = auth_header.split(' ')[1] if auth_header and auth_header.startswith('Bearer ') else None
 
     if token and token == AGENT_AUTH_TOKEN:
-        # For agents: use a global session approach
-        agent_session_id = 'global_agent_session'
+        # For agents: create a unique session for this agent connection
+        # This prevents data pollution between multiple concurrent agent sessions
+        agent_session_id = str(uuid.uuid4())
         session['session_id'] = agent_session_id
         session_id = agent_session_id
 
@@ -1262,9 +1269,11 @@ def handle_disconnect():
             # Only clear if no new agent has connected
             if agent_session_tracker.get('agent_sid') == disconnected_sid:
                 logger.warning(f"Agent {disconnected_sid} did not reconnect. Cleaning up...")
+                disconnected_session = agent_session_tracker.get('current_session')
                 agent_session_tracker['current_session'] = None
                 agent_session_tracker['agent_sid'] = None
-                set_session_agent_sid('global_agent_session', None)
+                if disconnected_session:
+                    set_session_agent_sid(disconnected_session, None)
 
                 # Notify all web viewers
                 all_web_viewer_sids = []
@@ -1279,8 +1288,12 @@ def handle_disconnect():
                     except Exception as e:
                         logger.error(f"Error getting all web viewers for disconnect: {e}")
 
-                if not all_web_viewer_sids and fallback_data.get('web_viewer_sids'):
-                    all_web_viewer_sids.extend(list(fallback_data['web_viewer_sids']))
+                # Check fallback data for all sessions
+                if not all_web_viewer_sids:
+                    with session_lock:
+                        for sess_id, sess_data in fallback_data.items():
+                            if isinstance(sess_data, dict) and 'web_viewer_sids' in sess_data:
+                                all_web_viewer_sids.extend(list(sess_data['web_viewer_sids']))
 
                 if all_web_viewer_sids:
                     socketio.emit('agent_status', {'status': 'disconnected'}, to=all_web_viewer_sids)
@@ -1363,29 +1376,24 @@ def handle_start_analysis_session(data):
     # Use global agent tracker
     agent_sid = agent_session_tracker.get('agent_sid')
 
-    # Fallback: check global agent session
-    if not agent_sid:
-        agent_sid = get_session_agent_sid('global_agent_session')
-        if agent_sid:
-            agent_session_tracker['agent_sid'] = agent_sid
-            logger.info(f"Retrieved agent SID from storage: {agent_sid}")
-
     if 'filters' in data and agent_sid:
         live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
         filters = data['filters']
         filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
 
-        # Store analysis params in global agent session for data processing
-        set_session_data('global_agent_session', 'live_analysis_params', data['analysisParams'])
-        set_session_data('global_agent_session', 'live_trend_data', {"raw_peaks": {}})
-        set_session_data('global_agent_session', 'live_peak_detection_warnings', {})
-        set_session_data('global_agent_session', 'validation_error_sent', False)
+        # Store analysis params in agent's session for data processing
+        agent_session_id = agent_session_tracker.get('current_session')
+        if agent_session_id:
+            set_session_data(agent_session_id, 'live_analysis_params', data['analysisParams'])
+            set_session_data(agent_session_id, 'live_trend_data', {"raw_peaks": {}})
+            set_session_data(agent_session_id, 'live_peak_detection_warnings', {})
+            set_session_data(agent_session_id, 'validation_error_sent', False)
 
-        logger.info(f"Sending filters to global agent {agent_sid}: {filters}")
+        logger.info(f"Sending filters to agent {agent_sid}: {filters}")
         emit('set_filters', filters, to=agent_sid)
         emit('ack_start_session', {'status': 'success', 'message': 'Instructions sent.'})
     elif not agent_sid:
-        logger.warning("No global agent found")
+        logger.warning("No agent found")
         emit('ack_start_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
 
 
@@ -1403,28 +1411,23 @@ def handle_start_cv_analysis_session(data):
     # Use global agent tracker
     agent_sid = agent_session_tracker.get('agent_sid')
 
-    # Fallback: check global agent session
-    if not agent_sid:
-        agent_sid = get_session_agent_sid('global_agent_session')
-        if agent_sid:
-            agent_session_tracker['agent_sid'] = agent_sid
-            logger.info(f"Retrieved agent SID from storage for CV: {agent_sid}")
-
     if 'filters' in data and agent_sid:
         live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
         filters = data['filters']
         filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
 
-        # Store CV analysis params in global agent session for data processing
-        set_session_data('global_agent_session', 'live_analysis_params', data['analysisParams'])
-        set_session_data('global_agent_session', 'live_trend_data', {"cv_results": {}})
-        set_session_data('global_agent_session', 'validation_error_sent', False)
+        # Store CV analysis params in agent's session for data processing
+        agent_session_id = agent_session_tracker.get('current_session')
+        if agent_session_id:
+            set_session_data(agent_session_id, 'live_analysis_params', data['analysisParams'])
+            set_session_data(agent_session_id, 'live_trend_data', {"cv_results": {}})
+            set_session_data(agent_session_id, 'validation_error_sent', False)
 
-        logger.info(f"Sending CV filters to global agent {agent_sid}: {filters}")
+        logger.info(f"Sending CV filters to agent {agent_sid}: {filters}")
         emit('set_filters', filters, to=agent_sid)
         emit('ack_start_cv_session', {'status': 'success', 'message': 'CV Instructions sent.'})
     elif not agent_sid:
-        logger.warning("No global agent found for CV analysis")
+        logger.warning("No agent found for CV analysis")
         emit('ack_start_cv_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
 
 
@@ -1493,32 +1496,27 @@ def handle_start_frequency_map_session(data):
     # Use global agent tracker
     agent_sid = agent_session_tracker.get('agent_sid')
 
-    # Fallback: check global agent session
-    if not agent_sid:
-        agent_sid = get_session_agent_sid('global_agent_session')
-        if agent_sid:
-            agent_session_tracker['agent_sid'] = agent_sid
-            logger.info(f"Retrieved agent SID from storage for frequency map: {agent_sid}")
-
     if 'filters' in data and agent_sid:
         filters = data['filters']
         filters['analysis_mode'] = 'frequency_map'
         filters['frequencies'] = data.get('frequencies', [])
         filters['file_extension'] = data['analysisParams'].get('file_extension', '.txt')
 
-        # Store in global agent session for data processing
-        set_session_data('global_agent_session', 'live_analysis_params', data['analysisParams'])
-        set_session_data('global_agent_session', 'frequency_map_data', {
-            'frequencies': data.get('frequencies', []),
-            'results': {}
-        })
-        set_session_data('global_agent_session', 'validation_error_sent', False)
+        # Store in agent's session for data processing
+        agent_session_id = agent_session_tracker.get('current_session')
+        if agent_session_id:
+            set_session_data(agent_session_id, 'live_analysis_params', data['analysisParams'])
+            set_session_data(agent_session_id, 'frequency_map_data', {
+                'frequencies': data.get('frequencies', []),
+                'results': {}
+            })
+            set_session_data(agent_session_id, 'validation_error_sent', False)
 
-        logger.info(f"Sending frequency map filters to global agent {agent_sid}: {filters}")
+        logger.info(f"Sending frequency map filters to agent {agent_sid}: {filters}")
         emit('set_filters', filters, to=agent_sid)
         emit('ack_start_frequency_map_session', {'status': 'success', 'message': 'Frequency map instructions sent.'})
     elif not agent_sid:
-        logger.warning("No global agent found for frequency map")
+        logger.warning("No agent found for frequency map")
         emit('ack_start_frequency_map_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
 
 
@@ -1542,14 +1540,20 @@ def handle_stop_frequency_map_session(data):
 
 @socketio.on('stream_instrument_data')
 def handle_instrument_data(data):
-    # Verify this is from the global agent
+    # Verify this is from the agent and get the agent's session
     if request.sid != agent_session_tracker.get('agent_sid'):
         logger.warning(f"Received data from non-agent SID: {request.sid}")
         return
 
+    # Get the agent's session ID from the tracker
+    agent_session_id = agent_session_tracker.get('current_session')
+    if not agent_session_id:
+        logger.error("No active agent session found")
+        return
+
     original_filename = data.get('filename', 'unknown_file.txt')
     file_content = data.get('content', '')
-    logger.info(f"Received data from agent: {original_filename}")
+    logger.info(f"Received data from agent (session {agent_session_id}): {original_filename}")
 
     # SAFETY VALIDATION: Check file safety before processing
     is_safe, error_message = validate_file_safety(original_filename, file_content)
@@ -1562,8 +1566,8 @@ def handle_instrument_data(data):
         }, to=request.sid)
         return
 
-    # Use global agent session for analysis parameters
-    live_analysis_params = get_session_data('global_agent_session', 'live_analysis_params', {})
+    # Use the agent's session for analysis parameters
+    live_analysis_params = get_session_data(agent_session_id, 'live_analysis_params', {})
     if not live_analysis_params:
         logger.warning("No analysis parameters found in global agent session")
         return
@@ -1602,7 +1606,7 @@ def handle_instrument_data(data):
                     content=file_content,
                     frequency=frequency,
                     params=params_for_this_file,
-                    session_id='global_agent_session'
+                    session_id=agent_session_id
                 )
         else:
             # Averaged electrode data
@@ -1618,7 +1622,7 @@ def handle_instrument_data(data):
                 content=file_content,
                 frequency=frequency,
                 params=params_for_this_file,
-                session_id='global_agent_session'
+                session_id=agent_session_id
             )
 
     else:
@@ -1640,7 +1644,7 @@ def handle_instrument_data(data):
                                              original_filename=f"{original_filename}_electrode_{electrode_idx}",
                                              content=file_content,
                                              params_for_this_file=params_for_this_file,
-                                             session_id='global_agent_session')
+                                             session_id=agent_session_id)
         else:
             # Original averaging behavior
             params_for_this_file = live_analysis_params.copy()
@@ -1654,15 +1658,23 @@ def handle_instrument_data(data):
                                          original_filename=original_filename,
                                          content=file_content,
                                          params_for_this_file=params_for_this_file,
-                                         session_id='global_agent_session')
+                                         session_id=agent_session_id)
 
 
 @socketio.on('stream_cv_data')
 def handle_cv_instrument_data(data):
-    session_id = get_session_id()
-    agent_sid = get_session_agent_sid(session_id)
-    if request.sid != agent_sid:
+    # Verify this is from the agent and get the agent's session (same logic as SWV)
+    if request.sid != agent_session_tracker.get('agent_sid'):
+        logger.warning(f"Received CV data from non-agent SID: {request.sid}")
         return
+
+    # Get the agent's session ID from the tracker
+    agent_session_id = agent_session_tracker.get('current_session')
+    if not agent_session_id:
+        logger.error("No active agent session found for CV data")
+        return
+
+    session_id = agent_session_id
 
     original_filename = data.get('filename', 'unknown_file.txt')
     file_content = data.get('content', '')
@@ -1715,13 +1727,6 @@ def handle_get_cv_preview(data):
         # Get agent_sid from the global agent tracker
         agent_sid = agent_session_tracker.get('agent_sid')
 
-        # Fallback: check global agent session
-        if not agent_sid:
-            agent_sid = get_session_agent_sid('global_agent_session')
-            if agent_sid:
-                agent_session_tracker['agent_sid'] = agent_sid
-                logger.info(f"Retrieved agent SID from storage for CV preview: {agent_sid}")
-
         if not agent_sid:
             logger.warning("No agent connected for CV preview request")
             emit('cv_preview_response', {'status': 'error', 'message': 'Agent not connected'})
@@ -1767,8 +1772,13 @@ def handle_get_cv_segments(data):
         file_content = data.get('content', '')
         analysis_params = data.get('params', {})
 
-        # Try to use preview content from session first to avoid large payload transfers
-        session_id = 'global_agent_session'
+        # Try to use preview content from agent's session first to avoid large payload transfers
+        agent_session_id = agent_session_tracker.get('current_session')
+        if not agent_session_id:
+            logger.error("No active agent session for CV segments")
+            emit('cv_segments_response', {'status': 'error', 'message': 'No active agent session found.'})
+            return
+        session_id = agent_session_id
         if not file_content:
             file_content = get_session_data(session_id, 'cv_preview_content', '')
             if file_content:
@@ -1817,10 +1827,17 @@ def process_cv_segments_background(data, client_sid):
         analysis_params = data.get('params', {})
         selected_electrode = analysis_params.get('selected_electrode')
 
-        # If no content provided, try to get from session (preview content)
+        # If no content provided, try to get from agent's session (preview content)
         if not file_content:
-            session_id = 'global_agent_session'
-            file_content = get_session_data(session_id, 'cv_preview_content', '')
+            agent_session_id = agent_session_tracker.get('current_session')
+            if not agent_session_id:
+                logger.error("No active agent session for CV segments preview content")
+                socketio.emit('cv_segments_response', {
+                    'status': 'error',
+                    'message': 'No active agent session found.'
+                }, room=client_sid)
+                return
+            file_content = get_session_data(agent_session_id, 'cv_preview_content', '')
             if file_content:
                 logger.info(f"Retrieved CV preview content from session ({len(file_content)} bytes)")
             else:
@@ -2018,10 +2035,11 @@ def handle_cv_data_from_agent(data):
                             requesting_client_sid = analysis_params.get('requesting_client_sid')
                             logger.info(f"Sending CV preview response to original client: {requesting_client_sid}")
 
-                            # Store preview content in session for segment detection (avoid re-sending large data)
-                            session_id = 'global_agent_session'
-                            set_session_data(session_id, 'cv_preview_content', file_content)
-                            set_session_data(session_id, 'cv_preview_client_sid', requesting_client_sid)
+                            # Store preview content in agent's session for segment detection (avoid re-sending large data)
+                            agent_session_id = agent_session_tracker.get('current_session')
+                            if agent_session_id:
+                                set_session_data(agent_session_id, 'cv_preview_content', file_content)
+                                set_session_data(agent_session_id, 'cv_preview_client_sid', requesting_client_sid)
                             logger.info(f"Stored CV preview content in session ({len(file_content)} bytes)")
 
                             # Send the CV data for preview visualization (without content to reduce payload)
@@ -2063,8 +2081,12 @@ def handle_cv_data_from_agent(data):
             # Regular analysis mode - use existing logic
             original_filename = data.get('filename', 'unknown_file.txt')
 
-            # Use global agent session for CV analysis parameters
-            session_id = 'global_agent_session'
+            # Use agent's session for CV analysis parameters
+            agent_session_id = agent_session_tracker.get('current_session')
+            if not agent_session_id:
+                logger.error("No active agent session for CV file processing")
+                return
+            session_id = agent_session_id
             live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
             if not live_analysis_params:
                 logger.warning(f"No CV analysis parameters found in global agent session for file: {original_filename}")
@@ -2117,8 +2139,15 @@ def handle_export_request(data):
     """
     logger.info(f"Received 'request_export_data' from {request.sid} with data: {data}")
     try:
+        # Get the agent's session ID
+        agent_session_id = agent_session_tracker.get('current_session')
+        if not agent_session_id:
+            logger.error("No active agent session for SWV export")
+            emit('export_data_response', {'status': 'error', 'message': 'No active agent session found.'})
+            return
+
         # Export all electrodes
-        csv_data = generate_csv_data_all_electrodes()
+        csv_data = generate_csv_data_all_electrodes(agent_session_id)
         if csv_data:
             emit('export_data_response', {'status': 'success', 'data': csv_data})
         else:
@@ -2136,8 +2165,15 @@ def handle_cv_export_request(data):
     """
     logger.info(f"Received 'request_export_cv_data' from {request.sid} with data: {data}")
     try:
+        # Get the agent's session ID
+        agent_session_id = agent_session_tracker.get('current_session')
+        if not agent_session_id:
+            logger.error("No active agent session for CV export")
+            emit('export_cv_data_response', {'status': 'error', 'message': 'No active agent session found.'})
+            return
+
         # Export all electrodes
-        csv_data = generate_cv_csv_data_all_electrodes()
+        csv_data = generate_cv_csv_data_all_electrodes(agent_session_id)
         if csv_data:
             emit('export_cv_data_response', {'status': 'success', 'data': csv_data})
         else:
@@ -2179,6 +2215,15 @@ def handle_electrode_warnings_request(data):
     """
     logger.info(f"Received 'request_electrode_warnings' from {request.sid} with data: {data}")
     try:
+        # Get the agent's session ID
+        agent_session_id = agent_session_tracker.get('current_session')
+        if not agent_session_id:
+            logger.error("No active agent session for warnings request")
+            emit('electrode_warnings_response', {'status': 'error', 'message': 'No active agent session found.'})
+            return
+
+        # Get warnings from session data
+        live_peak_detection_warnings = get_session_data(agent_session_id, 'live_peak_detection_warnings', {})
         electrode_index = data.get('electrode_index')
         electrode_key = str(electrode_index) if electrode_index is not None else 'averaged'
         warnings = live_peak_detection_warnings.get(electrode_key, [])
@@ -2344,15 +2389,15 @@ def debug_consent_logs():
         return {'status': 'error', 'message': str(e)}, 500
 
 
-def generate_cv_csv_data(current_electrode=None):
+def generate_cv_csv_data(session_id, current_electrode=None):
     """
     Generates a CSV formatted string from the current CV analysis data with AUC and peak separation data.
 
     Args:
+        session_id: The session ID to get data from.
         current_electrode: The electrode index to export data for (None for averaged data).
     """
     # Get CV results from session data
-    session_id = 'global_agent_session'
     live_trend_data = get_session_data(session_id, 'live_trend_data', {})
     live_cv_results = live_trend_data.get('cv_results', {})
 
@@ -2472,12 +2517,14 @@ def generate_cv_csv_data(current_electrode=None):
     return string_io.getvalue()
 
 
-def generate_cv_csv_data_all_electrodes():
+def generate_cv_csv_data_all_electrodes(session_id):
     """
     Generates a CSV formatted string with all electrodes CV data combined, including mean and std.
+
+    Args:
+        session_id: The session ID to get data from.
     """
     # Get CV results from session data
-    session_id = 'global_agent_session'
     live_trend_data = get_session_data(session_id, 'live_trend_data', {})
     live_cv_results = live_trend_data.get('cv_results', {})
 
@@ -2869,7 +2916,7 @@ def generate_cv_csv_data_all_electrodes():
     return string_io.getvalue()
 
 
-def generate_frequency_map_csv_data(session_id='global_agent_session', current_electrode=None):
+def generate_frequency_map_csv_data(session_id, current_electrode=None):
     """
     Generates a CSV formatted string from Frequency Map analysis data.
 
@@ -2986,7 +3033,7 @@ def generate_frequency_map_csv_data(session_id='global_agent_session', current_e
     return string_io.getvalue()
 
 
-def generate_frequency_map_all_electrodes_csv(session_id='global_agent_session'):
+def generate_frequency_map_all_electrodes_csv(session_id):
     """
     Generates CSV with all electrodes data combined, including mean and std.
 
