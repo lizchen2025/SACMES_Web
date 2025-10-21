@@ -1051,12 +1051,21 @@ export class SWVModule {
             console.log(`Expected frequencies: [${this.state.currentFrequencies.sort((a, b) => a - b).join(', ')}]`);
             console.log(`Analyzed frequencies: [${this.state.analyzedFrequencies[electrodeKey].join(', ')}]`);
 
+            // Check if all frequencies complete for THIS electrode
+            const electrodeComplete = this.state.analyzedFrequencies[electrodeKey].length === this.state.currentFrequencies.length;
+
             // Only update visualization if this is the currently displayed electrode
             if (electrode_index === this.state.currentElectrode) {
                 this._updateFrequencyMapStats();
 
-                // Update voltammogram plot (top) - only for NEW frequency
-                this._updateFrequencyMapVoltammogram(freqData);
+                if (electrodeComplete) {
+                    // Show overlay if all frequencies are complete for current electrode
+                    console.log(`All frequencies complete for electrode ${electrodeKey} - showing overlay`);
+                    this._updateFrequencyMapOverlay();
+                } else {
+                    // Update voltammogram plot (top) - only for NEW frequency
+                    this._updateFrequencyMapVoltammogram(freqData);
+                }
 
                 // Update frequency-charge plot (bottom) - cumulative
                 this._updateFrequencyChargeChart();
@@ -1100,18 +1109,7 @@ export class SWVModule {
     _updateFrequencyMapVoltammogram(freqData) {
         const plotDiv = this.dom.visualization.frequencyMapVoltammogramPlot;
 
-        // Check if all frequencies are analyzed for current electrode
-        const electrodeKey = this.state.currentElectrode !== null ? this.state.currentElectrode.toString() : 'averaged';
-        const analyzedFreqs = this.state.analyzedFrequencies[electrodeKey] || [];
-        const allFrequenciesComplete = analyzedFreqs.length === this.state.currentFrequencies.length;
-
-        if (allFrequenciesComplete) {
-            // Show overlay plot with all frequencies
-            this._updateFrequencyMapOverlay();
-            return;
-        }
-
-        // Show individual frequency plot (before all complete)
+        // Show individual frequency plot
         const traces = [];
 
         // Smoothed data trace
