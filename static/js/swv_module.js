@@ -560,13 +560,20 @@ export class SWVModule {
         // Check analysis mode and setup appropriate visualization
         if (this.state.analysisMode === 'frequency_map') {
             // Frequency Map mode
+            console.log('=== Starting Frequency Map Mode ===');
+            console.log('Analysis mode:', this.state.analysisMode);
+
             this._setupFrequencyMapVisualization();
             this._setupElectrodeControls();  // Show electrode controls
+
+            console.log('Switching to visualizationArea...');
             this.uiManager.showScreen('visualizationArea');
 
             // Hide continuous monitor specific controls
             this.dom.visualization.adjustmentControls.classList.add('hidden');
             this.dom.visualization.exportDataBtn.classList.add('hidden');
+
+            console.log('Frequency map visualization setup complete');
 
             // Clear frequency map data for current electrode
             const electrodeKey = this.state.currentElectrode !== null ? this.state.currentElectrode.toString() : 'averaged';
@@ -597,6 +604,9 @@ export class SWVModule {
 
     _setupFrequencyMapVisualization() {
         console.log('Setting up Frequency Map visualization...');
+
+        // Clean up any CV remnants before setting up frequency map visualization
+        this._cleanupCVRemnants();
 
         // Hide continuous monitor containers
         if (this.dom.visualization.continuousMonitorContainer) {

@@ -1947,8 +1947,24 @@ export class CVModule {
             console.log('CV Cleanup: Showed back to SWV button');
         }
 
-        // Restore SWV trend plots container visibility and structure
+        // Restore SWV containers visibility
+        const continuousMonitorContainer = document.getElementById('continuousMonitorContainer');
+        const frequencyMapContainer = document.getElementById('frequencyMapContainer');
         const trendPlotsContainer = document.getElementById('trendPlotsContainer');
+
+        // Ensure continuousMonitorContainer is visible (SWV default)
+        if (continuousMonitorContainer) {
+            continuousMonitorContainer.classList.remove('hidden');
+            console.log('CV Cleanup: Restored continuousMonitorContainer visibility');
+        }
+
+        // Ensure frequencyMapContainer is hidden (SWV will show it if needed)
+        if (frequencyMapContainer) {
+            frequencyMapContainer.classList.add('hidden');
+            console.log('CV Cleanup: Hid frequencyMapContainer');
+        }
+
+        // Restore trend plots container structure
         if (trendPlotsContainer) {
             trendPlotsContainer.style.display = '';
 
