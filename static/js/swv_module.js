@@ -631,6 +631,21 @@ export class SWVModule {
         // Clean up any CV remnants before setting up frequency map visualization
         this._cleanupCVRemnants();
 
+        // DEBUG: Check if plot divs exist after cleanup
+        const voltammogramPlot = document.getElementById('frequencyMapVoltammogramPlot');
+        const chargePlot = document.getElementById('frequencyMapChargePlot');
+        console.log('=== Frequency Map Plot Divs Check (after cleanup) ===');
+        console.log('frequencyMapVoltammogramPlot exists:', !!voltammogramPlot);
+        console.log('frequencyMapVoltammogramPlot innerHTML:', voltammogramPlot?.innerHTML.substring(0, 100));
+        console.log('frequencyMapChargePlot exists:', !!chargePlot);
+        console.log('frequencyMapChargePlot innerHTML:', chargePlot?.innerHTML.substring(0, 100));
+
+        // If plot divs don't exist or are damaged, recreate them
+        if (!voltammogramPlot || !chargePlot) {
+            console.warn('Plot divs missing after cleanup - attempting to restore...');
+            this._restoreFrequencyMapPlotDivs();
+        }
+
         // Hide continuous monitor containers
         if (this.dom.visualization.continuousMonitorContainer) {
             console.log('Hiding continuousMonitorContainer');
@@ -654,6 +669,48 @@ export class SWVModule {
         }
 
         console.log('Frequency Map visualization setup complete');
+    }
+
+    _restoreFrequencyMapPlotDivs() {
+        console.log('Restoring frequency map plot divs...');
+        const container = document.getElementById('frequencyMapContainer');
+        if (!container) {
+            console.error('Cannot restore - frequencyMapContainer not found!');
+            return;
+        }
+
+        // Recreate the entire frequency map structure
+        container.innerHTML = `
+            <div class="grid grid-cols-1 gap-6">
+                <!-- Voltammogram Plot (Top) -->
+                <div class="border rounded-lg p-4 bg-gradient-to-r from-blue-50 to-purple-50">
+                    <h4 class="text-lg font-semibold text-gray-700 mb-2">Current Voltammogram</h4>
+                    <div id="frequencyMapVoltammogramPlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                        <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
+                    </div>
+                    <p id="currentFrequencyLabel" class="text-sm text-gray-600 mt-2 text-center">No frequency selected</p>
+                </div>
+
+                <!-- Frequency vs Charge Plot (Bottom) -->
+                <div class="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-pink-50">
+                    <h4 class="text-lg font-semibold text-gray-700 mb-2">Frequency Map: Charge vs Frequency</h4>
+                    <div id="frequencyMapChargePlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                        <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2 text-center">Logarithmic frequency scale</p>
+                </div>
+
+                <!-- Frequency Map Statistics -->
+                <div class="border rounded-lg p-4 bg-blue-50">
+                    <h4 class="text-md font-semibold text-gray-700 mb-2">Analysis Progress</h4>
+                    <div id="frequencyMapStats" class="text-sm text-gray-600">
+                        <p>Frequencies analyzed: <span id="analyzedFrequenciesCount" class="font-bold">0</span></p>
+                        <p>Latest frequency: <span id="latestFrequency" class="font-bold">-</span> Hz</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        console.log('Frequency map plot divs restored');
     }
     
     _updateIndividualPlotsUI(filename, individual_analysis) {

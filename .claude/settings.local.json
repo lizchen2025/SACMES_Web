@@ -12,7 +12,10 @@
       "Bash(pip show:*)",
       "Bash(where python)",
       "Bash(D:minicondapython.exe -m pip show cx_Freeze)",
-      "Bash(del setup.py)"
+      "Bash(del setup.py)",
+      "Bash(timeout /t 3 /nobreak)",
+      "Bash(where:*)",
+      "Bash(python3:*)"
     ],
     "deny": [],
     "ask": []

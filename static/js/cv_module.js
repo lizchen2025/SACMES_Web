@@ -1369,13 +1369,24 @@ export class CVModule {
             return;
         }
 
-        // Remove old layout elements and text summaries only
+        // Remove old CV layout elements only - DO NOT remove SWV elements
         const oldPlots = visualizationArea.querySelectorAll('.cv-plot-container, .cv-summary-plots');
         oldPlots.forEach(plot => plot.remove());
 
-        // Remove text summaries
-        const textSummaries = visualizationArea.querySelectorAll('.analysis-summary, .border');
+        // Remove CV-specific text summaries only
+        // IMPORTANT: Do NOT remove all .border elements as this would damage SWV frequency map containers
+        const textSummaries = visualizationArea.querySelectorAll('.analysis-summary');
         textSummaries.forEach(summary => summary.remove());
+
+        // Only remove .border elements that are direct children of visualizationArea
+        // and NOT inside frequencyMapContainer or continuousMonitorContainer (SWV elements)
+        const borderElements = Array.from(visualizationArea.querySelectorAll(':scope > .border'));
+        borderElements.forEach(element => {
+            // Double-check this is not an SWV container
+            if (element.id !== 'frequencyMapContainer' && element.id !== 'continuousMonitorContainer') {
+                element.remove();
+            }
+        });
 
         // Create new layout: left side segments, right side comprehensive analysis
         const mainContainer = document.createElement('div');
