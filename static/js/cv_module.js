@@ -729,6 +729,11 @@ export class CVModule {
         const existingButtons = electrodeControls.querySelectorAll('.electrode-btn');
         existingButtons.forEach(btn => btn.remove());
 
+        // Get actual available electrodes from CV results
+        const availableElectrodes = Object.keys(this.state.cvResults).filter(key => key !== 'averaged');
+        console.log('CV: Available electrodes in results:', availableElectrodes);
+        console.log('CV: Selected electrodes:', this.state.selectedElectrodes);
+
         // Add "Averaged" button if no specific electrodes selected
         if (this.state.selectedElectrodes.length === 0) {
             const avgBtn = document.createElement('button');
@@ -737,23 +742,38 @@ export class CVModule {
             avgBtn.disabled = true; // Current selection
             electrodeControls.appendChild(avgBtn);
         } else {
-            // Add buttons for each selected electrode
+            // Add buttons for each selected electrode, but only if data exists
             this.state.selectedElectrodes.forEach(electrodeIdx => {
+                const electrodeKey = electrodeIdx.toString();
+                const hasData = availableElectrodes.includes(electrodeKey);
+
                 const btn = document.createElement('button');
                 btn.className = `electrode-btn px-4 py-2 text-sm font-medium rounded-lg border ${
                     electrodeIdx === this.state.currentElectrode
                         ? 'bg-blue-500 text-white'
-                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                        : hasData
+                            ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                 }`;
                 btn.textContent = `Electrode ${electrodeIdx + 1}`;  // Display as 1-based
-                btn.onclick = () => this._switchCVElectrode(electrodeIdx);
+
+                if (hasData) {
+                    btn.onclick = () => this._switchCVElectrode(electrodeIdx);
+                } else {
+                    btn.disabled = true;
+                    btn.title = 'No data for this electrode';
+                }
+
                 electrodeControls.appendChild(btn);
             });
         }
     }
 
     _switchCVElectrode(electrodeIdx) {
-        if (this.state.currentElectrode === electrodeIdx) return;
+        if (this.state.currentElectrode === electrodeIdx) {
+            console.log(`CV: Already on electrode ${electrodeIdx}, ignoring switch`);
+            return;
+        }
 
         console.log(`=== CV Electrode Switch ===`);
         console.log(`Switching from electrode ${this.state.currentElectrode} to ${electrodeIdx}`);
@@ -761,22 +781,25 @@ export class CVModule {
 
         const newElectrodeKey = electrodeIdx?.toString() || 'averaged';
         const newElectrodeData = this.state.cvResults[newElectrodeKey];
-        console.log(`New electrode ${newElectrodeKey} data:`, newElectrodeData);
 
-        if (newElectrodeData) {
-            console.log(`Electrode ${newElectrodeKey} has ${Object.keys(newElectrodeData).length} files`);
-            Object.keys(newElectrodeData).forEach(fileNum => {
-                const fileData = newElectrodeData[fileNum];
-                console.log(`  File ${fileNum}: Forward peak = ${fileData?.forward?.peak_current}, Reverse peak = ${fileData?.reverse?.peak_current}`);
-            });
-        } else {
-            console.log(`No data found for electrode ${newElectrodeKey}`);
+        if (!newElectrodeData) {
+            console.warn(`CV: No data available for electrode ${newElectrodeKey}`);
+            alert(`No data available for electrode ${electrodeIdx + 1}. The file may only contain fewer electrodes.`);
+            return;
         }
 
+        console.log(`Electrode ${newElectrodeKey} has ${Object.keys(newElectrodeData).length} files`);
+        Object.keys(newElectrodeData).forEach(fileNum => {
+            const fileData = newElectrodeData[fileNum];
+            console.log(`  File ${fileNum}: Forward peak = ${fileData?.forward?.peak_current}, Reverse peak = ${fileData?.reverse?.peak_current}`);
+        });
+
         this.state.currentElectrode = electrodeIdx;
+        console.log('CV: Updating UI for new electrode...');
         this._setupCVElectrodeControls(); // Update button states
         this._displayCVResults(); // Refresh plots with new electrode data
         this._updateCVSummaryPlots(); // Update summary plots for new electrode
+        console.log('CV: Electrode switch complete');
     }
 
     _displayCVResults() {
@@ -1829,6 +1852,8 @@ export class CVModule {
     }
 
     _resetAnalysis() {
+        console.log('CV: Resetting analysis and cleaning up...');
+
         this.state.isAnalysisRunning = false;
         this.state.cvResults = {};
         this.state.previewFileContent = null;
@@ -1838,6 +1863,8 @@ export class CVModule {
         this.state.reverseSegments = [];
         this.state.originalCVData = null;
         this.state.currentScreen = 'settings';
+        this.state.currentElectrode = null;  // Reset current electrode
+        this.state.selectedElectrodes = [];  // Reset selected electrodes
         this.dom.startAnalysisBtn.textContent = 'Start CV Analysis & Sync';
         this.dom.startAnalysisBtn.disabled = false;
 
@@ -1849,6 +1876,8 @@ export class CVModule {
 
         // Clean up CV-specific content from shared visualization area
         this._cleanupVisualizationArea();
+
+        console.log('CV: Cleanup complete');
     }
 
     _resetAnalysisState() {
