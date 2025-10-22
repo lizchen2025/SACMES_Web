@@ -15,7 +15,8 @@
       "Bash(del setup.py)",
       "Bash(timeout /t 3 /nobreak)",
       "Bash(where:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(package_agent_v2.bat)"
     ],
     "deny": [],
     "ask": []

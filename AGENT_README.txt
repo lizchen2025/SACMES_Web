@@ -75,8 +75,29 @@ A: No. start_agent.bat will automatically run it on first use.
 TROUBLESHOOTING
 ================================================================================
 
+Problem: Python installation fails or shows "installation failed"
+Solution: The installer now has multiple fallback methods:
+          1. It will first try the full Python installer (with GUI support)
+          2. If that fails, it will automatically try embeddable Python
+          3. Check "install_log.txt" in the agent folder for detailed errors
+          4. Common causes:
+             - Antivirus blocking the installer (temporarily disable it)
+             - Existing conflicting Python installations
+             - Insufficient disk space (need ~50 MB free)
+          5. Manual fix: Delete "python_embed" folder and run start_agent.bat again
+
 Problem: "Python environment not found" appears repeatedly
 Solution: Delete the "python_embed" folder and run start_agent.bat again
+          The installer will re-run automatically
+
+Problem: Installation stuck or freezes
+Solution: 1. Press Ctrl+C to cancel
+          2. Delete these files if they exist:
+             - python-3.11.9-amd64.exe
+             - python-3.11.9-embed-amd64.zip
+             - python_embed folder
+          3. Run start_agent.bat again
+          4. Check install_log.txt for errors
 
 Problem: Cannot connect to server
 Solution: Check your server URL and internet connection
@@ -85,6 +106,14 @@ Solution: Check your server URL and internet connection
 Problem: Files are not being processed
 Solution: Check that files in your monitored folder match the expected format
           Check the agent log window for error messages
+
+Problem: GUI features not working (tkinter errors)
+Solution: This happens with embeddable Python (fallback method)
+          To get full GUI support:
+          1. Delete "python_embed" folder
+          2. Ensure good internet connection
+          3. Temporarily disable antivirus
+          4. Run start_agent.bat again
 
 ================================================================================
 PRIVACY & DATA
