@@ -569,6 +569,29 @@ export class SWVModule {
             console.log('Switching to visualizationArea...');
             this.uiManager.showScreen('visualizationArea');
 
+            // Debug: Verify visualization area and containers are visible
+            setTimeout(() => {
+                const visualizationArea = document.getElementById('visualizationArea');
+                const frequencyMapContainer = document.getElementById('frequencyMapContainer');
+                const continuousMonitorContainer = document.getElementById('continuousMonitorContainer');
+
+                console.log('=== DOM State Check (after showScreen) ===');
+                console.log('visualizationArea:');
+                console.log('  - classList:', visualizationArea?.classList.toString());
+                console.log('  - computed display:', window.getComputedStyle(visualizationArea).display);
+                console.log('  - offsetParent:', visualizationArea?.offsetParent);  // null means hidden
+
+                console.log('frequencyMapContainer:');
+                console.log('  - classList:', frequencyMapContainer?.classList.toString());
+                console.log('  - computed display:', window.getComputedStyle(frequencyMapContainer).display);
+                console.log('  - offsetParent:', frequencyMapContainer?.offsetParent);
+
+                console.log('continuousMonitorContainer:');
+                console.log('  - classList:', continuousMonitorContainer?.classList.toString());
+                console.log('  - computed display:', window.getComputedStyle(continuousMonitorContainer).display);
+                console.log('=========================================');
+            }, 100);  // Small delay to ensure DOM updates
+
             // Hide continuous monitor specific controls
             this.dom.visualization.adjustmentControls.classList.add('hidden');
             this.dom.visualization.exportDataBtn.classList.add('hidden');
