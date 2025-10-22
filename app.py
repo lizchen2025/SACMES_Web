@@ -424,7 +424,56 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
 
         # Get selected electrode from params (if any)
         selected_electrode = params_for_this_file.get('selected_electrode')
-        analysis_result = analyze_cv_data(temp_filepath, params_for_this_file, selected_electrode)
+
+        # Validate electrode count before analysis
+        if selected_electrode is not None:
+            try:
+                import numpy as np
+                # Try to load data to detect electrode count
+                try:
+                    data = np.loadtxt(temp_filepath, delimiter=',')
+                except:
+                    try:
+                        data = np.loadtxt(temp_filepath, delimiter='\t')
+                    except:
+                        try:
+                            data = np.loadtxt(temp_filepath, delimiter=' ')
+                        except:
+                            data = np.loadtxt(temp_filepath)
+
+                if data.ndim == 2:
+                    detected_electrodes = data.shape[1] - 1  # First column is potential
+                    logger.info(f"CV: Detected {detected_electrodes} electrode(s) in file '{original_filename}'")
+
+                    # Check if requested electrode exists
+                    if selected_electrode >= detected_electrodes:
+                        logger.error(f"CV: Requested electrode {selected_electrode} (1-based: {selected_electrode + 1}) but file only has {detected_electrodes} electrode(s)")
+                        analysis_result = {
+                            'status': 'error',
+                            'message': f'File only contains {detected_electrodes} electrode(s), but you requested electrode {selected_electrode + 1}.',
+                            'detected_electrodes': detected_electrodes,
+                            'requested_electrode': selected_electrode + 1
+                        }
+                    else:
+                        # Electrode exists, proceed with analysis
+                        analysis_result = analyze_cv_data(temp_filepath, params_for_this_file, selected_electrode)
+                else:
+                    # 1D data, assume single electrode
+                    if selected_electrode > 0:
+                        analysis_result = {
+                            'status': 'error',
+                            'message': f'File only contains 1 electrode, but you requested electrode {selected_electrode + 1}.',
+                            'detected_electrodes': 1,
+                            'requested_electrode': selected_electrode + 1
+                        }
+                    else:
+                        analysis_result = analyze_cv_data(temp_filepath, params_for_this_file, selected_electrode)
+            except Exception as e:
+                logger.error(f"CV electrode validation failed: {e}")
+                analysis_result = analyze_cv_data(temp_filepath, params_for_this_file, selected_electrode)
+        else:
+            # No specific electrode selected, use original averaging behavior
+            analysis_result = analyze_cv_data(temp_filepath, params_for_this_file, selected_electrode)
 
         # Handle electrode validation errors for CV
         if analysis_result and analysis_result.get('status') == 'error' and 'detected_electrodes' in analysis_result:

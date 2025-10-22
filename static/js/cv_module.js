@@ -1929,6 +1929,24 @@ export class CVModule {
             existingButtons.forEach(btn => btn.remove());
         }
 
+        // Hide CV-specific buttons and show SWV buttons
+        const exportCVBtn = document.getElementById('exportCVDataBtn');
+        const exportDataBtn = document.getElementById('exportDataBtn');
+        const backToSWVBtn = document.getElementById('backToSWVBtn');
+
+        if (exportCVBtn) {
+            exportCVBtn.classList.add('hidden');
+            console.log('CV Cleanup: Hid CV export button');
+        }
+        if (exportDataBtn) {
+            exportDataBtn.classList.remove('hidden');
+            console.log('CV Cleanup: Showed SWV export button');
+        }
+        if (backToSWVBtn) {
+            backToSWVBtn.classList.remove('hidden');
+            console.log('CV Cleanup: Showed back to SWV button');
+        }
+
         // Restore SWV trend plots container visibility and structure
         const trendPlotsContainer = document.getElementById('trendPlotsContainer');
         if (trendPlotsContainer) {

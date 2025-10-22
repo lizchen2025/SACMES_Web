@@ -546,6 +546,17 @@ export class SWVModule {
         this.dom.startAnalysisBtn.disabled = true;
         this.dom.folderStatus.textContent = "Sending instructions to server...";
 
+        // Ensure CV buttons are hidden and SWV buttons are visible
+        const exportCVBtn = document.getElementById('exportCVDataBtn');
+        const backToSWVBtn = document.getElementById('backToSWVBtn');
+        if (exportCVBtn) {
+            exportCVBtn.classList.add('hidden');
+        }
+        if (backToSWVBtn) {
+            backToSWVBtn.textContent = 'Back to SWV Settings';
+            backToSWVBtn.onclick = () => this.uiManager.showScreen('swvAnalysisScreen');
+        }
+
         // Check analysis mode and setup appropriate visualization
         if (this.state.analysisMode === 'frequency_map') {
             // Frequency Map mode
