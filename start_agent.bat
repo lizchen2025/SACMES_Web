@@ -10,7 +10,7 @@ echo ========================================
 echo.
 
 REM Check if Python directory exists
-if not exist "python_embed" (
+if not exist "sacmes_python" (
     echo Python environment not found. Running first-time setup...
     echo.
     call install_python.bat
@@ -33,7 +33,7 @@ if not exist "agent.py" (
 REM Run the agent
 echo Starting SACMES Agent...
 echo.
-python_embed\python.exe agent.py
+sacmes_python\python.exe agent.py
 
 REM If agent exits, pause to show any errors
 if errorlevel 1 (

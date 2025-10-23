@@ -76,35 +76,33 @@ TROUBLESHOOTING
 ================================================================================
 
 Problem: Python installation fails or shows "installation failed"
-Solution: The installer v3.0 has enhanced diagnostics and reliability:
-          1. It primarily uses embeddable Python (more reliable)
-          2. Falls back to full installer only if needed
-          3. Check these log files for diagnostics:
-             - install_verbose.log (detailed step-by-step log)
-             - install_log.txt (installer errors, if available)
-          4. Common causes:
-             - Antivirus blocking the installer (temporarily disable it)
-             - Existing conflicting Python installations
-             - Insufficient disk space (need ~50 MB free)
-          5. Manual fix: Delete "python_embed" folder and run start_agent.bat again
+Solution: The installer v3.1 uses embeddable Python only (most reliable):
+          1. Check install_log.txt for detailed error information
+          2. Common causes and fixes:
+             - No internet: Check connection, download shows progress
+             - Antivirus: Temporarily disable it
+             - Firewall: Allow PowerShell to access python.org
+             - Disk space: Need ~50 MB free
+          3. Manual fix: Delete "sacmes_python" folder and try again
+          4. Alternative: Manually download the ZIP (see error message for URL)
 
 Problem: Python installer shows "Modify/Repair/Uninstall" dialog
-Solution: This means registry thinks Python is already installed there:
+Solution: v3.1 uses embeddable Python only - this should not happen anymore!
+          If it still occurs:
           1. Close the dialog (click X, do NOT select any option)
-          2. Delete the entire "python_embed" folder
-          3. Run start_agent.bat again
-          4. The installer will use embeddable Python to avoid this issue
+          2. Delete the entire "sacmes_python" folder
+          3. Delete any "python_embed" folder if it exists (old version)
+          4. Run start_agent.bat again
 
 Problem: "Python environment not found" appears repeatedly
-Solution: Delete the "python_embed" folder and run start_agent.bat again
+Solution: Delete the "sacmes_python" folder and run start_agent.bat again
           The installer will re-run automatically
 
 Problem: Installation stuck or freezes
 Solution: 1. Press Ctrl+C to cancel
           2. Delete these files if they exist:
-             - python-3.11.9-amd64.exe
              - python-3.11.9-embed-amd64.zip
-             - python_embed folder
+             - sacmes_python folder
           3. Run start_agent.bat again
           4. Check install_log.txt for errors
 
@@ -117,12 +115,10 @@ Solution: Check that files in your monitored folder match the expected format
           Check the agent log window for error messages
 
 Problem: GUI features not working (tkinter errors)
-Solution: This happens with embeddable Python (fallback method)
-          To get full GUI support:
-          1. Delete "python_embed" folder
-          2. Ensure good internet connection
-          3. Temporarily disable antivirus
-          4. Run start_agent.bat again
+Solution: v3.1 uses embeddable Python which does not include tkinter.
+          This is expected behavior. The agent works fine without GUI.
+          If you need full GUI support, you must manually install Python 3.11.9
+          from python.org and use it instead.
 
 ================================================================================
 PRIVACY & DATA
@@ -147,7 +143,14 @@ visit: https://github.com/lizchen2025/SACMES_Web
 VERSION INFORMATION
 ================================================================================
 
-Version: 1.0.0
-Last Updated: 2025-10-21
+Version: 3.1 (Embeddable-Only)
+Last Updated: 2025-10-22
+
+Changes in v3.1:
+- Uses ONLY embeddable Python (no registry conflicts)
+- Changed directory name from python_embed to sacmes_python
+- Removed full installer fallback (caused Modify/Repair issues)
+- Simplified installation process
+- More detailed error messages and recovery steps
 
 ================================================================================
