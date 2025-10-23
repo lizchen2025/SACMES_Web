@@ -4,12 +4,19 @@ REM This version cleans registry before installing to avoid conflicts
 
 setlocal enabledelayedexpansion
 
+REM Get script directory and change to it
+set "SCRIPT_DIR=%~dp0"
+cd /d "%SCRIPT_DIR%"
+
 echo ========================================
 echo SACMES Agent - Setup v4.0
 echo ========================================
 echo.
 echo Full Python with tkinter (GUI support)
 echo ========================================
+echo.
+echo Script directory: %SCRIPT_DIR%
+echo Working directory: %CD%
 echo.
 
 REM Configuration
@@ -25,13 +32,17 @@ set UNIQUE_ID=%RANDOM%-%RANDOM%
 REM Clear previous log
 if exist "%INSTALL_LOG%" del "%INSTALL_LOG%"
 
-echo Installation Log > "%INSTALL_LOG%"
-echo ====================================== >> "%INSTALL_LOG%"
+echo ===== SACMES Agent Installation Log ===== > "%INSTALL_LOG%"
 echo Time: %date% %time% >> "%INSTALL_LOG%"
-echo Directory: %CD% >> "%INSTALL_LOG%"
-echo Target: %PYTHON_DIR% >> "%INSTALL_LOG%"
+echo Script Directory: %SCRIPT_DIR% >> "%INSTALL_LOG%"
+echo Working Directory: %CD% >> "%INSTALL_LOG%"
+echo Target Directory: %PYTHON_DIR% >> "%INSTALL_LOG%"
 echo Unique ID: %UNIQUE_ID% >> "%INSTALL_LOG%"
+echo ========================================== >> "%INSTALL_LOG%"
 echo. >> "%INSTALL_LOG%"
+
+echo Log file created: %INSTALL_LOG%
+echo.
 
 REM ========================================
 REM STEP 1: Check Existing Installation
@@ -110,7 +121,7 @@ REM This is the KEY to avoiding the Modify/Repair dialog!
 
 echo Searching for conflicting registry entries...
 
-powershell -Command "$ErrorActionPreference='SilentlyContinue'; $targetPath='%PYTHON_DIR%'.Replace('\','\\'); Write-Host 'Target path: %PYTHON_DIR%'; $regPaths = @('HKCU:\Software\Python\PythonCore\3.11', 'HKLM:\Software\Python\PythonCore\3.11', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall'); $found = $false; foreach($path in $regPaths) { if(Test-Path $path) { Get-ChildItem $path -ErrorAction SilentlyContinue | ForEach-Object { $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue; if($props.InstallLocation -like '*sacmes_python*' -or $props.InstallLocation -like '*python_embed*') { Write-Host \"Found conflicting entry: $($_.PSPath)\"; Write-Host \"  InstallLocation: $($props.InstallLocation)\"; try { Remove-Item $_.PSPath -Recurse -Force -ErrorAction Stop; Write-Host \"  Removed successfully\"; $found = $true } catch { Write-Host \"  Could not remove (may need admin): $($_.Exception.Message)\" } } } } } if($found) { Write-Host ''; Write-Host 'Registry cleanup complete!'; Write-Host 'Previous installation records removed.' } else { Write-Host 'No conflicting entries found - clean start!' }" 2>>"%INSTALL_LOG%"
+powershell -Command "$ErrorActionPreference='SilentlyContinue'; Write-Host ''; Write-Host 'Scanning registry locations...'; $targetPath='%PYTHON_DIR%'.Replace('\','\\'); $regPaths = @('HKCU:\Software\Python\PythonCore\3.11', 'HKLM:\Software\Python\PythonCore\3.11', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall'); $found = $false; $scanned = 0; foreach($path in $regPaths) { $scanned++; if(Test-Path $path) { $items = Get-ChildItem $path -ErrorAction SilentlyContinue; foreach($item in $items) { $props = Get-ItemProperty $item.PSPath -ErrorAction SilentlyContinue; if($props.InstallLocation -like '*sacmes_python*' -or $props.InstallLocation -like '*python_embed*') { Write-Host ''; Write-Host 'FOUND CONFLICT:' -ForegroundColor Yellow; Write-Host \"  Registry: $($item.PSPath)\" -ForegroundColor Yellow; Write-Host \"  Location: $($props.InstallLocation)\" -ForegroundColor Yellow; try { Remove-Item $item.PSPath -Recurse -Force -ErrorAction Stop; Write-Host '  STATUS: Removed successfully' -ForegroundColor Green; $found = $true } catch { Write-Host \"  STATUS: Could not remove - $($_.Exception.Message)\" -ForegroundColor Red; Write-Host '  TIP: Try running as Administrator' -ForegroundColor Cyan } } } } } Write-Host ''; if($found) { Write-Host 'Registry cleanup complete!' -ForegroundColor Green; Write-Host 'Old installation records have been removed.'; Write-Host 'Installation can proceed without conflicts.'; } else { Write-Host 'No conflicts found!' -ForegroundColor Green; Write-Host 'Clean start - no previous installations detected.'; } Write-Host \"Scanned $scanned registry locations.\"; Write-Host ''" 2>>"%INSTALL_LOG%"
 
 echo.
 echo Registry check complete.

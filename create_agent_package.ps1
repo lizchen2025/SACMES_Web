@@ -25,22 +25,25 @@ Write-Host ""
 Write-Host "Copying files..."
 Write-Host ""
 
-Write-Host "[1/6] agent.py"
+Write-Host "[1/7] agent.py"
 Copy-Item 'agent.py' 'agent_package\'
 
-Write-Host "[2/6] start_agent.bat"
+Write-Host "[2/7] start_agent.bat"
 Copy-Item 'start_agent.bat' 'agent_package\'
 
-Write-Host "[3/6] install_python.bat"
+Write-Host "[3/7] install_python.bat"
 Copy-Item 'install_python.bat' 'agent_package\'
 
-Write-Host "[4/6] test_installation.bat"
+Write-Host "[4/7] test_installation.bat"
 Copy-Item 'test_installation.bat' 'agent_package\'
 
-Write-Host "[5/6] Netzlab.ico"
+Write-Host "[5/7] diagnose.bat"
+Copy-Item 'diagnose.bat' 'agent_package\'
+
+Write-Host "[6/7] Netzlab.ico"
 Copy-Item 'Netzlab.ico' 'agent_package\'
 
-Write-Host "[6/6] AGENT_README.txt (as README.txt)"
+Write-Host "[7/7] AGENT_README.txt (as README.txt)"
 Copy-Item 'AGENT_README.txt' 'agent_package\README.txt'
 
 # Create ZIP
@@ -68,8 +71,9 @@ Write-Host ""
 Write-Host "Contents:"
 Write-Host "- agent.py (Agent source code)"
 Write-Host "- start_agent.bat (Main launcher)"
-Write-Host "- install_python.bat (Robust first-time setup)"
+Write-Host "- install_python.bat (v4.0 with Registry cleanup)"
 Write-Host "- test_installation.bat (Installation verification)"
+Write-Host "- diagnose.bat (Diagnostic tool - NEW!)"
 Write-Host "- Netzlab.ico (Application icon)"
 Write-Host "- README.txt (User documentation)"
 Write-Host ""
