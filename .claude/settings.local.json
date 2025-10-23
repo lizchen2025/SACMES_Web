@@ -19,7 +19,10 @@
       "Bash(package_agent_v2.bat)",
       "Bash(git log:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(Copy-Item 'SACMES_Agent.zip' 'static\\downloads\\SACMES_Agent.zip' -Force)",
+      "Bash(Get-Item 'static\\downloads\\SACMES_Agent.zip')",
+      "Bash(Select-Object Name, Length, LastWriteTime)"
     ],
     "deny": [],
     "ask": []
