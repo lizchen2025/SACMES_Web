@@ -149,7 +149,7 @@ echo Please wait, this may take 2-3 minutes...
 echo.
 echo Download URL: %PYTHON_URL% >> "%INSTALL_LOG%"
 
-powershell -Command "& { $ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; try { Write-Host 'Connecting to python.org...'; $wc = New-Object System.Net.WebClient; $wc.DownloadFile('%PYTHON_URL%', '%PYTHON_INSTALLER%'); Write-Host 'Download complete!'; exit 0 } catch { Write-Host ''; Write-Host 'ERROR downloading Python:'; Write-Host $_.Exception.Message; Write-Host ''; exit 1 }}" 2>>"%INSTALL_LOG%"
+powershell -ExecutionPolicy Bypass -Command "& { $ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try { Write-Host 'Connecting to python.org...'; Invoke-WebRequest -Uri '%PYTHON_URL%' -OutFile '%PYTHON_INSTALLER%' -UseBasicParsing; Write-Host 'Download complete!' } catch { Write-Host 'ERROR downloading Python:'; Write-Host $_.Exception.Message; exit 1 } }" 2>>"%INSTALL_LOG%"
 
 if errorlevel 1 (
     echo Download failed >> "%INSTALL_LOG%"
