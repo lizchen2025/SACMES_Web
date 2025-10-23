@@ -76,15 +76,24 @@ TROUBLESHOOTING
 ================================================================================
 
 Problem: Python installation fails or shows "installation failed"
-Solution: The installer now has multiple fallback methods:
-          1. It will first try the full Python installer (with GUI support)
-          2. If that fails, it will automatically try embeddable Python
-          3. Check "install_log.txt" in the agent folder for detailed errors
+Solution: The installer v3.0 has enhanced diagnostics and reliability:
+          1. It primarily uses embeddable Python (more reliable)
+          2. Falls back to full installer only if needed
+          3. Check these log files for diagnostics:
+             - install_verbose.log (detailed step-by-step log)
+             - install_log.txt (installer errors, if available)
           4. Common causes:
              - Antivirus blocking the installer (temporarily disable it)
              - Existing conflicting Python installations
              - Insufficient disk space (need ~50 MB free)
           5. Manual fix: Delete "python_embed" folder and run start_agent.bat again
+
+Problem: Python installer shows "Modify/Repair/Uninstall" dialog
+Solution: This means registry thinks Python is already installed there:
+          1. Close the dialog (click X, do NOT select any option)
+          2. Delete the entire "python_embed" folder
+          3. Run start_agent.bat again
+          4. The installer will use embeddable Python to avoid this issue
 
 Problem: "Python environment not found" appears repeatedly
 Solution: Delete the "python_embed" folder and run start_agent.bat again
