@@ -17,7 +17,9 @@
       "Bash(where:*)",
       "Bash(python3:*)",
       "Bash(package_agent_v2.bat)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
