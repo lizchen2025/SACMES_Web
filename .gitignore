@@ -36,3 +36,82 @@ upx-*/
 # OS
 .DS_Store
 Thumbs.db
+
+# ============================================
+# SACMES Agent Build Files (Local Only)
+# ============================================
+
+# Extracted/Built Agent Folder
+SACMES_Agent/
+
+# Agent Build Scripts (Local use only)
+build_agent_console.bat
+build_agent_exe.bat
+build_agent_minimal.bat
+cleanup_build.bat
+kill_agent_processes.bat
+package_final.bat
+
+# Python Installation Scripts (Local use only)
+install_portable_python.bat
+download_python311.bat
+extract_tkinter_311.bat
+CLEAN_PYTHON311_REGISTRY.bat
+download_file.ps1
+
+# Test Scripts (Local use only)
+test_url.bat
+TEST_EXTRACTION_ENVIRONMENT.bat
+TEST_REGISTRY_CLEAN.bat
+CLEANUP_OTHER_SOLUTIONS.bat
+test_extract.bat
+
+# Temporary and Local Build Artifacts
+tkinter_package/
+sacmes_python/
+python_embed/
+nul
+*.ico
+!static/favicon.ico
+
+# Session Documentation (Generated during development)
+SESSION_SUMMARY.md
+SESSION_IMPROVEMENTS_SUMMARY.md
+REQUESTS_FIX_SUMMARY.md
+VERSION_FIX_SUMMARY.md
+FIXED_BUILD_SUMMARY.md
+AGENT_FIXES_SUMMARY.md
+CHANGELOG.md
+AGENT_DIAGNOSTIC_GUIDE.md
+AGENT_DEPLOYMENT.md
+AGENT_README.txt
+AGENT_V3.1_RELEASE_NOTES.md
+AGENT_V4.0_GUIDE.md
+BUILD_TROUBLESHOOTING.md
+RELEASE.md
+
+# Testing Files
+2025_10_03_CV_Test__1.txt
+*_Test_*.txt
+
+# Manual Guides (Keep consolidated docs only)
+MANUAL_EXTRACTION_GUIDE.txt
+
+# Keep Important Documentation
+!README.md
+!BUILD_INSTRUCTIONS.md
+!requirements.txt
+!IMPLEMENTATION_COMPLETE.md
+!MULTI_USER_SERVER_COMPLETE.md
+!WEB_FRONTEND_COMPLETE.md
+!WEB_FRONTEND_MIGRATION_TODO.md
+!USER_ID_MIGRATION_STATUS.md
+
+# Logs
+*.log
+server.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
