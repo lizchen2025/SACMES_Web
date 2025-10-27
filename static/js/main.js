@@ -12,6 +12,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize Socket Manager
     const socketManager = new SocketManager();
 
+    // Expose socketManager globally for User ID connection functionality
+    window.socketManager = socketManager;
+
     // Initialize UI Manager
     const uiManager = new UIManager();
 

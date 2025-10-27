@@ -1605,8 +1605,9 @@
 
         let currentUserId = null;
 
-        // Load saved user_id from localStorage on page load
+        // Initialize User ID functionality on page load
         document.addEventListener('DOMContentLoaded', function() {
+            // Load saved user_id from localStorage
             const savedUserId = localStorage.getItem('sacmes_user_id');
             if (savedUserId) {
                 document.getElementById('userIdInput').value = savedUserId;
@@ -1617,6 +1618,9 @@
 
             // Disable analysis buttons until connected
             disableAnalysisControls();
+
+            // Initialize socket event listeners
+            initializeUserIdSocketListeners();
         });
 
         // Connect button click handler
@@ -1647,14 +1651,14 @@
         function connectToAgent(userId) {
             showConnectionStatus('info', 'Verifying agent connection...');
 
-            // Check if socket is available
-            if (typeof socket === 'undefined') {
+            // Check if socketManager is available
+            if (typeof window.socketManager === 'undefined') {
                 showConnectionStatus('error', 'Socket.IO not initialized. Please refresh the page.');
                 return;
             }
 
             // Emit check connection request
-            socket.emit('check_agent_connection', {
+            window.socketManager.emit('check_agent_connection', {
                 user_id: userId
             });
         }
@@ -1760,51 +1764,62 @@
             return currentUserId !== null;
         }
 
-        // Listen for agent connection verification response
-        socket.on('agent_connection_status', function(response) {
-            if (response.status === 'error') {
-                showConnectionStatus('error', response.message);
+        // Initialize socket event listeners after socketManager is available
+        function initializeUserIdSocketListeners() {
+            if (!window.socketManager) {
+                console.log('Waiting for socketManager...');
+                setTimeout(initializeUserIdSocketListeners, 100);
                 return;
             }
 
-            if (response.connected) {
-                // Agent is connected
-                currentUserId = response.user_id;
-                localStorage.setItem('sacmes_user_id', response.user_id);
-
-                // Update UI
-                document.getElementById('userIdInput').disabled = true;
-                document.getElementById('connectAgentBtn').disabled = true;
-                document.getElementById('userIdInputContainer').classList.add('hidden');
-                document.getElementById('connectedUserId').textContent = response.user_id;
-                document.getElementById('agentInfoContainer').classList.remove('hidden');
-
-                showConnectionStatus('success', 'Successfully connected to agent!');
-                enableAnalysisControls();
-
-                console.log('Connected to agent at:', response.connected_at);
-            } else {
-                // Agent not found
-                showConnectionStatus('error', 'Agent not found. Please check your User ID and ensure your agent is running.');
-            }
-        });
-
-        // Listen for agent status updates (connection/disconnection)
-        socket.on('agent_status', function(data) {
-            console.log('Agent status update:', data);
-
-            // Check if this affects our connected agent
-            if (data.user_id === currentUserId) {
-                if (data.status === 'disconnected') {
-                    showConnectionStatus('error', 'Your agent has disconnected');
-                    alert('Warning: Your agent has disconnected. Please restart your agent and reconnect.');
-                    // Optionally auto-disconnect
-                    // disconnectFromAgent();
-                } else if (data.status === 'connected') {
-                    showConnectionStatus('success', 'Your agent is now connected');
+            // Listen for agent connection verification response
+            window.socketManager.on('agent_connection_status', function(response) {
+                if (response.status === 'error') {
+                    showConnectionStatus('error', response.message);
+                    return;
                 }
-            }
-        });
+
+                if (response.connected) {
+                    // Agent is connected
+                    currentUserId = response.user_id;
+                    localStorage.setItem('sacmes_user_id', response.user_id);
+
+                    // Update UI
+                    document.getElementById('userIdInput').disabled = true;
+                    document.getElementById('connectAgentBtn').disabled = true;
+                    document.getElementById('userIdInputContainer').classList.add('hidden');
+                    document.getElementById('connectedUserId').textContent = response.user_id;
+                    document.getElementById('agentInfoContainer').classList.remove('hidden');
+
+                    showConnectionStatus('success', 'Successfully connected to agent!');
+                    enableAnalysisControls();
+
+                    console.log('Connected to agent at:', response.connected_at);
+                } else {
+                    // Agent not found
+                    showConnectionStatus('error', 'Agent not found. Please check your User ID and ensure your agent is running.');
+                }
+            });
+
+            // Listen for agent status updates (connection/disconnection)
+            window.socketManager.on('agent_status', function(data) {
+                console.log('Agent status update:', data);
+
+                // Check if this affects our connected agent
+                if (data.user_id === currentUserId) {
+                    if (data.status === 'disconnected') {
+                        showConnectionStatus('error', 'Your agent has disconnected');
+                        alert('Warning: Your agent has disconnected. Please restart your agent and reconnect.');
+                        // Optionally auto-disconnect
+                        // disconnectFromAgent();
+                    } else if (data.status === 'connected') {
+                        showConnectionStatus('success', 'Your agent is now connected');
+                    }
+                }
+            });
+
+            console.log('User ID socket listeners initialized');
+        }
 
         // JavaScript for copying citation text
         document.getElementById('copyCitationBtn').addEventListener('click', function() {
