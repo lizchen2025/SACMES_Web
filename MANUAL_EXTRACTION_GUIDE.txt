@@ -1,0 +1,263 @@
+================================================================================
+MANUAL TKINTER EXTRACTION GUIDE
+================================================================================
+
+This guide provides step-by-step manual instructions for extracting tkinter
+files from Python 3.11.9. Follow these steps carefully.
+
+TIME REQUIRED: 15-20 minutes
+
+
+================================================================================
+PREPARATION
+================================================================================
+
+1. Ensure you have downloaded python-3.11.9-amd64.exe
+   Location: E:\SACMES_web\web\SACMES_Web-Multiuser\python-3.11.9-amd64.exe
+
+   If not downloaded, run: download_python311.bat
+
+
+================================================================================
+STEP 1: INSTALL PYTHON 3.11.9 TEMPORARILY
+================================================================================
+
+1.1. Double-click python-3.11.9-amd64.exe
+
+1.2. IMPORTANT: Do NOT click "Install Now"
+     Click "Customize installation" instead
+
+1.3. On "Optional Features" screen:
+     - Check all boxes (leave defaults)
+     - Click "Next"
+
+1.4. On "Advanced Options" screen:
+     - UNCHECK "Install for all users"
+     - UNCHECK "Add Python to environment variables"
+     - UNCHECK "Precompile standard library"
+     - CHECK "tcl/tk and IDLE"
+
+     - In "Customize install location" field, enter EXACTLY:
+       E:\SACMES_web\web\SACMES_Web-Multiuser\temp_python311
+
+     - Click "Install"
+
+1.5. Wait for installation to complete (2-3 minutes)
+
+1.6. Click "Close" when installation finishes
+
+
+================================================================================
+STEP 2: VERIFY INSTALLATION
+================================================================================
+
+2.1. Open File Explorer
+
+2.2. Navigate to: E:\SACMES_web\web\SACMES_Web-Multiuser\temp_python311
+
+2.3. Verify the following folders exist:
+     - Lib\
+     - DLLs\
+     - tcl\
+
+2.4. Verify python.exe exists in temp_python311 folder
+
+If any of these are missing, the installation failed. Delete temp_python311
+folder and repeat Step 1.
+
+
+================================================================================
+STEP 3: CREATE TKINTER_PACKAGE FOLDER STRUCTURE
+================================================================================
+
+3.1. In File Explorer, navigate to:
+     E:\SACMES_web\web\SACMES_Web-Multiuser
+
+3.2. Create a new folder named: tkinter_package
+
+3.3. Inside tkinter_package, create three folders:
+     - Lib
+     - DLLs
+     - tcl
+
+Your structure should look like:
+  E:\SACMES_web\web\SACMES_Web-Multiuser\
+    tkinter_package\
+      Lib\
+      DLLs\
+      tcl\
+
+
+================================================================================
+STEP 4: COPY TKINTER LIBRARY
+================================================================================
+
+4.1. Open two File Explorer windows side by side
+
+4.2. Left window: Navigate to
+     E:\SACMES_web\web\SACMES_Web-Multiuser\temp_python311\Lib\
+
+4.3. Right window: Navigate to
+     E:\SACMES_web\web\SACMES_Web-Multiuser\tkinter_package\Lib\
+
+4.4. In LEFT window, find the "tkinter" folder
+
+4.5. Copy the entire "tkinter" folder to RIGHT window
+
+Result: You should have
+  tkinter_package\Lib\tkinter\
+    with many .py files inside
+
+
+================================================================================
+STEP 5: COPY TCL/TK RUNTIME
+================================================================================
+
+5.1. Left window: Navigate to
+     E:\SACMES_web\web\SACMES_Web-Multiuser\temp_python311\tcl\
+
+5.2. Right window: Navigate to
+     E:\SACMES_web\web\SACMES_Web-Multiuser\tkinter_package\tcl\
+
+5.3. In LEFT window, you should see folders like:
+     - tcl8.6
+     - tk8.6
+     - and other folders
+
+5.4. Select ALL folders and files in LEFT window
+
+5.5. Copy all to RIGHT window
+
+Result: tkinter_package\tcl\ should contain all the tcl runtime folders
+
+
+================================================================================
+STEP 6: COPY DLL FILES
+================================================================================
+
+6.1. Left window: Navigate to
+     E:\SACMES_web\web\SACMES_Web-Multiuser\temp_python311\DLLs\
+
+6.2. Right window: Navigate to
+     E:\SACMES_web\web\SACMES_Web-Multiuser\tkinter_package\DLLs\
+
+6.3. In LEFT window, find and copy these files to RIGHT window:
+
+     REQUIRED FILES:
+     - _tkinter.pyd
+     - tcl86t.dll
+     - tk86t.dll
+
+     OPTIONAL (copy if they exist):
+     - tcl86t.lib
+     - tk86t.lib
+     - tclstub86.lib
+     - tkstub86.lib
+
+6.4. Verify all three required files are now in
+     tkinter_package\DLLs\
+
+
+================================================================================
+STEP 7: VERIFY EXTRACTION
+================================================================================
+
+7.1. Check tkinter_package folder structure:
+
+  tkinter_package\
+    Lib\
+      tkinter\
+        __init__.py       (MUST exist)
+        __main__.py
+        colorchooser.py
+        ... (many other .py files)
+
+    DLLs\
+      _tkinter.pyd        (MUST exist)
+      tcl86t.dll          (MUST exist)
+      tk86t.dll           (MUST exist)
+
+    tcl\
+      tcl8.6\             (MUST exist - folder)
+      tk8.6\              (MUST exist - folder)
+      ... (other folders)
+
+7.2. If all MUST exist items are present, extraction is successful
+
+
+================================================================================
+STEP 8: CLEANUP
+================================================================================
+
+8.1. Delete the temporary installation:
+     Right-click on temp_python311 folder
+     Select "Delete"
+
+8.2. (Optional) Delete python-3.11.9-amd64.exe if you no longer need it
+     This file is ~30 MB
+
+
+================================================================================
+STEP 9: CREATE DISTRIBUTION PACKAGE
+================================================================================
+
+9.1. Run: package_final.bat
+
+9.2. This will create SACMES_Agent.zip containing your extracted tkinter files
+
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Problem: Installation fails at Step 1
+Solution:
+  - Run python-3.11.9-amd64.exe as Administrator (right-click > Run as admin)
+  - Disable antivirus temporarily
+  - Ensure the installation path does not contain special characters
+
+Problem: tkinter folder missing in temp_python311\Lib\
+Solution:
+  - Repeat Step 1, ensure "tcl/tk and IDLE" is checked in Advanced Options
+
+Problem: DLL files not found
+Solution:
+  - In temp_python311\DLLs\, search for "tcl" and "tk"
+  - The DLL names might be slightly different (e.g., tcl87t.dll for newer versions)
+  - Copy any tcl*.dll and tk*.dll files
+
+Problem: Folder access denied
+Solution:
+  - Close all programs that might be using the folders
+  - Run File Explorer as Administrator
+  - Check folder is not marked as read-only (right-click > Properties)
+
+
+================================================================================
+VERIFICATION CHECKLIST
+================================================================================
+
+Before proceeding to package_final.bat, verify:
+
+[ ] tkinter_package\Lib\tkinter\__init__.py exists
+[ ] tkinter_package\DLLs\_tkinter.pyd exists
+[ ] tkinter_package\DLLs\tcl86t.dll exists
+[ ] tkinter_package\DLLs\tk86t.dll exists
+[ ] tkinter_package\tcl\tcl8.6\ folder exists
+[ ] tkinter_package\tcl\tk8.6\ folder exists
+[ ] temp_python311 folder has been deleted
+
+If all items are checked, you are ready to run package_final.bat
+
+
+================================================================================
+SUPPORT
+================================================================================
+
+If you encounter issues not covered in troubleshooting:
+1. Take a screenshot of the error
+2. Note which step failed
+3. Check disk space (need at least 500 MB free)
+4. Verify you have write permissions to the folder
+
+================================================================================

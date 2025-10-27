@@ -134,8 +134,18 @@ export class SWVModule {
             if (filename) {
                 this.dom.visualization.exportDataBtn.dataset.filename = filename;
                 this.dom.visualization.exportStatus.textContent = 'Generating export file...';
+
+                // Check if connected to agent
+                if (typeof isConnectedToAgent === 'function' && !isConnectedToAgent()) {
+                    alert('Please connect to an agent first by entering your User ID.');
+                    this.dom.visualization.exportStatus.textContent = '';
+                    return;
+                }
+
                 // Export all electrodes
-                this.socketManager.emit('request_export_data', {});
+                this.socketManager.emit('request_export_data', {
+                    user_id: getCurrentUserId()
+                });
             }
         });
 
@@ -147,7 +157,16 @@ export class SWVModule {
                 if (filename) {
                     this.dom.visualization.exportFrequencyMapDataBtn.dataset.filename = filename;
                     this.dom.visualization.exportFrequencyMapStatus.textContent = 'Generating export file...';
+
+                    // Check if connected to agent
+                    if (typeof isConnectedToAgent === 'function' && !isConnectedToAgent()) {
+                        alert('Please connect to an agent first by entering your User ID.');
+                        this.dom.visualization.exportFrequencyMapStatus.textContent = '';
+                        return;
+                    }
+
                     this.socketManager.emit('request_export_frequency_map_data', {
+                        user_id: getCurrentUserId(),
                         export_all: true
                     });
                 }
@@ -231,6 +250,11 @@ export class SWVModule {
                 this.state.isAnalysisRunning = false;
                 this.dom.startAnalysisBtn.disabled = false;
                 this.dom.startAnalysisBtn.textContent = 'Start Analysis & Sync';
+
+                // Show alert for user_id related errors
+                if (data.message && data.message.includes('User ID')) {
+                    alert('Error: ' + data.message + '\n\nPlease go back to the welcome screen and connect to your agent first.');
+                }
             }
         });
 
@@ -609,7 +633,18 @@ export class SWVModule {
 
             this._updateFrequencyMapStats();
 
-            this.socketManager.emit('start_frequency_map_session', { filters, analysisParams, frequencies: this.state.currentFrequencies });
+            // Check if connected to agent
+            if (typeof isConnectedToAgent === 'function' && !isConnectedToAgent()) {
+                alert('Please connect to an agent first by entering your User ID on the welcome screen.');
+                return;
+            }
+
+            this.socketManager.emit('start_frequency_map_session', {
+                user_id: getCurrentUserId(),
+                filters,
+                analysisParams,
+                frequencies: this.state.currentFrequencies
+            });
         } else {
             // Continuous Monitor mode (original behavior)
             this._setupVisualizationLayout();
@@ -621,7 +656,18 @@ export class SWVModule {
             // Clear warnings at the start of analysis
             this.dom.visualization.peakDetectionWarnings.classList.add('hidden');
             this.dom.visualization.warningsList.innerHTML = '';
-            this.socketManager.emit('start_analysis_session', { filters, analysisParams });
+
+            // Check if connected to agent
+            if (typeof isConnectedToAgent === 'function' && !isConnectedToAgent()) {
+                alert('Please connect to an agent first by entering your User ID on the welcome screen.');
+                return;
+            }
+
+            this.socketManager.emit('start_analysis_session', {
+                user_id: getCurrentUserId(),
+                filters,
+                analysisParams
+            });
         }
     }
 
@@ -1198,6 +1244,11 @@ export class SWVModule {
                 this.state.isAnalysisRunning = false;
                 this.dom.startAnalysisBtn.disabled = false;
                 this.dom.startAnalysisBtn.textContent = 'Start Frequency Map Analysis';
+
+                // Show alert for user_id related errors
+                if (data.message && data.message.includes('User ID')) {
+                    alert('Error: ' + data.message + '\n\nPlease go back to the welcome screen and connect to your agent first.');
+                }
             }
         });
 

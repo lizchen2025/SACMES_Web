@@ -22,7 +22,15 @@
       "Bash(git commit:*)",
       "Bash(Copy-Item 'SACMES_Agent.zip' 'static\\downloads\\SACMES_Agent.zip' -Force)",
       "Bash(Get-Item 'static\\downloads\\SACMES_Agent.zip')",
-      "Bash(Select-Object Name, Length, LastWriteTime)"
+      "Bash(Select-Object Name, Length, LastWriteTime)",
+      "Bash(TEST_LIGHTWEIGHT.bat)",
+      "Bash(cmd /c TEST_LIGHTWEIGHT.bat)",
+      "Bash(cmd /c package_agent_final.bat)",
+      "Bash(cmd /c \"if exist sacmes_python\\python.exe (sacmes_python\\python.exe -m pip list) else (echo Python not found)\")",
+      "Bash(sacmes_pythonpython.exe -c \"import socketio; print(''socketio OK'')\")",
+      "Bash(cmd /c \"sacmes_python\\python.exe -c \"\"import socketio; print(''socketio OK'')\"\" 2>&1\")",
+      "Bash(cmd /c CLEANUP_OTHER_SOLUTIONS.bat)",
+      "Bash(cmd /c test_extract.bat)"
     ],
     "deny": [],
     "ask": []

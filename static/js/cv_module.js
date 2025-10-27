@@ -194,6 +194,11 @@ export class CVModule {
             } else {
                 this.dom.folderStatus.textContent = data.message;
                 this._resetAnalysisState();
+
+                // Show alert for user_id related errors
+                if (data.message && data.message.includes('User ID')) {
+                    alert('Error: ' + data.message + '\n\nPlease go back to the welcome screen and connect to your agent first.');
+                }
             }
         });
 
@@ -655,7 +660,19 @@ export class CVModule {
         this.dom.startAnalysisBtn.disabled = true;
         this.dom.folderStatus.textContent = "Sending CV instructions to server...";
 
-        this.socketManager.emit('start_cv_analysis_session', { filters, analysisParams });
+        // Check if connected to agent
+        if (typeof isConnectedToAgent === 'function' && !isConnectedToAgent()) {
+            alert('Please connect to an agent first by entering your User ID on the welcome screen.');
+            this.dom.startAnalysisBtn.disabled = false;
+            this.dom.folderStatus.textContent = '';
+            return;
+        }
+
+        this.socketManager.emit('start_cv_analysis_session', {
+            user_id: getCurrentUserId(),
+            filters,
+            analysisParams
+        });
 
         // Set up timeout to automatically switch to visualization if no data is received
         this._setupCVAnalysisTimeout();
@@ -2241,8 +2258,18 @@ export class CVModule {
         if (filename) {
             this.dom.visualization.exportCVDataBtn.dataset.filename = filename;
             this.dom.visualization.exportStatus.textContent = 'Generating CV export file...';
+
+            // Check if connected to agent
+            if (typeof isConnectedToAgent === 'function' && !isConnectedToAgent()) {
+                alert('Please connect to an agent first by entering your User ID.');
+                this.dom.visualization.exportStatus.textContent = '';
+                return;
+            }
+
             // Export all electrodes
-            this.socketManager.emit('request_export_cv_data', {});
+            this.socketManager.emit('request_export_cv_data', {
+                user_id: getCurrentUserId()
+            });
         }
     }
 

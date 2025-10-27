@@ -1286,8 +1286,120 @@ def generate_csv_data_all_electrodes(session_id):
 
 
 # --- Socket.IO Event Handlers (Connect, Disconnect, Start Session are Unchanged) ---
-# Global session tracker for agent-web viewer communication
+# DEPRECATED: Old global session tracker (kept for backward compatibility, will be removed)
 agent_session_tracker = {'current_session': None, 'agent_sid': None}
+
+# NEW: User ID based mapping for multi-user support
+agent_user_mapping = {}  # {user_id: {'session_id': xxx, 'agent_sid': xxx, 'connected_at': xxx}}
+agent_user_mapping_lock = threading.Lock()
+
+def register_agent_user(user_id, session_id, agent_sid):
+    """
+    Register agent user_id to session mapping.
+    This allows multiple agents to connect simultaneously.
+
+    Args:
+        user_id: Unique user identifier from agent
+        session_id: Server-generated session ID
+        agent_sid: Socket.IO connection ID
+    """
+    with agent_user_mapping_lock:
+        agent_user_mapping[user_id] = {
+            'session_id': session_id,
+            'agent_sid': agent_sid,
+            'connected_at': datetime.now().isoformat()
+        }
+
+    # Store in Redis for persistence
+    if redis_client:
+        try:
+            redis_client.hset(
+                'agent_user_mapping',
+                user_id,
+                json.dumps({
+                    'session_id': session_id,
+                    'agent_sid': agent_sid,
+                    'connected_at': datetime.now().isoformat()
+                })
+            )
+            logger.info(f"Registered agent mapping in Redis: {user_id} -> {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to store agent mapping in Redis: {e}")
+
+    logger.info(f"Registered agent user: {user_id}, session: {session_id}, sid: {agent_sid}")
+
+def get_agent_session_by_user_id(user_id):
+    """
+    Get agent session info by user_id.
+
+    Args:
+        user_id: User identifier
+
+    Returns:
+        dict with 'session_id', 'agent_sid', 'connected_at' or None if not found
+    """
+    # Try Redis first
+    if redis_client:
+        try:
+            data = redis_client.hget('agent_user_mapping', user_id)
+            if data:
+                return json.loads(data)
+        except Exception as e:
+            logger.error(f"Redis get agent mapping error: {e}")
+
+    # Fallback to in-memory
+    with agent_user_mapping_lock:
+        return agent_user_mapping.get(user_id)
+
+def unregister_agent_user(user_id):
+    """
+    Unregister agent when disconnected.
+
+    Args:
+        user_id: User identifier to remove
+    """
+    with agent_user_mapping_lock:
+        if user_id in agent_user_mapping:
+            del agent_user_mapping[user_id]
+            logger.info(f"Unregistered agent user from memory: {user_id}")
+
+    if redis_client:
+        try:
+            redis_client.hdel('agent_user_mapping', user_id)
+            logger.info(f"Unregistered agent user from Redis: {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to delete agent mapping from Redis: {e}")
+
+def get_user_id_by_agent_sid(agent_sid):
+    """
+    Reverse lookup: find user_id by agent socket ID.
+    Used during disconnect to identify which user disconnected.
+
+    Args:
+        agent_sid: Socket.IO connection ID
+
+    Returns:
+        user_id or None if not found
+    """
+    # Check memory first
+    with agent_user_mapping_lock:
+        for user_id, mapping in agent_user_mapping.items():
+            if mapping['agent_sid'] == agent_sid:
+                return user_id
+
+    # Check Redis if not in memory
+    if redis_client:
+        try:
+            all_mappings = redis_client.hgetall('agent_user_mapping')
+            for user_id_bytes, mapping_json in all_mappings.items():
+                user_id = user_id_bytes.decode('utf-8') if isinstance(user_id_bytes, bytes) else user_id_bytes
+                mapping = json.loads(mapping_json)
+                if mapping.get('agent_sid') == agent_sid:
+                    return user_id
+        except Exception as e:
+            logger.error(f"Redis reverse lookup error: {e}")
+
+    return None
 
 @socketio.on('connect')
 def handle_connect():
@@ -1296,18 +1408,28 @@ def handle_connect():
     token = auth_header.split(' ')[1] if auth_header and auth_header.startswith('Bearer ') else None
 
     if token and token == AGENT_AUTH_TOKEN:
+        # NEW: Get user_id from query parameters
+        user_id = request.args.get('user_id')
+
+        if not user_id:
+            logger.error("Agent connected without user_id - connection rejected")
+            return False  # Reject connection
+
         # For agents: create a unique session for this agent connection
         # This prevents data pollution between multiple concurrent agent sessions
         agent_session_id = str(uuid.uuid4())
         session['session_id'] = agent_session_id
         session_id = agent_session_id
 
-        # Update global agent tracker
+        # NEW: Register user_id mapping (multi-user support)
+        register_agent_user(user_id, session_id, request.sid)
+
+        # DEPRECATED: Update global agent tracker (kept for backward compatibility)
         agent_session_tracker['current_session'] = session_id
         agent_session_tracker['agent_sid'] = request.sid
 
         set_session_agent_sid(session_id, request.sid)
-        logger.info(f"AGENT connected. SID: {request.sid}, Global Session: {session_id}")
+        logger.info(f"AGENT connected. User ID: {user_id}, SID: {request.sid}, Session: {session_id}")
 
         # Notify ALL web viewers in ALL sessions about agent connection
         all_web_viewer_sids = []
@@ -1331,13 +1453,13 @@ def handle_connect():
                         all_web_viewer_sids.extend(list(sess_data['web_viewer_sids']))
 
         if all_web_viewer_sids:
-            emit('agent_status', {'status': 'connected'}, to=all_web_viewer_sids)
-            logger.info(f"Notified {len(all_web_viewer_sids)} web viewers of agent connection")
+            emit('agent_status', {'status': 'connected', 'user_id': user_id}, to=all_web_viewer_sids)
+            logger.info(f"Notified {len(all_web_viewer_sids)} web viewers of agent connection (user_id: {user_id})")
         else:
-            logger.info("No web viewers to notify of agent connection")
+            logger.info(f"No web viewers to notify of agent connection (user_id: {user_id})")
 
         # Send session info back to agent
-        emit('session_info', {'session_id': session_id})
+        emit('session_info', {'session_id': session_id, 'user_id': user_id})
 
     else:
         # For web viewers: use normal session management
@@ -1360,29 +1482,38 @@ def handle_connect():
 @socketio.on('disconnect')
 def handle_disconnect():
     session_id = get_session_id()
-    logger.info(f"Client disconnected: {request.sid}, Session: {session_id}. Reason: {request.args.get('reason', 'N/A')}")
+    disconnected_sid = request.sid
+    logger.info(f"Client disconnected: {disconnected_sid}, Session: {session_id}. Reason: {request.args.get('reason', 'N/A')}")
 
-    # Check if this was the global agent disconnection
-    if request.sid == agent_session_tracker.get('agent_sid'):
-        # Don't immediately clear agent tracker - give a grace period for reconnection
-        # Store the disconnected SID for comparison
-        disconnected_sid = request.sid
+    # NEW: Check if this is an agent disconnection by looking up user_id
+    disconnected_user_id = get_user_id_by_agent_sid(disconnected_sid)
 
-        logger.warning(f"Global Agent disconnecting: {request.sid}. Grace period for reconnection...")
+    if disconnected_user_id:
+        # This is an agent disconnection
+        logger.warning(f"AGENT disconnecting: User ID: {disconnected_user_id}, SID: {disconnected_sid}. Grace period for reconnection...")
 
         # Schedule cleanup after a short delay to allow for reconnection
         def delayed_agent_cleanup():
             import time
             time.sleep(2)  # 2 second grace period
 
-            # Only clear if no new agent has connected
-            if agent_session_tracker.get('agent_sid') == disconnected_sid:
-                logger.warning(f"Agent {disconnected_sid} did not reconnect. Cleaning up...")
-                disconnected_session = agent_session_tracker.get('current_session')
-                agent_session_tracker['current_session'] = None
-                agent_session_tracker['agent_sid'] = None
-                if disconnected_session:
-                    set_session_agent_sid(disconnected_session, None)
+            # Check if agent reconnected (user_id would have new mapping)
+            current_mapping = get_agent_session_by_user_id(disconnected_user_id)
+
+            if current_mapping and current_mapping.get('agent_sid') == disconnected_sid:
+                # Agent did not reconnect, clean up
+                logger.warning(f"Agent (User ID: {disconnected_user_id}) did not reconnect. Cleaning up...")
+
+                # Unregister from user_id mapping
+                unregister_agent_user(disconnected_user_id)
+
+                # DEPRECATED: Clear global tracker if it matches
+                if agent_session_tracker.get('agent_sid') == disconnected_sid:
+                    disconnected_session = agent_session_tracker.get('current_session')
+                    agent_session_tracker['current_session'] = None
+                    agent_session_tracker['agent_sid'] = None
+                    if disconnected_session:
+                        set_session_agent_sid(disconnected_session, None)
 
                 # Notify all web viewers
                 all_web_viewer_sids = []
@@ -1405,10 +1536,10 @@ def handle_disconnect():
                                 all_web_viewer_sids.extend(list(sess_data['web_viewer_sids']))
 
                 if all_web_viewer_sids:
-                    socketio.emit('agent_status', {'status': 'disconnected'}, to=all_web_viewer_sids)
-                    logger.info(f"Notified {len(all_web_viewer_sids)} web viewers of agent disconnection")
+                    socketio.emit('agent_status', {'status': 'disconnected', 'user_id': disconnected_user_id}, to=all_web_viewer_sids)
+                    logger.info(f"Notified {len(all_web_viewer_sids)} web viewers of agent disconnection (user_id: {disconnected_user_id})")
             else:
-                logger.info(f"Agent {disconnected_sid} was replaced by new connection. Skipping cleanup.")
+                logger.info(f"Agent (User ID: {disconnected_user_id}) reconnected or replaced. Skipping cleanup.")
 
         # Start the delayed cleanup in background
         socketio.start_background_task(delayed_agent_cleanup)
@@ -1475,6 +1606,14 @@ def handle_start_analysis_session(data):
     session_id = get_session_id()
     logger.info(f"Received 'start_analysis_session' from {request.sid}, Session: {session_id}")
 
+    # NEW: Get user_id from web viewer request
+    user_id = data.get('user_id') if data else None
+
+    if not user_id:
+        logger.error("Start analysis request missing user_id")
+        emit('ack_start_session', {'status': 'error', 'message': 'User ID is required to start analysis.'})
+        return
+
     if 'analysisParams' in data:
         set_session_data(session_id, 'live_analysis_params', data['analysisParams'])
         set_session_data(session_id, 'live_trend_data', {"raw_peaks": {}})
@@ -1482,28 +1621,29 @@ def handle_start_analysis_session(data):
         set_session_data(session_id, 'validation_error_sent', False)
         logger.info(f"Analysis session started for session {session_id}. Params set and trend data reset.")
 
-    # Use global agent tracker
-    agent_sid = agent_session_tracker.get('agent_sid')
+    # NEW: Look up agent by user_id
+    agent_mapping = get_agent_session_by_user_id(user_id)
 
-    if 'filters' in data and agent_sid:
+    if 'filters' in data and agent_mapping:
+        agent_sid = agent_mapping['agent_sid']
+        agent_session_id = agent_mapping['session_id']
+
         live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
         filters = data['filters']
         filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
 
         # Store analysis params in agent's session for data processing
-        agent_session_id = agent_session_tracker.get('current_session')
-        if agent_session_id:
-            set_session_data(agent_session_id, 'live_analysis_params', data['analysisParams'])
-            set_session_data(agent_session_id, 'live_trend_data', {"raw_peaks": {}})
-            set_session_data(agent_session_id, 'live_peak_detection_warnings', {})
-            set_session_data(agent_session_id, 'validation_error_sent', False)
+        set_session_data(agent_session_id, 'live_analysis_params', data['analysisParams'])
+        set_session_data(agent_session_id, 'live_trend_data', {"raw_peaks": {}})
+        set_session_data(agent_session_id, 'live_peak_detection_warnings', {})
+        set_session_data(agent_session_id, 'validation_error_sent', False)
 
-        logger.info(f"Sending filters to agent {agent_sid}: {filters}")
+        logger.info(f"Sending filters to agent (user_id: {user_id}, sid: {agent_sid}): {filters}")
         emit('set_filters', filters, to=agent_sid)
         emit('ack_start_session', {'status': 'success', 'message': 'Instructions sent.'})
-    elif not agent_sid:
-        logger.warning("No agent found")
-        emit('ack_start_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
+    elif not agent_mapping:
+        logger.warning(f"No agent found for user_id: {user_id}")
+        emit('ack_start_session', {'status': 'error', 'message': 'Error: Local agent not detected for this User ID.'})
 
 
 @socketio.on('start_cv_analysis_session')
@@ -1511,33 +1651,42 @@ def handle_start_cv_analysis_session(data):
     session_id = get_session_id()
     logger.info(f"Received 'start_cv_analysis_session' from {request.sid}, Session: {session_id}")
 
+    # NEW: Get user_id from web viewer request
+    user_id = data.get('user_id') if data else None
+
+    if not user_id:
+        logger.error("Start CV analysis request missing user_id")
+        emit('ack_start_cv_session', {'status': 'error', 'message': 'User ID is required to start CV analysis.'})
+        return
+
     if 'analysisParams' in data:
         set_session_data(session_id, 'live_analysis_params', data['analysisParams'])
         set_session_data(session_id, 'live_trend_data', {"cv_results": {}})
         set_session_data(session_id, 'validation_error_sent', False)
         logger.info(f"CV Analysis session started for session {session_id}. Params set and CV data reset.")
 
-    # Use global agent tracker
-    agent_sid = agent_session_tracker.get('agent_sid')
+    # NEW: Look up agent by user_id
+    agent_mapping = get_agent_session_by_user_id(user_id)
 
-    if 'filters' in data and agent_sid:
+    if 'filters' in data and agent_mapping:
+        agent_sid = agent_mapping['agent_sid']
+        agent_session_id = agent_mapping['session_id']
+
         live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
         filters = data['filters']
         filters['file_extension'] = live_analysis_params.get('file_extension', '.txt')
 
         # Store CV analysis params in agent's session for data processing
-        agent_session_id = agent_session_tracker.get('current_session')
-        if agent_session_id:
-            set_session_data(agent_session_id, 'live_analysis_params', data['analysisParams'])
-            set_session_data(agent_session_id, 'live_trend_data', {"cv_results": {}})
-            set_session_data(agent_session_id, 'validation_error_sent', False)
+        set_session_data(agent_session_id, 'live_analysis_params', data['analysisParams'])
+        set_session_data(agent_session_id, 'live_trend_data', {"cv_results": {}})
+        set_session_data(agent_session_id, 'validation_error_sent', False)
 
-        logger.info(f"Sending CV filters to agent {agent_sid}: {filters}")
+        logger.info(f"Sending CV filters to agent (user_id: {user_id}, sid: {agent_sid}): {filters}")
         emit('set_filters', filters, to=agent_sid)
         emit('ack_start_cv_session', {'status': 'success', 'message': 'CV Instructions sent.'})
-    elif not agent_sid:
-        logger.warning("No agent found for CV analysis")
-        emit('ack_start_cv_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
+    elif not agent_mapping:
+        logger.warning(f"No agent found for user_id: {user_id}")
+        emit('ack_start_cv_session', {'status': 'error', 'message': 'Error: Local agent not detected for this User ID.'})
 
 
 @socketio.on('stop_analysis_session')
@@ -1583,6 +1732,7 @@ def handle_start_frequency_map_session(data):
     Start frequency map analysis session
     Expected data structure:
     {
+        'user_id': 'xxx-xxx-xxx',
         'analysisParams': {...},
         'frequencies': [10, 20, 50, 100, ...],
         'filters': {...}
@@ -1590,6 +1740,14 @@ def handle_start_frequency_map_session(data):
     """
     session_id = get_session_id()
     logger.info(f"Received 'start_frequency_map_session' from {request.sid}, Session: {session_id}")
+
+    # NEW: Get user_id from web viewer request
+    user_id = data.get('user_id') if data else None
+
+    if not user_id:
+        logger.error("Start frequency map request missing user_id")
+        emit('ack_start_frequency_map_session', {'status': 'error', 'message': 'User ID is required to start frequency map.'})
+        return
 
     if 'analysisParams' in data:
         # Store frequency map specific params
@@ -1602,31 +1760,32 @@ def handle_start_frequency_map_session(data):
         set_session_data(session_id, 'validation_error_sent', False)
         logger.info(f"Frequency Map session started for session {session_id} with frequencies: {data.get('frequencies', [])}")
 
-    # Use global agent tracker
-    agent_sid = agent_session_tracker.get('agent_sid')
+    # NEW: Look up agent by user_id
+    agent_mapping = get_agent_session_by_user_id(user_id)
 
-    if 'filters' in data and agent_sid:
+    if 'filters' in data and agent_mapping:
+        agent_sid = agent_mapping['agent_sid']
+        agent_session_id = agent_mapping['session_id']
+
         filters = data['filters']
         filters['analysis_mode'] = 'frequency_map'
         filters['frequencies'] = data.get('frequencies', [])
         filters['file_extension'] = data['analysisParams'].get('file_extension', '.txt')
 
         # Store in agent's session for data processing
-        agent_session_id = agent_session_tracker.get('current_session')
-        if agent_session_id:
-            set_session_data(agent_session_id, 'live_analysis_params', data['analysisParams'])
-            set_session_data(agent_session_id, 'frequency_map_data', {
-                'frequencies': data.get('frequencies', []),
-                'results': {}
-            })
-            set_session_data(agent_session_id, 'validation_error_sent', False)
+        set_session_data(agent_session_id, 'live_analysis_params', data['analysisParams'])
+        set_session_data(agent_session_id, 'frequency_map_data', {
+            'frequencies': data.get('frequencies', []),
+            'results': {}
+        })
+        set_session_data(agent_session_id, 'validation_error_sent', False)
 
-        logger.info(f"Sending frequency map filters to agent {agent_sid}: {filters}")
+        logger.info(f"Sending frequency map filters to agent (user_id: {user_id}, sid: {agent_sid}): {filters}")
         emit('set_filters', filters, to=agent_sid)
         emit('ack_start_frequency_map_session', {'status': 'success', 'message': 'Frequency map instructions sent.'})
-    elif not agent_sid:
-        logger.warning("No agent found for frequency map")
-        emit('ack_start_frequency_map_session', {'status': 'error', 'message': 'Error: Local agent not detected.'})
+    elif not agent_mapping:
+        logger.warning(f"No agent found for user_id: {user_id}")
+        emit('ack_start_frequency_map_session', {'status': 'error', 'message': 'Error: Local agent not detected for this User ID.'})
 
 
 @socketio.on('stop_frequency_map_session')
@@ -1649,16 +1808,21 @@ def handle_stop_frequency_map_session(data):
 
 @socketio.on('stream_instrument_data')
 def handle_instrument_data(data):
-    # Verify this is from the agent and get the agent's session
-    if request.sid != agent_session_tracker.get('agent_sid'):
-        logger.warning(f"Received data from non-agent SID: {request.sid}")
+    # NEW: Verify this is from a registered agent using user_id lookup
+    user_id = get_user_id_by_agent_sid(request.sid)
+
+    if not user_id:
+        logger.warning(f"Received data from unregistered agent SID: {request.sid}")
         return
 
-    # Get the agent's session ID from the tracker
-    agent_session_id = agent_session_tracker.get('current_session')
-    if not agent_session_id:
-        logger.error("No active agent session found")
+    # Get agent session by user_id
+    agent_mapping = get_agent_session_by_user_id(user_id)
+    if not agent_mapping:
+        logger.error(f"No active session found for user_id: {user_id}")
         return
+
+    agent_session_id = agent_mapping['session_id']
+    logger.debug(f"Processing SWV data for user_id: {user_id}, session: {agent_session_id}")
 
     original_filename = data.get('filename', 'unknown_file.txt')
     file_content = data.get('content', '')
@@ -1777,18 +1941,22 @@ def handle_instrument_data(data):
 
 @socketio.on('stream_cv_data')
 def handle_cv_instrument_data(data):
-    # Verify this is from the agent and get the agent's session (same logic as SWV)
-    if request.sid != agent_session_tracker.get('agent_sid'):
-        logger.warning(f"Received CV data from non-agent SID: {request.sid}")
+    # NEW: Verify this is from a registered agent using user_id lookup
+    user_id = get_user_id_by_agent_sid(request.sid)
+
+    if not user_id:
+        logger.warning(f"Received CV data from unregistered agent SID: {request.sid}")
         return
 
-    # Get the agent's session ID from the tracker
-    agent_session_id = agent_session_tracker.get('current_session')
-    if not agent_session_id:
-        logger.error("No active agent session found for CV data")
+    # Get agent session by user_id
+    agent_mapping = get_agent_session_by_user_id(user_id)
+    if not agent_mapping:
+        logger.error(f"No active CV session found for user_id: {user_id}")
         return
 
+    agent_session_id = agent_mapping['session_id']
     session_id = agent_session_id
+    logger.debug(f"Processing CV data for user_id: {user_id}, session: {session_id}")
 
     original_filename = data.get('filename', 'unknown_file.txt')
     file_content = data.get('content', '')
@@ -2244,21 +2412,72 @@ def handle_cv_data_from_agent(data):
             socketio.emit('cv_preview_response', {'status': 'error', 'message': str(e)}, room=requesting_client_sid)
 
 
+# --- *** USER ID CONNECTION CHECK HANDLER ***
+@socketio.on('check_agent_connection')
+def handle_check_agent_connection(data):
+    """
+    Check if agent with given user_id is currently connected.
+    Web viewers use this to verify their agent is online before starting analysis.
+    """
+    logger.info(f"Received 'check_agent_connection' from {request.sid}")
+
+    user_id = data.get('user_id')
+
+    if not user_id:
+        logger.error("check_agent_connection missing user_id")
+        emit('agent_connection_status', {
+            'status': 'error',
+            'message': 'User ID is required'
+        })
+        return
+
+    # Look up agent by user_id
+    agent_mapping = get_agent_session_by_user_id(user_id)
+
+    if agent_mapping:
+        logger.info(f"Agent found for user_id: {user_id}")
+        emit('agent_connection_status', {
+            'status': 'success',
+            'connected': True,
+            'user_id': user_id,
+            'connected_at': agent_mapping.get('connected_at')
+        })
+    else:
+        logger.warning(f"No agent found for user_id: {user_id}")
+        emit('agent_connection_status', {
+            'status': 'success',
+            'connected': False,
+            'user_id': user_id,
+            'message': 'No agent found with this User ID. Please ensure your agent is running.'
+        })
+
+
 # --- *** NEW *** SOCKET.IO EVENT HANDLER FOR EXPORTING DATA ---
 @socketio.on('request_export_data')
 def handle_export_request(data):
     """
-    Handles a request from the client to export data to CSV.
+    Handles a request from the client to export SWV data to CSV.
     Now exports all electrodes by default.
     """
     logger.info(f"Received 'request_export_data' from {request.sid} with data: {data}")
     try:
-        # Get the agent's session ID
-        agent_session_id = agent_session_tracker.get('current_session')
-        if not agent_session_id:
-            logger.error("No active agent session for SWV export")
-            emit('export_data_response', {'status': 'error', 'message': 'No active agent session found.'})
+        # NEW: Get user_id from request
+        user_id = data.get('user_id') if data else None
+
+        if not user_id:
+            logger.error("SWV export request missing user_id")
+            emit('export_data_response', {'status': 'error', 'message': 'User ID is required for export.'})
             return
+
+        # Get agent session by user_id
+        agent_mapping = get_agent_session_by_user_id(user_id)
+        if not agent_mapping:
+            logger.error(f"No active agent session for user_id: {user_id}")
+            emit('export_data_response', {'status': 'error', 'message': 'No active agent session found for this User ID.'})
+            return
+
+        agent_session_id = agent_mapping['session_id']
+        logger.info(f"Exporting SWV data for user_id: {user_id}, session: {agent_session_id}")
 
         # Export all electrodes
         csv_data = generate_csv_data_all_electrodes(agent_session_id)
@@ -2279,12 +2498,23 @@ def handle_cv_export_request(data):
     """
     logger.info(f"Received 'request_export_cv_data' from {request.sid} with data: {data}")
     try:
-        # Get the agent's session ID
-        agent_session_id = agent_session_tracker.get('current_session')
-        if not agent_session_id:
-            logger.error("No active agent session for CV export")
-            emit('export_cv_data_response', {'status': 'error', 'message': 'No active agent session found.'})
+        # NEW: Get user_id from request
+        user_id = data.get('user_id') if data else None
+
+        if not user_id:
+            logger.error("CV export request missing user_id")
+            emit('export_cv_data_response', {'status': 'error', 'message': 'User ID is required for export.'})
             return
+
+        # Get agent session by user_id
+        agent_mapping = get_agent_session_by_user_id(user_id)
+        if not agent_mapping:
+            logger.error(f"No active agent session for user_id: {user_id}")
+            emit('export_cv_data_response', {'status': 'error', 'message': 'No active agent session found for this User ID.'})
+            return
+
+        agent_session_id = agent_mapping['session_id']
+        logger.info(f"Exporting CV data for user_id: {user_id}, session: {agent_session_id}")
 
         # Export all electrodes
         csv_data = generate_cv_csv_data_all_electrodes(agent_session_id)
@@ -2306,12 +2536,18 @@ def handle_frequency_map_export_request(data):
     try:
         current_electrode = data.get('current_electrode') if data else None
         export_all = data.get('export_all', False) if data else False
-        session_id = get_session_id()
+
+        # Get the agent's session ID (same as CV export)
+        agent_session_id = agent_session_tracker.get('current_session')
+        if not agent_session_id:
+            logger.error("No active agent session for Frequency Map export")
+            emit('export_frequency_map_data_response', {'status': 'error', 'message': 'No active agent session found.'})
+            return
 
         if export_all:
-            csv_data = generate_frequency_map_all_electrodes_csv(session_id)
+            csv_data = generate_frequency_map_all_electrodes_csv(agent_session_id)
         else:
-            csv_data = generate_frequency_map_csv_data(session_id, current_electrode)
+            csv_data = generate_frequency_map_csv_data(agent_session_id, current_electrode)
 
         if csv_data:
             emit('export_frequency_map_data_response', {'status': 'success', 'data': csv_data})

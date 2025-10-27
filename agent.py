@@ -696,6 +696,51 @@ class AgentApp:
         self.url_entry = tk.Entry(server_frame, textvariable=self.server_url, font=("Helvetica", 9))
         self.url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        # --- User ID Display Frame ---
+        user_id_frame = tk.Frame(main_frame, pady=5, bg="#e8f5e9", relief=tk.RIDGE, bd=1)
+        user_id_frame.pack(fill=tk.X, pady=(5, 0))
+
+        tk.Label(user_id_frame, text="User ID (for web connection):", anchor="w", bg="#e8f5e9",
+                font=("Helvetica", 9, "bold")).pack(side=tk.LEFT, padx=(5, 5))
+
+        # User ID display with copy button
+        user_id_display_frame = tk.Frame(user_id_frame, bg="white", relief=tk.SUNKEN, bd=1)
+        user_id_display_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        self.user_id_label = tk.Label(
+            user_id_display_frame,
+            text=id_manager.get_user_id(),
+            bg="white",
+            fg="#0066cc",
+            font=("Courier New", 9),
+            anchor="w",
+            padx=5
+        )
+        self.user_id_label.pack(fill=tk.X)
+
+        def copy_user_id():
+            user_id = id_manager.get_user_id()
+            root.clipboard_clear()
+            root.clipboard_append(user_id)
+            self.log(f"User ID copied to clipboard: {user_id}")
+            # Visual feedback
+            copy_btn.config(text="Copied!", bg="#66bb6a")
+            root.after(2000, lambda: copy_btn.config(text="Copy", bg="#4CAF50"))
+
+        copy_btn = tk.Button(
+            user_id_frame,
+            text="Copy",
+            command=copy_user_id,
+            width=8,
+            bg="#4CAF50",
+            fg="white",
+            font=("Helvetica", 9, "bold"),
+            relief=tk.RAISED,
+            cursor="hand2",
+            padx=5
+        )
+        copy_btn.pack(side=tk.LEFT, padx=(0, 5))
+
         # Folder Selection Frame
         folder_frame = tk.Frame(main_frame)
         folder_frame.pack(fill=tk.X)
@@ -798,8 +843,13 @@ class AgentApp:
 
             self.log("Preparing connection with authentication...")
             headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
-            self.log("Initiating Socket.IO connection...")
-            sio.connect(server_url_to_connect, headers=headers, socketio_path='socket.io', transports=['polling'])
+
+            # Get user_id to send with connection
+            user_id = id_manager.get_user_id()
+            connection_url = f"{server_url_to_connect}?user_id={user_id}"
+
+            self.log(f"Initiating Socket.IO connection with User ID: {user_id}...")
+            sio.connect(connection_url, headers=headers, socketio_path='socket.io', transports=['polling'])
             self.log("Socket.IO connection established!")
 
             # Wait a moment for connection to stabilize
