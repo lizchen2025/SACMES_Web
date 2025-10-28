@@ -1561,6 +1561,21 @@ def handle_connect():
             logger.error("Agent connected without user_id - connection rejected")
             return False  # Reject connection
 
+        # SECURITY: Check if user_id is already in use
+        existing_agent = get_agent_session_by_user_id(user_id)
+        if existing_agent:
+            # User ID collision detected - reject connection
+            logger.error(f"SECURITY: User ID collision detected! user_id={user_id} is already in use by agent_sid={existing_agent.get('agent_sid')}")
+            logger.error(f"Rejecting new connection attempt from sid={request.sid}")
+
+            # Notify the connecting agent that user_id is taken
+            emit('connection_rejected', {
+                'reason': 'user_id_collision',
+                'message': f'User ID {user_id} is already in use. Please restart your agent to generate a new User ID.',
+                'user_id': user_id
+            })
+            return False  # Reject connection
+
         # For agents: create a unique session for this agent connection
         # This prevents data pollution between multiple concurrent agent sessions
         agent_session_id = str(uuid.uuid4())
@@ -1569,6 +1584,7 @@ def handle_connect():
 
         # NEW: Register user_id mapping (multi-user support)
         register_agent_user(user_id, session_id, request.sid)
+        logger.info(f"Successfully registered unique user_id: {user_id}")
 
         # DEPRECATED: Update global agent tracker (kept for backward compatibility)
         agent_session_tracker['current_session'] = session_id
