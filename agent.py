@@ -674,6 +674,60 @@ def on_consent_logged(data):
         app.log(f"Server failed to log consent for user: {user_id}")
 
 
+@sio.on('connection_rejected')
+def on_connection_rejected(data):
+    """Handle connection rejection from server (e.g., user_id collision)"""
+    reason = data.get('reason', 'unknown')
+    message = data.get('message', 'Connection rejected by server')
+    user_id = data.get('user_id', 'unknown')
+
+    app.log("\n" + "=" * 60)
+    app.log("❌ ERROR: Connection Rejected by Server")
+    app.log("=" * 60)
+
+    if reason == 'user_id_collision':
+        app.log(f"Your User ID ({user_id}) is already in use by another agent.")
+        app.log("")
+        app.log("Possible causes:")
+        app.log("1. You have another instance of this agent running")
+        app.log("2. Extremely rare UUID collision (probability: 1/10^36)")
+        app.log("3. Someone is using the same User ID")
+        app.log("")
+        app.log("Solution:")
+        app.log("→ Please DELETE the file 'agent.json' in the agent folder")
+        app.log("→ Then RESTART this agent to generate a new User ID")
+    else:
+        app.log(f"Reason: {reason}")
+        app.log(f"Message: {message}")
+
+    app.log("=" * 60 + "\n")
+
+    # Disconnect from server
+    sio.disconnect()
+
+    # Show error dialog in GUI
+    try:
+        if reason == 'user_id_collision':
+            messagebox.showerror(
+                "User ID Collision",
+                f"Your User ID is already in use!\n\n"
+                f"User ID: {user_id}\n\n"
+                f"Solution:\n"
+                f"1. DELETE the file 'agent.json'\n"
+                f"2. RESTART this agent\n\n"
+                f"This will generate a new unique User ID.",
+                parent=app.root
+            )
+        else:
+            messagebox.showerror(
+                "Connection Rejected",
+                f"Server rejected connection.\n\nReason: {reason}\n\n{message}",
+                parent=app.root
+            )
+    except:
+        pass  # GUI might not be ready yet
+
+
 # --- GUI Application Class ---
 class AgentApp:
     def __init__(self, root):

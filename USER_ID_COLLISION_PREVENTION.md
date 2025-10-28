@@ -23,9 +23,39 @@
 
 ## 当前的防护机制 (已实施)
 
-### 1. 服务器端冲突检测
+### 重要说明：Monitor模式不受影响 ✅
 
-当Agent尝试连接时，服务器会检查user_id是否已被占用：
+**冲突检测仅针对Agent连接，Web Viewer的Monitor模式完全不受影响！**
+
+- ✅ **Monitor模式**：多个web browsers输入相同user_id → **允许**（这是设计功能）
+- ❌ **Agent重复连接**：两个agents使用相同user_id → **拒绝**（这是安全防护）
+
+**实现细节**：
+```python
+# app.py: handle_connect()
+
+if token and token == AGENT_AUTH_TOKEN:
+    # 这里是Agent连接逻辑 - 有冲突检测
+    existing_agent = get_agent_session_by_user_id(user_id)
+    if existing_agent:
+        # 拒绝Agent重复连接 ❌
+        emit('connection_rejected', {...})
+        return False
+else:
+    # 这里是Web Viewer连接逻辑 - 无冲突检测
+    # Monitor模式允许多个viewer ✅
+    add_session_web_viewer_sid(session_id, request.sid)
+```
+
+**Monitor模式的连接流程**：
+1. Web Viewer连接 → 创建session（无user_id检查）
+2. 用户输入user_id → 触发 `check_agent_connection` 事件
+3. 服务器调用 `register_web_viewer_user(user_id, sid)` → **允许多个viewer注册到同一个user_id** ✅
+4. 多台设备显示 "Monitor Mode: N devices viewing"
+
+### 1. 服务器端冲突检测（仅针对Agent）
+
+当**Agent**尝试连接时，服务器会检查user_id是否已被占用：
 
 ```python
 # app.py: handle_connect()
@@ -68,38 +98,76 @@ Agent显示错误：需要重启生成新ID
 [ERROR] Rejecting new connection attempt from sid=def456
 ```
 
-## Agent端需要的修改
+## Agent端实现 (已完成 ✅)
 
-### 必需：处理连接拒绝事件
+### connection_rejected 事件处理器
 
-Agent需要监听 `connection_rejected` 事件：
+Agent现已实现完整的连接拒绝处理逻辑（[agent.py:677-728](agent.py#L677-L728)）：
 
 ```python
-# agent.py
+# agent.py (已实现)
 
 @sio.on('connection_rejected')
 def on_connection_rejected(data):
-    reason = data.get('reason')
-    message = data.get('message')
-    user_id = data.get('user_id')
+    """Handle connection rejection from server (e.g., user_id collision)"""
+    reason = data.get('reason', 'unknown')
+    message = data.get('message', 'Connection rejected by server')
+    user_id = data.get('user_id', 'unknown')
+
+    # 1. Log detailed error in console
+    app.log("\n" + "=" * 60)
+    app.log("❌ ERROR: Connection Rejected by Server")
+    app.log("=" * 60)
 
     if reason == 'user_id_collision':
-        print("\n" + "="*60)
-        print("❌ ERROR: User ID Collision Detected")
-        print("="*60)
-        print(f"Your User ID ({user_id}) is already in use by another agent.")
-        print("\nPossible causes:")
-        print("1. You have another instance of this agent running")
-        print("2. Extremely rare UUID collision (probability: 1/10^36)")
-        print("3. Someone is maliciously using your User ID")
-        print("\nSolution:")
-        print("→ Please RESTART this agent to generate a new User ID")
-        print("="*60 + "\n")
+        app.log(f"Your User ID ({user_id}) is already in use by another agent.")
+        app.log("")
+        app.log("Possible causes:")
+        app.log("1. You have another instance of this agent running")
+        app.log("2. Extremely rare UUID collision (probability: 1/10^36)")
+        app.log("3. Someone is using the same User ID")
+        app.log("")
+        app.log("Solution:")
+        app.log("→ Please DELETE the file 'agent.json' in the agent folder")
+        app.log("→ Then RESTART this agent to generate a new User ID")
+    else:
+        app.log(f"Reason: {reason}")
+        app.log(f"Message: {message}")
 
-        # Disconnect and exit
-        sio.disconnect()
-        sys.exit(1)
+    app.log("=" * 60 + "\n")
+
+    # 2. Disconnect from server
+    sio.disconnect()
+
+    # 3. Show error dialog in GUI
+    try:
+        if reason == 'user_id_collision':
+            messagebox.showerror(
+                "User ID Collision",
+                f"Your User ID is already in use!\n\n"
+                f"User ID: {user_id}\n\n"
+                f"Solution:\n"
+                f"1. DELETE the file 'agent.json'\n"
+                f"2. RESTART this agent\n\n"
+                f"This will generate a new unique User ID.",
+                parent=app.root
+            )
+        else:
+            messagebox.showerror(
+                "Connection Rejected",
+                f"Server rejected connection.\n\nReason: {reason}\n\n{message}",
+                parent=app.root
+            )
+    except:
+        pass  # GUI might not be ready yet
 ```
+
+**功能说明**：
+- ✅ 清晰的控制台错误日志
+- ✅ 用户友好的GUI错误对话框
+- ✅ 详细的问题诊断和解决方案
+- ✅ 自动断开连接防止重试
+- ✅ 指导用户删除agent.json并重启
 
 ### 可选：断线重连逻辑
 
