@@ -882,38 +882,30 @@ def process_file_in_background(original_filename, content, params_for_this_file,
         current_electrode = live_analysis_params.get('selected_electrode')
         electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
         full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key)
-        # Send update to ALL web viewers across all sessions
-        all_web_viewer_sids = []
-        if redis_client:
-            try:
-                session_keys = redis_client.keys("session:*")
-                for session_key in session_keys:
-                    # session_key is already a string due to decode_responses=True
-                    session_data = redis_client.hget(session_key, 'web_viewer_sids')
-                    if session_data:
-                        viewer_sids = json.loads(session_data)
-                        all_web_viewer_sids.extend(list(viewer_sids))
-            except Exception as e:
-                logger.error(f"Error getting all web viewers for analysis update: {e}")
 
-        # Check fallback data for all sessions
-        if not all_web_viewer_sids:
-            with session_lock:
-                for sess_id, sess_data in fallback_data.items():
-                    if isinstance(sess_data, dict) and 'web_viewer_sids' in sess_data:
-                        all_web_viewer_sids.extend(list(sess_data['web_viewer_sids']))
+        # PRIVACY FIX: Send update ONLY to web viewers with matching user_id
+        # First, find the user_id for this session
+        user_id = get_user_id_by_session_id(session_id)
 
-        if all_web_viewer_sids:
-            # Send update with electrode-specific information
-            response_data = {
-                "filename": base_filename,  # Use base filename for frontend processing
-                "individual_analysis": analysis_result,
-                "trend_data": full_trends,
-                "electrode_index": selected_electrode,
-                "peak_detection_warnings": live_peak_detection_warnings.get(electrode_key, [])
-            }
-            socketio.emit('live_analysis_update', response_data, to=all_web_viewer_sids)
-            logger.info(f"Sent analysis update to {len(all_web_viewer_sids)} web viewers")
+        if user_id:
+            # Get web viewers registered to this user_id
+            user_web_viewers = get_web_viewers_by_user_id(user_id)
+
+            if user_web_viewers:
+                # Send update with electrode-specific information
+                response_data = {
+                    "filename": base_filename,  # Use base filename for frontend processing
+                    "individual_analysis": analysis_result,
+                    "trend_data": full_trends,
+                    "electrode_index": selected_electrode,
+                    "peak_detection_warnings": live_peak_detection_warnings.get(electrode_key, [])
+                }
+                socketio.emit('live_analysis_update', response_data, to=user_web_viewers)
+                logger.info(f"Sent analysis update to {len(user_web_viewers)} web viewers for user_id: {user_id}")
+            else:
+                logger.info(f"No web viewers registered for user_id: {user_id}")
+        else:
+            logger.warning(f"Could not find user_id for session: {session_id} - skipping broadcast for privacy")
 
         # Send processing complete acknowledgment to agent
         agent_sid = agent_session_tracker.get('agent_sid')
@@ -1293,6 +1285,11 @@ agent_session_tracker = {'current_session': None, 'agent_sid': None}
 agent_user_mapping = {}  # {user_id: {'session_id': xxx, 'agent_sid': xxx, 'connected_at': xxx}}
 agent_user_mapping_lock = threading.Lock()
 
+# NEW: Web viewer to user_id mapping for multi-viewer support (monitor mode)
+# This allows multiple web browsers to monitor the same agent's analysis
+web_user_mapping = {}  # {user_id: set([web_viewer_sid1, web_viewer_sid2, ...])}
+web_user_mapping_lock = threading.Lock()
+
 def register_agent_user(user_id, session_id, agent_sid):
     """
     Register agent user_id to session mapping.
@@ -1401,6 +1398,155 @@ def get_user_id_by_agent_sid(agent_sid):
 
     return None
 
+def register_web_viewer_user(user_id, web_viewer_sid):
+    """
+    Register a web viewer to a user_id for monitor mode.
+    Multiple web viewers can connect to the same user_id to monitor analysis.
+
+    Args:
+        user_id: User identifier from agent
+        web_viewer_sid: Socket.IO connection ID of the web viewer
+    """
+    with web_user_mapping_lock:
+        if user_id not in web_user_mapping:
+            web_user_mapping[user_id] = set()
+        web_user_mapping[user_id].add(web_viewer_sid)
+
+    # Store in Redis for persistence
+    if redis_client:
+        try:
+            redis_client.hset(
+                'web_user_mapping',
+                user_id,
+                json.dumps(list(web_user_mapping[user_id]))
+            )
+            logger.info(f"Registered web viewer in Redis: user_id={user_id}, sid={web_viewer_sid}, total_viewers={len(web_user_mapping[user_id])}")
+        except Exception as e:
+            logger.error(f"Failed to store web viewer mapping in Redis: {e}")
+
+    logger.info(f"Registered web viewer: user_id={user_id}, sid={web_viewer_sid}, total_viewers={len(web_user_mapping[user_id])}")
+
+def unregister_web_viewer_user(user_id, web_viewer_sid):
+    """
+    Unregister a web viewer from a user_id when disconnected.
+
+    Args:
+        user_id: User identifier
+        web_viewer_sid: Socket.IO connection ID of the web viewer
+    """
+    with web_user_mapping_lock:
+        if user_id in web_user_mapping:
+            web_user_mapping[user_id].discard(web_viewer_sid)
+
+            # Remove the user_id entry if no more viewers
+            if not web_user_mapping[user_id]:
+                del web_user_mapping[user_id]
+                logger.info(f"Removed user_id mapping (no more viewers): {user_id}")
+            else:
+                logger.info(f"Unregistered web viewer: user_id={user_id}, sid={web_viewer_sid}, remaining_viewers={len(web_user_mapping[user_id])}")
+
+    # Update Redis
+    if redis_client:
+        try:
+            if user_id in web_user_mapping:
+                redis_client.hset(
+                    'web_user_mapping',
+                    user_id,
+                    json.dumps(list(web_user_mapping[user_id]))
+                )
+            else:
+                redis_client.hdel('web_user_mapping', user_id)
+                logger.info(f"Removed web viewer mapping from Redis: {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to update web viewer mapping in Redis: {e}")
+
+def get_web_viewers_by_user_id(user_id):
+    """
+    Get all web viewer SIDs for a given user_id.
+
+    Args:
+        user_id: User identifier
+
+    Returns:
+        list of web viewer socket IDs
+    """
+    # Try Redis first
+    if redis_client:
+        try:
+            data = redis_client.hget('web_user_mapping', user_id)
+            if data:
+                return json.loads(data)
+        except Exception as e:
+            logger.error(f"Redis get web viewer mapping error: {e}")
+
+    # Fallback to in-memory
+    with web_user_mapping_lock:
+        if user_id in web_user_mapping:
+            return list(web_user_mapping[user_id])
+        return []
+
+def get_user_id_by_web_viewer_sid(web_viewer_sid):
+    """
+    Reverse lookup: find user_id by web viewer socket ID.
+    Used during disconnect to identify which user_id the viewer was monitoring.
+
+    Args:
+        web_viewer_sid: Web viewer socket ID
+
+    Returns:
+        user_id string or None if not found
+    """
+    # Check in-memory first
+    with web_user_mapping_lock:
+        for user_id, viewer_sids in web_user_mapping.items():
+            if web_viewer_sid in viewer_sids:
+                return user_id
+
+    # Check Redis if not in memory
+    if redis_client:
+        try:
+            all_mappings = redis_client.hgetall('web_user_mapping')
+            for user_id_bytes, viewers_json in all_mappings.items():
+                user_id = user_id_bytes.decode('utf-8') if isinstance(user_id_bytes, bytes) else user_id_bytes
+                viewer_sids = json.loads(viewers_json)
+                if web_viewer_sid in viewer_sids:
+                    return user_id
+        except Exception as e:
+            logger.error(f"Redis reverse lookup for web viewer error: {e}")
+
+    return None
+
+def get_user_id_by_session_id(session_id):
+    """
+    Reverse lookup: find user_id by session_id.
+    Used to determine which user's data is being processed.
+
+    Args:
+        session_id: Session ID
+
+    Returns:
+        user_id string or None if not found
+    """
+    # Check in-memory first
+    with agent_user_mapping_lock:
+        for user_id, mapping in agent_user_mapping.items():
+            if mapping.get('session_id') == session_id:
+                return user_id
+
+    # Check Redis if not in memory
+    if redis_client:
+        try:
+            all_mappings = redis_client.hgetall('agent_user_mapping')
+            for user_id_bytes, mapping_json in all_mappings.items():
+                user_id = user_id_bytes.decode('utf-8') if isinstance(user_id_bytes, bytes) else user_id_bytes
+                mapping = json.loads(mapping_json)
+                if mapping.get('session_id') == session_id:
+                    return user_id
+        except Exception as e:
+            logger.error(f"Redis reverse lookup for session error: {e}")
+
+    return None
+
 @socketio.on('connect')
 def handle_connect():
     # Check if this is an agent with a specific session_id in auth data
@@ -1431,32 +1577,14 @@ def handle_connect():
         set_session_agent_sid(session_id, request.sid)
         logger.info(f"AGENT connected. User ID: {user_id}, SID: {request.sid}, Session: {session_id}")
 
-        # Notify ALL web viewers in ALL sessions about agent connection
-        all_web_viewer_sids = []
-        if redis_client:
-            try:
-                # Get all session keys
-                session_keys = redis_client.keys("session:*")
-                for session_key in session_keys:
-                    session_data = redis_client.hget(session_key, 'web_viewer_sids')
-                    if session_data:
-                        viewer_sids = json.loads(session_data)
-                        all_web_viewer_sids.extend(list(viewer_sids))
-            except Exception as e:
-                logger.error(f"Error getting all web viewers: {e}")
+        # PRIVACY FIX: Notify ONLY web viewers with matching user_id
+        user_web_viewers = get_web_viewers_by_user_id(user_id)
 
-        # Check fallback data for all sessions
-        if not all_web_viewer_sids:
-            with session_lock:
-                for sess_id, sess_data in fallback_data.items():
-                    if isinstance(sess_data, dict) and 'web_viewer_sids' in sess_data:
-                        all_web_viewer_sids.extend(list(sess_data['web_viewer_sids']))
-
-        if all_web_viewer_sids:
-            emit('agent_status', {'status': 'connected', 'user_id': user_id}, to=all_web_viewer_sids)
-            logger.info(f"Notified {len(all_web_viewer_sids)} web viewers of agent connection (user_id: {user_id})")
+        if user_web_viewers:
+            emit('agent_status', {'status': 'connected', 'user_id': user_id}, to=user_web_viewers)
+            logger.info(f"Notified {len(user_web_viewers)} web viewers of agent connection (user_id: {user_id})")
         else:
-            logger.info(f"No web viewers to notify of agent connection (user_id: {user_id})")
+            logger.info(f"No web viewers registered yet for user_id: {user_id}")
 
         # Send session info back to agent
         emit('session_info', {'session_id': session_id, 'user_id': user_id})
@@ -1515,29 +1643,14 @@ def handle_disconnect():
                     if disconnected_session:
                         set_session_agent_sid(disconnected_session, None)
 
-                # Notify all web viewers
-                all_web_viewer_sids = []
-                if redis_client:
-                    try:
-                        session_keys = redis_client.keys("session:*")
-                        for session_key in session_keys:
-                            session_data = redis_client.hget(session_key, 'web_viewer_sids')
-                            if session_data:
-                                viewer_sids = json.loads(session_data)
-                                all_web_viewer_sids.extend(list(viewer_sids))
-                    except Exception as e:
-                        logger.error(f"Error getting all web viewers for disconnect: {e}")
+                # PRIVACY FIX: Notify ONLY web viewers with matching user_id
+                user_web_viewers = get_web_viewers_by_user_id(disconnected_user_id)
 
-                # Check fallback data for all sessions
-                if not all_web_viewer_sids:
-                    with session_lock:
-                        for sess_id, sess_data in fallback_data.items():
-                            if isinstance(sess_data, dict) and 'web_viewer_sids' in sess_data:
-                                all_web_viewer_sids.extend(list(sess_data['web_viewer_sids']))
-
-                if all_web_viewer_sids:
-                    socketio.emit('agent_status', {'status': 'disconnected', 'user_id': disconnected_user_id}, to=all_web_viewer_sids)
-                    logger.info(f"Notified {len(all_web_viewer_sids)} web viewers of agent disconnection (user_id: {disconnected_user_id})")
+                if user_web_viewers:
+                    socketio.emit('agent_status', {'status': 'disconnected', 'user_id': disconnected_user_id}, to=user_web_viewers)
+                    logger.info(f"Notified {len(user_web_viewers)} web viewers of agent disconnection (user_id: {disconnected_user_id})")
+                else:
+                    logger.info(f"No web viewers to notify for user_id: {disconnected_user_id}")
             else:
                 logger.info(f"Agent (User ID: {disconnected_user_id}) reconnected or replaced. Skipping cleanup.")
 
@@ -1549,6 +1662,13 @@ def handle_disconnect():
         web_viewer_sids = get_session_web_viewer_sids(session_id)
         if request.sid in web_viewer_sids:
             remove_session_web_viewer_sid(session_id, request.sid)
+
+            # NEW: Clean up web_user_mapping when web viewer disconnects
+            viewer_user_id = get_user_id_by_web_viewer_sid(request.sid)
+            if viewer_user_id:
+                unregister_web_viewer_user(viewer_user_id, request.sid)
+                logger.info(f"Cleaned up web_user_mapping for disconnected viewer: user_id={viewer_user_id}, sid={request.sid}")
+
             # Reset validation error flag when a web viewer disconnects
             set_session_data(session_id, 'validation_error_sent', False)
             remaining_viewers = get_session_web_viewer_sids(session_id)
@@ -2436,12 +2556,23 @@ def handle_check_agent_connection(data):
 
     if agent_mapping:
         logger.info(f"Agent found for user_id: {user_id}")
+
+        # Register this web viewer to the user_id (enable monitor mode)
+        register_web_viewer_user(user_id, request.sid)
+
+        # Get count of web viewers for this user_id
+        web_viewers = get_web_viewers_by_user_id(user_id)
+        viewer_count = len(web_viewers)
+
         emit('agent_connection_status', {
             'status': 'success',
             'connected': True,
             'user_id': user_id,
-            'connected_at': agent_mapping.get('connected_at')
+            'connected_at': agent_mapping.get('connected_at'),
+            'viewer_count': viewer_count  # Let user know how many devices are monitoring
         })
+
+        logger.info(f"Web viewer {request.sid} registered to user_id: {user_id}, total viewers: {viewer_count}")
     else:
         logger.warning(f"No agent found for user_id: {user_id}")
         emit('agent_connection_status', {

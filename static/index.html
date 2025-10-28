@@ -381,10 +381,20 @@
                 <div id="agentInfoContainer" class="hidden">
                     <div class="bg-white p-4 rounded-lg border-2 border-green-400 shadow-sm">
                         <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <span class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
-                                <span class="text-sm text-gray-700">Connected to Agent:</span>
-                                <strong id="connectedUserId" class="text-sm text-green-700 font-mono"></strong>
+                            <div class="flex flex-col gap-1">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
+                                    <span class="text-sm text-gray-700">Connected to Agent:</span>
+                                    <strong id="connectedUserId" class="text-sm text-green-700 font-mono"></strong>
+                                </div>
+                                <!-- Monitor mode indicator -->
+                                <div id="monitorModeIndicator" class="hidden flex items-center gap-2 ml-5">
+                                    <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                    </svg>
+                                    <span id="monitorModeText" class="text-xs text-blue-600 font-medium"></span>
+                                </div>
                             </div>
                             <button id="disconnectBtn" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-200 focus:outline-none focus:ring-2 focus:ring-red-400">
                                 Disconnect
@@ -414,7 +424,7 @@
                 <a href="/downloads/SACMES_Agent.zip" download="SACMES_Agent.zip"
                    class="block w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-75 text-center">
                     <span class="text-lg">Download Local Agent</span>
-                    <span class="block text-sm mt-1 opacity-90">Python script with auto-setup • No installation required • 90 KB</span>
+                    <span class="block text-sm mt-1 opacity-90">Python script with auto-setup • No installation required • 4 MB</span>
                 </a>
             </div>
         </div>
@@ -1791,10 +1801,23 @@
                     document.getElementById('connectedUserId').textContent = response.user_id;
                     document.getElementById('agentInfoContainer').classList.remove('hidden');
 
+                    // Show monitor mode indicator if multiple viewers
+                    const viewerCount = response.viewer_count || 1;
+                    if (viewerCount > 1) {
+                        const monitorIndicator = document.getElementById('monitorModeIndicator');
+                        const monitorText = document.getElementById('monitorModeText');
+                        monitorIndicator.classList.remove('hidden');
+                        monitorText.textContent = `Monitor Mode: ${viewerCount} device${viewerCount > 1 ? 's' : ''} viewing`;
+                        console.log(`Monitor mode active: ${viewerCount} devices connected`);
+                    } else {
+                        document.getElementById('monitorModeIndicator').classList.add('hidden');
+                    }
+
                     showConnectionStatus('success', 'Successfully connected to agent!');
                     enableAnalysisControls();
 
                     console.log('Connected to agent at:', response.connected_at);
+                    console.log(`Viewer count: ${viewerCount}`);
                 } else {
                     // Agent not found
                     showConnectionStatus('error', 'Agent not found. Please check your User ID and ensure your agent is running.');
