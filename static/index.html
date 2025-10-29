@@ -415,24 +415,14 @@
                             </button>
                         </div>
 
-                        <!-- Monitor Mode Entry Buttons -->
-                        <div class="border-t pt-3">
-                            <p class="text-xs text-gray-600 mb-2">Enter Monitor Mode (view analysis from another device):</p>
-                            <div class="flex gap-2">
-                                <button id="monitorSWVBtn" class="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400 flex items-center justify-center gap-2">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                                    </svg>
-                                    Monitor SWV
-                                </button>
-                                <button id="monitorCVBtn" class="flex-1 bg-purple-500 hover:bg-purple-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-200 focus:outline-none focus:ring-2 focus:ring-purple-400 flex items-center justify-center gap-2">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                                    </svg>
-                                    Monitor CV
-                                </button>
+                        <!-- Smart Monitor Mode Entry (only shown when analysis is ongoing) -->
+                        <div id="smartMonitorSection" class="hidden border-t pt-3">
+                            <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-2 rounded">
+                                <p class="text-xs font-semibold text-yellow-800 mb-1">📊 Active Analysis Detected!</p>
+                                <p class="text-xs text-yellow-700">Another device is running analysis with this User ID. Enter Monitor Mode to view real-time results:</p>
+                            </div>
+                            <div class="flex gap-2" id="monitorButtonsContainer">
+                                <!-- Buttons will be dynamically added here based on ongoing analysis -->
                             </div>
                         </div>
                     </div>
@@ -1720,42 +1710,116 @@
             disconnectFromAgent();
         });
 
-        // Monitor Mode buttons - direct entry to visualization
-        document.getElementById('monitorSWVBtn').addEventListener('click', function() {
-            console.log('Entering SWV Monitor Mode');
-            // Set monitor mode flag
-            sessionStorage.setItem('monitorMode', 'true');
-            sessionStorage.setItem('monitorType', 'swv');
-            // Show SWV section and skip to trend visualization
-            showSection('swv');
-            // Show monitor mode banner
-            document.getElementById('swvMonitorModeBanner').classList.remove('hidden');
-            // Auto-navigate to trend tab
-            setTimeout(() => {
-                const trendTab = document.querySelector('[data-tab="swv-trend"]');
-                if (trendTab) {
-                    trendTab.click();
-                }
-            }, 100);
-        });
+        // Smart Monitor Mode: Show buttons based on ongoing analysis
+        function showSmartMonitorButtons(ongoingAnalysis) {
+            const smartMonitorSection = document.getElementById('smartMonitorSection');
+            const monitorButtonsContainer = document.getElementById('monitorButtonsContainer');
 
-        document.getElementById('monitorCVBtn').addEventListener('click', function() {
-            console.log('Entering CV Monitor Mode');
-            // Set monitor mode flag
-            sessionStorage.setItem('monitorMode', 'true');
-            sessionStorage.setItem('monitorType', 'cv');
-            // Show CV section and skip to segments visualization
-            showSection('cv');
-            // Show monitor mode banner
-            document.getElementById('cvMonitorModeBanner').classList.remove('hidden');
-            // Auto-navigate to segments tab
-            setTimeout(() => {
-                const segmentsTab = document.querySelector('[data-tab="cv-segments"]');
-                if (segmentsTab) {
-                    segmentsTab.click();
+            // Clear existing buttons
+            monitorButtonsContainer.innerHTML = '';
+
+            // Check if there's any ongoing analysis
+            const hasSWV = ongoingAnalysis.swv === true;
+            const hasCV = ongoingAnalysis.cv === true;
+
+            if (hasSWV || hasCV) {
+                // Show the smart monitor section
+                smartMonitorSection.classList.remove('hidden');
+
+                // Add SWV Monitor button if SWV analysis is ongoing
+                if (hasSWV) {
+                    const swvBtn = document.createElement('button');
+                    swvBtn.id = 'monitorSWVBtn';
+                    swvBtn.className = 'flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400 flex items-center justify-center gap-2';
+                    swvBtn.innerHTML = `
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                        </svg>
+                        Monitor SWV
+                    `;
+                    swvBtn.addEventListener('click', function() {
+                        enterMonitorMode('swv');
+                    });
+                    monitorButtonsContainer.appendChild(swvBtn);
                 }
-            }, 100);
-        });
+
+                // Add CV Monitor button if CV analysis is ongoing
+                if (hasCV) {
+                    const cvBtn = document.createElement('button');
+                    cvBtn.id = 'monitorCVBtn';
+                    cvBtn.className = 'flex-1 bg-purple-500 hover:bg-purple-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-200 focus:outline-none focus:ring-2 focus:ring-purple-400 flex items-center justify-center gap-2';
+                    cvBtn.innerHTML = `
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                        </svg>
+                        Monitor CV
+                    `;
+                    cvBtn.addEventListener('click', function() {
+                        enterMonitorMode('cv');
+                    });
+                    monitorButtonsContainer.appendChild(cvBtn);
+                }
+
+                console.log('Smart Monitor buttons shown:', { swv: hasSWV, cv: hasCV });
+            } else {
+                // No ongoing analysis, hide the section
+                smartMonitorSection.classList.add('hidden');
+                console.log('No ongoing analysis detected');
+            }
+        }
+
+        // Enter Monitor Mode for specified analysis type
+        function enterMonitorMode(analysisType) {
+            console.log(`Entering ${analysisType.toUpperCase()} Monitor Mode`);
+
+            // Set monitor mode flags
+            sessionStorage.setItem('monitorMode', 'true');
+            sessionStorage.setItem('monitorType', analysisType);
+
+            if (analysisType === 'swv') {
+                // Use UIManager to show SWV screen
+                if (window.uiManager) {
+                    window.uiManager.showScreen('swvAnalysisScreen');
+                } else {
+                    // Fallback to manual DOM manipulation
+                    document.getElementById('welcomeScreen').classList.add('hidden');
+                    document.getElementById('swvAnalysisScreen').classList.remove('hidden');
+                }
+
+                // Show monitor mode banner
+                document.getElementById('swvMonitorModeBanner').classList.remove('hidden');
+
+                // Auto-navigate to trend tab
+                setTimeout(() => {
+                    const trendTab = document.querySelector('[data-tab="swv-trend"]');
+                    if (trendTab) {
+                        trendTab.click();
+                    }
+                }, 100);
+            } else if (analysisType === 'cv') {
+                // Use UIManager to show CV screen
+                if (window.uiManager) {
+                    window.uiManager.showScreen('cvAnalysisScreen');
+                } else {
+                    // Fallback to manual DOM manipulation
+                    document.getElementById('welcomeScreen').classList.add('hidden');
+                    document.getElementById('cvAnalysisScreen').classList.remove('hidden');
+                }
+
+                // Show monitor mode banner
+                document.getElementById('cvMonitorModeBanner').classList.remove('hidden');
+
+                // Auto-navigate to segments tab
+                setTimeout(() => {
+                    const segmentsTab = document.querySelector('[data-tab="cv-segments"]');
+                    if (segmentsTab) {
+                        segmentsTab.click();
+                    }
+                }, 100);
+            }
+        }
 
         // Connect to agent with user_id
         function connectToAgent(userId) {
@@ -1948,6 +2012,10 @@
                         document.getElementById('monitorModeIndicator').classList.add('hidden');
                     }
 
+                    // Smart Monitor Mode: Show buttons for ongoing analysis
+                    const ongoingAnalysis = response.ongoing_analysis || {};
+                    showSmartMonitorButtons(ongoingAnalysis);
+
                     showConnectionStatus('success', 'Successfully connected to agent!');
                     enableAnalysisControls();
 
@@ -1956,6 +2024,7 @@
 
                     console.log('Connected to agent at:', response.connected_at);
                     console.log(`Viewer count: ${viewerCount}`);
+                    console.log('Ongoing analysis:', ongoingAnalysis);
                 } else {
                     // Agent not found
                     showConnectionStatus('error', 'Agent not found. Please check your User ID and ensure your agent is running.');

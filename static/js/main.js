@@ -18,6 +18,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize UI Manager
     const uiManager = new UIManager();
 
+    // Expose uiManager globally for Monitor Mode navigation
+    window.uiManager = uiManager;
+
     // Initialize SWV Module, passing dependencies
     const swvModule = new SWVModule(socketManager, uiManager);
 

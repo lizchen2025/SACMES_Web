@@ -1547,6 +1547,36 @@ def get_user_id_by_session_id(session_id):
 
     return None
 
+def detect_ongoing_analysis(session_id):
+    """
+    Detect if there are ongoing SWV or CV analyses for a given session.
+    Used for smart monitor mode - shows appropriate monitor buttons.
+
+    Args:
+        session_id: Session ID to check
+
+    Returns:
+        dict: {'swv': bool, 'cv': bool} indicating ongoing analyses
+    """
+    result = {'swv': False, 'cv': False}
+
+    try:
+        # Check for SWV data
+        swv_trend_data = get_session_data(session_id, 'live_trend_data', {})
+        if swv_trend_data and swv_trend_data.get('raw_peaks'):
+            result['swv'] = True
+
+        # Check for CV data
+        cv_data = get_session_data(session_id, 'cv_segments_data', {})
+        if cv_data and len(cv_data) > 0:
+            result['cv'] = True
+
+        logger.info(f"Detected ongoing analysis for session {session_id}: {result}")
+    except Exception as e:
+        logger.error(f"Error detecting ongoing analysis: {e}")
+
+    return result
+
 @socketio.on('connect')
 def handle_connect():
     # Check if this is an agent with a specific session_id in auth data
@@ -2580,15 +2610,20 @@ def handle_check_agent_connection(data):
         web_viewers = get_web_viewers_by_user_id(user_id)
         viewer_count = len(web_viewers)
 
+        # Check for ongoing analysis (for smart monitor mode)
+        session_id = agent_mapping['session_id']
+        ongoing_analysis = detect_ongoing_analysis(session_id)
+
         emit('agent_connection_status', {
             'status': 'success',
             'connected': True,
             'user_id': user_id,
             'connected_at': agent_mapping.get('connected_at'),
-            'viewer_count': viewer_count  # Let user know how many devices are monitoring
+            'viewer_count': viewer_count,  # Let user know how many devices are monitoring
+            'ongoing_analysis': ongoing_analysis  # {'swv': True/False, 'cv': True/False}
         })
 
-        logger.info(f"Web viewer {request.sid} registered to user_id: {user_id}, total viewers: {viewer_count}")
+        logger.info(f"Web viewer {request.sid} registered to user_id: {user_id}, total viewers: {viewer_count}, ongoing: {ongoing_analysis}")
     else:
         logger.warning(f"No agent found for user_id: {user_id}")
         emit('agent_connection_status', {
