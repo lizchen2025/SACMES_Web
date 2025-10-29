@@ -355,9 +355,23 @@
                     </svg>
                     Connect to Your Agent
                 </h3>
-                <p class="text-sm text-gray-600 mb-4 text-center">
+                <p class="text-sm text-gray-600 mb-2 text-center">
                     Enter the User ID displayed in your SACMES Agent application
                 </p>
+
+                <!-- Monitor Mode Info Banner -->
+                <div class="bg-blue-50 border-l-4 border-blue-400 p-3 mb-4 rounded">
+                    <div class="flex items-start">
+                        <svg class="w-5 h-5 text-blue-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                        </svg>
+                        <div>
+                            <p class="text-xs text-blue-800 font-semibold">Monitor Mode Available</p>
+                            <p class="text-xs text-blue-700">Multiple devices can use the same User ID to monitor real-time analysis simultaneously</p>
+                        </div>
+                    </div>
+                </div>
 
                 <div id="userIdInputContainer" class="flex flex-col sm:flex-row gap-3 mb-4">
                     <input
@@ -1687,6 +1701,9 @@
             document.getElementById('userIdInputContainer').classList.remove('hidden');
             showConnectionStatus('info', 'Disconnected from agent');
 
+            // Update agent status in SWV and CV pages
+            updateAgentStatusDisplay('disconnected');
+
             console.log('Disconnected from agent');
 
             // Disable analysis controls
@@ -1744,6 +1761,38 @@
         }
 
         // Disable analysis controls (called when disconnected)
+        // Update agent status display in SWV and CV pages
+        function updateAgentStatusDisplay(status) {
+            const agentStatusElement = document.getElementById('agentStatus');
+            const cvAgentStatusElement = document.getElementById('cvAgentStatus');
+
+            if (status === 'connected') {
+                // Update SWV page status
+                if (agentStatusElement) {
+                    agentStatusElement.textContent = `Connected to Agent (User ID: ${currentUserId})`;
+                    agentStatusElement.className = 'text-sm text-green-700 mt-1 font-semibold';
+                }
+
+                // Update CV page status
+                if (cvAgentStatusElement) {
+                    cvAgentStatusElement.textContent = `Connected to Agent (User ID: ${currentUserId})`;
+                    cvAgentStatusElement.className = 'text-sm text-green-700 mt-1 font-semibold';
+                }
+            } else if (status === 'disconnected') {
+                // Update SWV page status
+                if (agentStatusElement) {
+                    agentStatusElement.textContent = 'Waiting for local agent connection... Please run agent.py locally.';
+                    agentStatusElement.className = 'text-sm text-red-700 mt-1';
+                }
+
+                // Update CV page status
+                if (cvAgentStatusElement) {
+                    cvAgentStatusElement.textContent = 'Waiting for local agent connection... Please run agent.py locally.';
+                    cvAgentStatusElement.className = 'text-sm text-red-700 mt-1';
+                }
+            }
+        }
+
         function disableAnalysisControls() {
             // Disable analysis buttons
             const swvBtn = document.getElementById('swvBtn');
@@ -1816,6 +1865,9 @@
                     showConnectionStatus('success', 'Successfully connected to agent!');
                     enableAnalysisControls();
 
+                    // Update agent status in SWV and CV pages
+                    updateAgentStatusDisplay('connected');
+
                     console.log('Connected to agent at:', response.connected_at);
                     console.log(`Viewer count: ${viewerCount}`);
                 } else {
@@ -1832,11 +1884,18 @@
                 if (data.user_id === currentUserId) {
                     if (data.status === 'disconnected') {
                         showConnectionStatus('error', 'Your agent has disconnected');
+
+                        // Update agent status in SWV and CV pages
+                        updateAgentStatusDisplay('disconnected');
+
                         alert('Warning: Your agent has disconnected. Please restart your agent and reconnect.');
                         // Optionally auto-disconnect
                         // disconnectFromAgent();
                     } else if (data.status === 'connected') {
                         showConnectionStatus('success', 'Your agent is now connected');
+
+                        // Update agent status in SWV and CV pages
+                        updateAgentStatusDisplay('connected');
                     }
                 }
             });
