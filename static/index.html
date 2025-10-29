@@ -418,7 +418,7 @@
                         <!-- Smart Monitor Mode Entry (only shown when analysis is ongoing) -->
                         <div id="smartMonitorSection" class="hidden border-t pt-3">
                             <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-2 rounded">
-                                <p class="text-xs font-semibold text-yellow-800 mb-1">📊 Active Analysis Detected!</p>
+                                <p class="text-xs font-semibold text-yellow-800 mb-1"> Active Analysis Detected!</p>
                                 <p class="text-xs text-yellow-700">Another device is running analysis with this User ID. Enter Monitor Mode to view real-time results:</p>
                             </div>
                             <div class="flex gap-2" id="monitorButtonsContainer">
@@ -1290,6 +1290,20 @@
 
         <!-- CV Visualization Screen for Segment Selection -->
         <div id="cvVisualizationScreen" class="hidden screen-card mb-6">
+            <!-- Monitor Mode Banner (shown when in monitor mode) -->
+            <div id="cvVisualizationMonitorModeBanner" class="hidden mb-4 p-4 bg-purple-100 border-2 border-purple-400 rounded-lg">
+                <div class="flex items-center gap-3">
+                    <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                    </svg>
+                    <div>
+                        <p class="text-sm font-bold text-purple-800">Monitor Mode Active</p>
+                        <p class="text-xs text-purple-700">You are viewing real-time CV analysis from another device. No local agent required.</p>
+                    </div>
+                </div>
+            </div>
+
             <!-- Data Warning Banner -->
             <div class="w-full bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4" role="alert">
                 <div class="flex">
@@ -1398,6 +1412,20 @@
 
         <!-- Data Visualization Area (Initially hidden, will be shown after analysis) -->
         <div id="visualizationArea" class="hidden screen-card text-center mt-6">
+            <!-- Monitor Mode Banner (shown when in monitor mode) -->
+            <div id="visualizationMonitorModeBanner" class="hidden mb-4 p-4 bg-blue-100 border-2 border-blue-400 rounded-lg">
+                <div class="flex items-center gap-3">
+                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                    </svg>
+                    <div>
+                        <p class="text-sm font-bold text-blue-800">Monitor Mode Active</p>
+                        <p class="text-xs text-blue-700">You are viewing real-time SWV analysis from another device. No local agent required.</p>
+                    </div>
+                </div>
+            </div>
+
             <!-- Data Warning Banner -->
             <div class="w-full bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4" role="alert">
                 <div class="flex">
@@ -1779,45 +1807,33 @@
             sessionStorage.setItem('monitorType', analysisType);
 
             if (analysisType === 'swv') {
-                // Use UIManager to show SWV screen
+                // Navigate directly to visualization screen
                 if (window.uiManager) {
-                    window.uiManager.showScreen('swvAnalysisScreen');
+                    window.uiManager.showScreen('visualizationArea');
                 } else {
                     // Fallback to manual DOM manipulation
                     document.getElementById('welcomeScreen').classList.add('hidden');
-                    document.getElementById('swvAnalysisScreen').classList.remove('hidden');
+                    document.getElementById('visualizationArea').classList.remove('hidden');
                 }
 
-                // Show monitor mode banner
-                document.getElementById('swvMonitorModeBanner').classList.remove('hidden');
+                // Show monitor mode banner in visualization screen
+                document.getElementById('visualizationMonitorModeBanner').classList.remove('hidden');
 
-                // Auto-navigate to trend tab
-                setTimeout(() => {
-                    const trendTab = document.querySelector('[data-tab="swv-trend"]');
-                    if (trendTab) {
-                        trendTab.click();
-                    }
-                }, 100);
+                console.log('Monitor Mode: Navigated to SWV visualization screen');
             } else if (analysisType === 'cv') {
-                // Use UIManager to show CV screen
+                // Navigate directly to CV visualization screen
                 if (window.uiManager) {
-                    window.uiManager.showScreen('cvAnalysisScreen');
+                    window.uiManager.showScreen('cvVisualizationScreen');
                 } else {
                     // Fallback to manual DOM manipulation
                     document.getElementById('welcomeScreen').classList.add('hidden');
-                    document.getElementById('cvAnalysisScreen').classList.remove('hidden');
+                    document.getElementById('cvVisualizationScreen').classList.remove('hidden');
                 }
 
-                // Show monitor mode banner
-                document.getElementById('cvMonitorModeBanner').classList.remove('hidden');
+                // Show monitor mode banner in CV visualization screen
+                document.getElementById('cvVisualizationMonitorModeBanner').classList.remove('hidden');
 
-                // Auto-navigate to segments tab
-                setTimeout(() => {
-                    const segmentsTab = document.querySelector('[data-tab="cv-segments"]');
-                    if (segmentsTab) {
-                        segmentsTab.click();
-                    }
-                }, 100);
+                console.log('Monitor Mode: Navigated to CV visualization screen');
             }
         }
 

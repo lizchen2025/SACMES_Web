@@ -682,7 +682,7 @@ def on_connection_rejected(data):
     user_id = data.get('user_id', 'unknown')
 
     app.log("\n" + "=" * 60)
-    app.log("❌ ERROR: Connection Rejected by Server")
+    app.log("ERROR: Connection Rejected by Server")
     app.log("=" * 60)
 
     if reason == 'user_id_collision':
