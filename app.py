@@ -2634,6 +2634,93 @@ def handle_check_agent_connection(data):
         })
 
 
+# --- *** MONITOR MODE: REQUEST HISTORICAL DATA HANDLER ***
+@socketio.on('request_historical_data')
+def handle_request_historical_data(data):
+    """
+    Send all existing analysis data to a monitor device.
+    This allows monitor mode to see historical data, not just new updates.
+
+    Used when a monitor device enters monitor mode and needs to sync
+    with ongoing analysis that already has data.
+    """
+    logger.info(f"Received 'request_historical_data' from {request.sid}")
+
+    user_id = data.get('user_id')
+    analysis_type = data.get('analysis_type')  # 'swv' or 'cv'
+
+    if not user_id or not analysis_type:
+        logger.error(f"request_historical_data missing required fields: user_id={user_id}, analysis_type={analysis_type}")
+        emit('historical_data_response', {
+            'status': 'error',
+            'message': 'user_id and analysis_type are required'
+        })
+        return
+
+    # Get agent session by user_id
+    agent_mapping = get_agent_session_by_user_id(user_id)
+    if not agent_mapping:
+        logger.warning(f"No agent found for user_id: {user_id}")
+        emit('historical_data_response', {
+            'status': 'error',
+            'message': 'No active agent session found'
+        })
+        return
+
+    session_id = agent_mapping['session_id']
+
+    try:
+        if analysis_type == 'swv':
+            # Get all SWV data
+            live_trend_data = get_session_data(session_id, 'live_trend_data', {})
+            live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
+            live_peak_detection_warnings = get_session_data(session_id, 'live_peak_detection_warnings', {})
+
+            # Send comprehensive SWV data
+            emit('historical_data_response', {
+                'status': 'success',
+                'analysis_type': 'swv',
+                'data': {
+                    'trend_data': live_trend_data,
+                    'analysis_params': live_analysis_params,
+                    'peak_detection_warnings': live_peak_detection_warnings
+                }
+            })
+            logger.info(f"Sent SWV historical data to monitor device {request.sid} for user_id: {user_id}")
+
+        elif analysis_type == 'cv':
+            # Get all CV data
+            cv_segments_data = get_session_data(session_id, 'cv_segments_data', {})
+            live_trend_data = get_session_data(session_id, 'live_trend_data', {})
+            cv_results = live_trend_data.get('cv_results', {})
+            cv_analysis_params = get_session_data(session_id, 'cv_analysis_params', {})
+
+            # Send comprehensive CV data
+            emit('historical_data_response', {
+                'status': 'success',
+                'analysis_type': 'cv',
+                'data': {
+                    'segments_data': cv_segments_data,
+                    'cv_results': cv_results,
+                    'analysis_params': cv_analysis_params
+                }
+            })
+            logger.info(f"Sent CV historical data to monitor device {request.sid} for user_id: {user_id}")
+
+        else:
+            emit('historical_data_response', {
+                'status': 'error',
+                'message': f'Unknown analysis_type: {analysis_type}'
+            })
+
+    except Exception as e:
+        logger.error(f"Error getting historical data: {e}", exc_info=True)
+        emit('historical_data_response', {
+            'status': 'error',
+            'message': str(e)
+        })
+
+
 # --- *** NEW *** SOCKET.IO EVENT HANDLER FOR EXPORTING DATA ---
 @socketio.on('request_export_data')
 def handle_export_request(data):

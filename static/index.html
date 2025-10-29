@@ -1835,6 +1835,13 @@
 
                 console.log('Monitor Mode: Navigated to CV visualization screen');
             }
+
+            // Request historical data from server
+            console.log(`Requesting historical data for ${analysisType}...`);
+            window.socketManager.emit('request_historical_data', {
+                user_id: currentUserId,
+                analysis_type: analysisType
+            });
         }
 
         // Connect to agent with user_id
@@ -2067,6 +2074,66 @@
 
                         // Update agent status in SWV and CV pages
                         updateAgentStatusDisplay('connected');
+                    }
+                }
+            });
+
+            // Listen for historical data response (monitor mode)
+            window.socketManager.on('historical_data_response', function(response) {
+                console.log('Received historical data response:', response);
+
+                if (response.status === 'error') {
+                    console.error('Error getting historical data:', response.message);
+                    alert('Failed to load historical data: ' + response.message);
+                    return;
+                }
+
+                const analysisType = response.analysis_type;
+                const data = response.data;
+
+                if (analysisType === 'swv') {
+                    // Populate SWV data
+                    console.log('Populating SWV historical data...');
+
+                    // Check if swvModule is available
+                    if (window.swvModule) {
+                        // Process trend data
+                        const trendData = data.trend_data;
+                        if (trendData && trendData.raw_peaks) {
+                            // Call the populateHistoricalData method
+                            window.swvModule.populateHistoricalData({
+                                trend_data: trendData,
+                                analysis_params: data.analysis_params
+                            });
+                            console.log('SWV historical data populated');
+                        } else {
+                            console.warn('No SWV trend data available yet');
+                        }
+                    } else {
+                        console.error('swvModule not found - cannot populate data');
+                    }
+
+                } else if (analysisType === 'cv') {
+                    // Populate CV data
+                    console.log('Populating CV historical data...');
+
+                    // Check if cvModule is available
+                    if (window.cvModule) {
+                        // Process CV data
+                        const cvResults = data.cv_results;
+                        if (cvResults && Object.keys(cvResults).length > 0) {
+                            // Call the populateHistoricalData method
+                            window.cvModule.populateHistoricalData({
+                                segments_data: data.segments_data,
+                                cv_results: data.cv_results,
+                                analysis_params: data.analysis_params
+                            });
+                            console.log('CV historical data populated');
+                        } else {
+                            console.warn('No CV results data available yet');
+                        }
+                    } else {
+                        console.error('cvModule not found - cannot populate data');
                     }
                 }
             });

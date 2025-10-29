@@ -401,6 +401,64 @@ export class CVModule {
         });
     }
 
+    /**
+     * PUBLIC METHOD: Populate historical CV data for Monitor Mode
+     * Called when a monitor device enters monitor mode and receives existing CV analysis data
+     */
+    populateHistoricalData(historicalData) {
+        console.log('CV Module: Populating historical data for monitor mode', historicalData);
+
+        const segmentsData = historicalData.segments_data;
+        const cvResults = historicalData.cv_results;
+        const analysisParams = historicalData.analysis_params;
+
+        if (!cvResults || Object.keys(cvResults).length === 0) {
+            console.warn('No CV results data to populate');
+            return;
+        }
+
+        // Mark as analysis running (in monitor mode)
+        this.state.isAnalysisRunning = true;
+        this.state.currentScreen = 'visualization';
+
+        // Determine which electrode to display
+        const selectedElectrode = analysisParams?.selected_electrode;
+        if (selectedElectrode !== undefined && selectedElectrode !== null) {
+            this.state.currentElectrode = selectedElectrode;
+        } else {
+            // Use first available electrode
+            const electrodes = Object.keys(cvResults);
+            if (electrodes.length > 0) {
+                const firstElectrode = electrodes[0];
+                this.state.currentElectrode = firstElectrode !== 'averaged' ?
+                                               parseInt(firstElectrode) : null;
+            }
+        }
+
+        // Populate CV results structure
+        // cvResults structure: { '0': {fileNum: {forward: ..., reverse: ...}}, '1': {...}, 'averaged': {...} }
+        this.state.cvResults = cvResults;
+
+        // Populate segment data if available
+        if (segmentsData && Object.keys(segmentsData).length > 0) {
+            this.state.availableSegments = segmentsData.segments || [];
+            this.state.segmentInfo = segmentsData.segment_info || {};
+            this.state.forwardSegments = segmentsData.forward_segments || [];
+            this.state.reverseSegments = segmentsData.reverse_segments || [];
+        }
+
+        // Navigate to CV visualization screen
+        this.uiManager.showScreen('cvVisualizationScreen');
+
+        // Set up electrode controls
+        this._setupCVElectrodeControls();
+
+        // Set up and render CV visualization
+        this._setupCVVisualization();
+
+        console.log('CV historical data populated successfully');
+    }
+
     _handleNextToVisualization() {
         // Validate basic parameters first
         const numFiles = parseInt(this.dom.params.numFilesInput.value);

@@ -24,8 +24,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize SWV Module, passing dependencies
     const swvModule = new SWVModule(socketManager, uiManager);
 
+    // Expose swvModule globally for Monitor Mode historical data population
+    window.swvModule = swvModule;
+
     // Initialize CV Module, passing dependencies
     const cvModule = new CVModule(socketManager, uiManager);
+
+    // Expose cvModule globally for Monitor Mode historical data population
+    window.cvModule = cvModule;
 
     // Initialize HT Module
     const htModule = new HTModule(uiManager);

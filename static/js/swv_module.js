@@ -333,6 +333,75 @@ export class SWVModule {
         });
     }
 
+    /**
+     * PUBLIC METHOD: Populate historical data for Monitor Mode
+     * Called when a monitor device enters monitor mode and receives existing analysis data
+     */
+    populateHistoricalData(historicalData) {
+        console.log('SWV Module: Populating historical data for monitor mode', historicalData);
+
+        const trendData = historicalData.trend_data;
+        const analysisParams = historicalData.analysis_params;
+
+        if (!trendData || !trendData.raw_peaks) {
+            console.warn('No SWV trend data to populate');
+            return;
+        }
+
+        // Mark as analysis running (in monitor mode)
+        this.state.isAnalysisRunning = true;
+
+        // Determine which electrode to display (prefer the one from params, or use first available)
+        const selectedElectrode = analysisParams?.selected_electrode;
+        if (selectedElectrode !== undefined && selectedElectrode !== null) {
+            this.state.currentElectrode = selectedElectrode;
+        }
+
+        // Populate electrode data from raw_peaks structure
+        // raw_peaks structure: { '0': {freq: {fileNum: data}}, '1': {...}, 'averaged': {...} }
+        const rawPeaks = trendData.raw_peaks;
+
+        for (const electrodeKey in rawPeaks) {
+            if (!this.state.electrodeData[electrodeKey]) {
+                this.state.electrodeData[electrodeKey] = {};
+            }
+
+            const electrodeFreqs = rawPeaks[electrodeKey];
+            for (const freq in electrodeFreqs) {
+                if (!this.state.electrodeData[electrodeKey][freq]) {
+                    this.state.electrodeData[electrodeKey][freq] = {};
+                }
+
+                const fileNumData = electrodeFreqs[freq];
+                for (const fileNum in fileNumData) {
+                    this.state.electrodeData[electrodeKey][freq][fileNum] = fileNumData[fileNum];
+                }
+            }
+        }
+
+        // Set raw trend data for current electrode
+        const currentElectrodeKey = this.state.currentElectrode !== null ?
+                                     this.state.currentElectrode.toString() : 'averaged';
+
+        if (trendData.peak_current_trends && trendData.x_axis_values) {
+            this.state.rawTrendData = {
+                peak_current_trends: trendData.peak_current_trends,
+                x_axis_values: trendData.x_axis_values
+            };
+        }
+
+        // Navigate to visualization and set up UI
+        this.uiManager.showScreen('visualizationArea');
+
+        // Set up electrode controls (buttons for switching electrodes)
+        this._setupElectrodeControls();
+
+        // Render initial trend plots
+        this._handlePostProcessUpdate();
+
+        console.log('SWV historical data populated successfully');
+    }
+
     _triggerCsvDownload(csvContent, filename) {
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
