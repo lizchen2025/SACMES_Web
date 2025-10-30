@@ -194,23 +194,32 @@ export class SWVModule {
 
         if (scanFreqBtn) {
             scanFreqBtn.addEventListener('click', () => {
+                console.log('[FREQUENCY SCAN] Scan button clicked');
                 const fileHandle = this.dom.params.fileHandleInput.value.trim();
+                console.log('[FREQUENCY SCAN] File handle:', fileHandle);
 
                 if (typeof window.getCurrentUserId !== 'function') {
+                    console.error('[FREQUENCY SCAN] getCurrentUserId function not found');
                     alert('Please connect to your agent first by entering your User ID on the welcome page.');
                     return;
                 }
 
                 const userId = window.getCurrentUserId();
+                console.log('[FREQUENCY SCAN] Current user ID:', userId);
+
                 if (!userId) {
+                    console.error('[FREQUENCY SCAN] No user ID available');
                     alert('Please connect to your agent first by entering your User ID on the welcome page.');
                     return;
                 }
 
+                console.log('[FREQUENCY SCAN] Emitting scan_available_frequencies');
                 this.socketManager.emit('scan_available_frequencies', {
                     user_id: userId,
                     file_handle: fileHandle
                 });
+                console.log('[FREQUENCY SCAN] Event emitted successfully');
+
                 scanFreqBtn.textContent = 'Scanning...';
                 scanFreqBtn.disabled = true;
             });
@@ -389,6 +398,9 @@ export class SWVModule {
         });
 
         this.socketManager.on('available_frequencies_response', (data) => {
+            console.log('[FREQUENCY SCAN] Received available_frequencies_response');
+            console.log('[FREQUENCY SCAN] Response data:', data);
+
             const scanFreqBtn = document.getElementById('scanFrequenciesBtn');
             if (scanFreqBtn) {
                 scanFreqBtn.textContent = 'Scan Folder';
@@ -396,20 +408,29 @@ export class SWVModule {
             }
 
             if (data.status === 'error') {
+                console.error('[FREQUENCY SCAN] Error response:', data.message);
                 alert('Error scanning frequencies: ' + data.message);
                 return;
             }
 
             const frequencies = data.frequencies || [];
+            console.log('[FREQUENCY SCAN] Detected frequencies:', frequencies);
+
             const container = document.getElementById('frequencyCheckboxContainer');
-            if (!container) return;
+            if (!container) {
+                console.error('[FREQUENCY SCAN] Checkbox container not found');
+                return;
+            }
 
             container.innerHTML = '';
 
             if (frequencies.length === 0) {
+                console.warn('[FREQUENCY SCAN] No frequencies found');
                 container.innerHTML = '<p class="text-sm text-gray-500 col-span-4">No frequencies found. Please check your file handle and folder.</p>';
                 return;
             }
+
+            console.log('[FREQUENCY SCAN] Creating checkboxes for', frequencies.length, 'frequencies');
 
             frequencies.forEach(freq => {
                 const label = document.createElement('label');
@@ -431,6 +452,7 @@ export class SWVModule {
 
             const selectedFreqs = frequencies.join(',');
             this.dom.params.frequencyInput.value = selectedFreqs;
+            console.log('[FREQUENCY SCAN] Updated frequency input with:', selectedFreqs);
         });
     }
 

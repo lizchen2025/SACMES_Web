@@ -525,19 +525,34 @@ def on_request_frequency_scan(data):
     Scan the monitored directory for all available frequencies.
     Used for frequency map mode to populate frequency dropdown.
     """
+    app.log(f"[FREQUENCY SCAN] Received request_frequency_scan event with data: {data}")
+
     file_handle = data.get('file_handle', '')
     requester_sid = data.get('requester_sid')
 
     directory = app.watch_directory.get()
+    app.log(f"[FREQUENCY SCAN] Scanning directory: {directory}")
+
     if directory == "No folder selected":
-        app.log("Cannot scan frequencies: No folder selected")
+        app.log("[FREQUENCY SCAN] ERROR: No folder selected")
+        sio.emit('frequency_scan_result', {
+            'status': 'error',
+            'message': 'No folder selected',
+            'requester_sid': requester_sid
+        })
         return
 
     try:
         frequencies = set()
         file_extension = '.txt'
+        file_count = 0
+        matched_files = []
+
+        app.log(f"[FREQUENCY SCAN] Looking for files with handle: '{file_handle}'")
 
         for filename in os.listdir(directory):
+            file_count += 1
+
             if not filename.endswith(file_extension):
                 continue
 
@@ -548,9 +563,12 @@ def on_request_frequency_scan(data):
             if match:
                 freq = int(match.group(1))
                 frequencies.add(freq)
+                matched_files.append(filename)
 
         frequencies_list = sorted(list(frequencies))
-        app.log(f"Detected frequencies: {frequencies_list}")
+        app.log(f"[FREQUENCY SCAN] Scanned {file_count} files, found {len(matched_files)} matching files")
+        app.log(f"[FREQUENCY SCAN] Detected frequencies: {frequencies_list}")
+        app.log(f"[FREQUENCY SCAN] Sample matched files: {matched_files[:5]}")
 
         sio.emit('frequency_scan_result', {
             'frequencies': frequencies_list,
@@ -558,8 +576,12 @@ def on_request_frequency_scan(data):
             'requester_sid': requester_sid
         })
 
+        app.log(f"[FREQUENCY SCAN] Emitted frequency_scan_result to server")
+
     except Exception as e:
-        app.log(f"Error scanning frequencies: {str(e)}")
+        app.log(f"[FREQUENCY SCAN] ERROR: {str(e)}")
+        import traceback
+        app.log(f"[FREQUENCY SCAN] Traceback: {traceback.format_exc()}")
         sio.emit('frequency_scan_result', {
             'status': 'error',
             'message': str(e),

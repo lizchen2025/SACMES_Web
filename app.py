@@ -1773,27 +1773,36 @@ def handle_scan_frequencies(data):
     Request agent to scan folder and detect all available frequencies.
     Used for frequency map mode to populate frequency dropdown.
     """
+    logger.info(f"[FREQUENCY SCAN] Received scan_available_frequencies from {request.sid}")
+    logger.info(f"[FREQUENCY SCAN] Data: {data}")
+
     user_id = data.get('user_id') if data else None
     file_handle = data.get('file_handle', '')
 
     if not user_id:
-        logger.error("Scan frequencies request missing user_id")
+        logger.error("[FREQUENCY SCAN] ERROR: Scan frequencies request missing user_id")
         emit('available_frequencies_response', {'status': 'error', 'message': 'User ID is required'})
         return
 
     agent_mapping = get_agent_session_by_user_id(user_id)
     if not agent_mapping:
-        logger.warning(f"No agent found for user_id: {user_id}")
+        logger.warning(f"[FREQUENCY SCAN] ERROR: No agent found for user_id: {user_id}")
         emit('available_frequencies_response', {'status': 'error', 'message': 'Agent not connected'})
         return
 
     agent_sid = agent_mapping['agent_sid']
-    logger.info(f"Requesting frequency scan from agent (user_id: {user_id}, handle: {file_handle})")
+    logger.info(f"[FREQUENCY SCAN] Requesting frequency scan from agent")
+    logger.info(f"[FREQUENCY SCAN] - user_id: {user_id}")
+    logger.info(f"[FREQUENCY SCAN] - agent_sid: {agent_sid}")
+    logger.info(f"[FREQUENCY SCAN] - file_handle: {file_handle}")
+    logger.info(f"[FREQUENCY SCAN] - requester_sid: {request.sid}")
 
     emit('request_frequency_scan', {
         'file_handle': file_handle,
         'requester_sid': request.sid
     }, to=agent_sid)
+
+    logger.info(f"[FREQUENCY SCAN] Emitted request_frequency_scan to agent_sid: {agent_sid}")
 
 
 @socketio.on('start_analysis_session')
@@ -2436,26 +2445,34 @@ def handle_frequency_scan_result(data):
     """
     Receive frequency scan results from agent and forward to requesting web viewer.
     """
+    logger.info(f"[FREQUENCY SCAN] Received frequency_scan_result from agent {request.sid}")
+    logger.info(f"[FREQUENCY SCAN] Result data: {data}")
+
     frequencies = data.get('frequencies', [])
     requester_sid = data.get('requester_sid')
     status = data.get('status', 'success')
 
+    logger.info(f"[FREQUENCY SCAN] Status: {status}, Frequencies count: {len(frequencies)}, Requester: {requester_sid}")
+
     if status == 'error':
         message = data.get('message', 'Unknown error')
-        logger.error(f"Frequency scan error: {message}")
+        logger.error(f"[FREQUENCY SCAN] ERROR from agent: {message}")
         socketio.emit('available_frequencies_response', {
             'status': 'error',
             'message': message
         }, to=requester_sid)
+        logger.info(f"[FREQUENCY SCAN] Sent error response to {requester_sid}")
         return
 
-    logger.info(f"Frequency scan result: {len(frequencies)} frequencies detected")
+    logger.info(f"[FREQUENCY SCAN] Detected frequencies: {frequencies}")
 
     socketio.emit('available_frequencies_response', {
         'status': 'success',
         'frequencies': frequencies,
         'file_handle': data.get('file_handle', '')
     }, to=requester_sid)
+
+    logger.info(f"[FREQUENCY SCAN] Sent success response to {requester_sid} with {len(frequencies)} frequencies")
 
 
 @socketio.on('cv_data_from_agent')
