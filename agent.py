@@ -977,6 +977,14 @@ class AgentApp:
             sio.connect(connection_url, headers=headers, socketio_path='socket.io', transports=['polling'])
             self.log("Socket.IO connection established!")
 
+            # Diagnostic: List all registered event handlers
+            registered_events = list(sio.handlers.get('/', {}).keys())
+            self.log(f"[DIAGNOSTIC] Registered Socket.IO events: {registered_events}")
+            if 'request_frequency_scan' in registered_events:
+                self.log("[DIAGNOSTIC] request_frequency_scan handler is registered")
+            else:
+                self.log("[DIAGNOSTIC] WARNING: request_frequency_scan handler NOT registered!")
+
             # Wait a moment for connection to stabilize
             time.sleep(0.5)
 

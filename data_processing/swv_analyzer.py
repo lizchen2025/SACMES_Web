@@ -513,24 +513,43 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
                 original_peak_current, peak_potential, peak_index = max(peak_candidates, key=lambda x: x[0])
                 logger.info(f"Peak detection: Selected peak at V={peak_potential:.4f}, I={original_peak_current:.4f}, index={peak_index}")
 
-                # --- Convex Hull Based Tangent Algorithm ---
+                # Determine if peak is in negative or positive current region
+                # Use the actual peak current value to decide
+                peak_is_negative = original_peak_current < 0
+                logger.info(f"Peak polarity: {'negative' if peak_is_negative else 'positive'} (peak current: {original_peak_current:.4e})")
+
+                # --- Intelligent Convex Hull Based Tangent Algorithm ---
                 points = list(zip(adjusted_potentials, adjusted_smoothed_currents))
 
-                # Andrew's monotone chain algorithm to find the lower convex hull
+                # Andrew's monotone chain algorithm
                 def cross_product(p1, p2, p3):
                     return (p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0])
 
-                lower_hull = []
-                for p in points:
-                    while len(lower_hull) >= 2 and cross_product(lower_hull[-2], lower_hull[-1], p) <= 0:
-                        lower_hull.pop()
-                    lower_hull.append(p)
+                # Build appropriate hull based on peak polarity
+                if peak_is_negative:
+                    # Peak is negative: use upper hull (peaks point downward)
+                    upper_hull = []
+                    for p in points:
+                        while len(upper_hull) >= 2 and cross_product(upper_hull[-2], upper_hull[-1], p) >= 0:
+                            upper_hull.pop()
+                        upper_hull.append(p)
+                    hull = upper_hull
+                    logger.info(f"Using upper hull for negative peak (hull points: {len(hull)})")
+                else:
+                    # Peak is positive: use lower hull (peaks point upward)
+                    lower_hull = []
+                    for p in points:
+                        while len(lower_hull) >= 2 and cross_product(lower_hull[-2], lower_hull[-1], p) <= 0:
+                            lower_hull.pop()
+                        lower_hull.append(p)
+                    hull = lower_hull
+                    logger.info(f"Using lower hull for positive peak (hull points: {len(hull)})")
 
                 # Find the baseline edge on the hull that spans the peak
                 baseline_edge_found = False
-                for i in range(len(lower_hull) - 1):
-                    p_left = lower_hull[i]
-                    p_right = lower_hull[i + 1]
+                for i in range(len(hull) - 1):
+                    p_left = hull[i]
+                    p_right = hull[i + 1]
 
                     # Find original indices
                     idx_left = adjusted_potentials.index(p_left[0])
@@ -540,14 +559,22 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
                         V_left_baseline, I_left_baseline = p_left
                         V_right_baseline, I_right_baseline = p_right
                         baseline_edge_found = True
+                        logger.info(f"Baseline edge found: Left({V_left_baseline:.4f}V, {I_left_baseline:.4e}A), Right({V_right_baseline:.4f}V, {I_right_baseline:.4e}A)")
                         break
 
                 if not baseline_edge_found:
-                    # Fallback if peak is outside the main hull segment (e.g., at the very edge)
+                    # Fallback if peak is outside the main hull segment
                     baseline_warning_type = "peak_outside_hull_fallback"
-                    min_idx = np.argmin(adjusted_smoothed_currents)
-                    V_left_baseline = V_right_baseline = adjusted_potentials[min_idx]
-                    I_left_baseline = I_right_baseline = adjusted_smoothed_currents[min_idx]
+                    if peak_is_negative:
+                        max_idx = np.argmax(adjusted_smoothed_currents)
+                        V_left_baseline = V_right_baseline = adjusted_potentials[max_idx]
+                        I_left_baseline = I_right_baseline = adjusted_smoothed_currents[max_idx]
+                        logger.warning(f"Peak outside hull, using max current point for negative peak")
+                    else:
+                        min_idx = np.argmin(adjusted_smoothed_currents)
+                        V_left_baseline = V_right_baseline = adjusted_potentials[min_idx]
+                        I_left_baseline = I_right_baseline = adjusted_smoothed_currents[min_idx]
+                        logger.warning(f"Peak outside hull, using min current point for positive peak")
 
                 # --- Apply chosen baseline ---
                 if V_left_baseline is not None:
