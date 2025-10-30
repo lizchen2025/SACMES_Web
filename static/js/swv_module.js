@@ -185,6 +185,52 @@ export class SWVModule {
                 this._handlePostProcessUpdate();
             }
         });
+
+        // Frequency selector event listeners
+        const scanFreqBtn = document.getElementById('scanFrequenciesBtn');
+        const selectAllBtn = document.getElementById('selectAllFreqBtn');
+        const deselectAllBtn = document.getElementById('deselectAllFreqBtn');
+        const applyFreqBtn = document.getElementById('applyFreqSelectionBtn');
+
+        if (scanFreqBtn) {
+            scanFreqBtn.addEventListener('click', () => {
+                const fileHandle = this.dom.params.fileHandleInput.value.trim();
+                if (typeof getCurrentUserId === 'function') {
+                    this.socketManager.emit('scan_available_frequencies', {
+                        user_id: getCurrentUserId(),
+                        file_handle: fileHandle
+                    });
+                    scanFreqBtn.textContent = 'Scanning...';
+                    scanFreqBtn.disabled = true;
+                }
+            });
+        }
+
+        if (selectAllBtn) {
+            selectAllBtn.addEventListener('click', () => {
+                document.querySelectorAll('#frequencyCheckboxContainer input[type="checkbox"]').forEach(cb => {
+                    cb.checked = true;
+                });
+            });
+        }
+
+        if (deselectAllBtn) {
+            deselectAllBtn.addEventListener('click', () => {
+                document.querySelectorAll('#frequencyCheckboxContainer input[type="checkbox"]').forEach(cb => {
+                    cb.checked = false;
+                });
+            });
+        }
+
+        if (applyFreqBtn) {
+            applyFreqBtn.addEventListener('click', () => {
+                const selectedFreqs = [];
+                document.querySelectorAll('#frequencyCheckboxContainer input[type="checkbox"]:checked').forEach(cb => {
+                    selectedFreqs.push(cb.value);
+                });
+                this.dom.params.frequencyInput.value = selectedFreqs.join(',');
+            });
+        }
     }
 
     _setupFilterModeToggle() {
@@ -330,6 +376,51 @@ export class SWVModule {
             if (data.status === 'success' && data.electrode_index === this.state.currentElectrode) {
                 this._updatePeakDetectionWarnings(data.warnings);
             }
+        });
+
+        this.socketManager.on('available_frequencies_response', (data) => {
+            const scanFreqBtn = document.getElementById('scanFrequenciesBtn');
+            if (scanFreqBtn) {
+                scanFreqBtn.textContent = 'Scan Folder';
+                scanFreqBtn.disabled = false;
+            }
+
+            if (data.status === 'error') {
+                alert('Error scanning frequencies: ' + data.message);
+                return;
+            }
+
+            const frequencies = data.frequencies || [];
+            const container = document.getElementById('frequencyCheckboxContainer');
+            if (!container) return;
+
+            container.innerHTML = '';
+
+            if (frequencies.length === 0) {
+                container.innerHTML = '<p class="text-sm text-gray-500 col-span-4">No frequencies found. Please check your file handle and folder.</p>';
+                return;
+            }
+
+            frequencies.forEach(freq => {
+                const label = document.createElement('label');
+                label.className = 'flex items-center text-sm cursor-pointer hover:bg-gray-100 p-1 rounded';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = freq;
+                checkbox.checked = true;
+                checkbox.className = 'mr-2';
+
+                const span = document.createElement('span');
+                span.textContent = `${freq} Hz`;
+
+                label.appendChild(checkbox);
+                label.appendChild(span);
+                container.appendChild(label);
+            });
+
+            const selectedFreqs = frequencies.join(',');
+            this.dom.params.frequencyInput.value = selectedFreqs;
         });
     }
 
@@ -1202,6 +1293,8 @@ export class SWVModule {
     }
 
     _updateUIForMode(mode) {
+        const frequencySelectorContainer = document.getElementById('frequencySelectorContainer');
+
         // Update UI elements based on analysis mode
         if (mode === 'frequency_map') {
             // Update frequency input hint
@@ -1211,6 +1304,11 @@ export class SWVModule {
             // Hide num files input, show frequency map hint
             this.dom.params.numFilesContainer.classList.add('hidden');
             this.dom.params.numFilesFrequencyMapHint.classList.remove('hidden');
+
+            // Show frequency selector
+            if (frequencySelectorContainer) {
+                frequencySelectorContainer.classList.remove('hidden');
+            }
 
             // Switch button text
             this.dom.startAnalysisBtn.textContent = 'Start Frequency Map Analysis';
@@ -1222,6 +1320,11 @@ export class SWVModule {
             // Show num files input, hide frequency map hint
             this.dom.params.numFilesContainer.classList.remove('hidden');
             this.dom.params.numFilesFrequencyMapHint.classList.add('hidden');
+
+            // Hide frequency selector
+            if (frequencySelectorContainer) {
+                frequencySelectorContainer.classList.add('hidden');
+            }
 
             this.dom.startAnalysisBtn.textContent = 'Start Analysis & Sync';
         }

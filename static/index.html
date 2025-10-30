@@ -523,6 +523,25 @@
                         <input type="text" id="frequencyInput" value="15,200"
                                class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
                         <p id="frequencyInputHint" class="text-xs text-gray-500 mt-1 hidden">For Frequency Map: List all frequencies to analyze (e.g., 10,20,50,100,200,500,1000)</p>
+
+                        <!-- Frequency Selector (shown in Frequency Map mode) -->
+                        <div id="frequencySelectorContainer" class="hidden mt-3 p-3 bg-gray-50 border rounded">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-sm font-semibold text-gray-700">Auto-detected Frequencies:</span>
+                                <button id="scanFrequenciesBtn" class="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded">
+                                    Scan Folder
+                                </button>
+                            </div>
+                            <div id="frequencyCheckboxContainer" class="grid grid-cols-4 gap-2 mb-2 max-h-40 overflow-y-auto">
+                                <!-- Checkboxes will be dynamically added here -->
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button id="selectAllFreqBtn" class="text-xs bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Select All</button>
+                                <button id="deselectAllFreqBtn" class="text-xs bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Deselect All</button>
+                                <button id="applyFreqSelectionBtn" class="text-xs bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded ml-auto">Apply Selection</button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">Or manually edit the frequency input above</p>
+                        </div>
                     </div>
 
                     <!-- [MODIFIED] Using the original single "Number of Files" input -->

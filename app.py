@@ -1767,6 +1767,35 @@ def cleanup_session_after_delay(session_id, delay_seconds):
         logger.info(f"Session {session_id} has active connections, skipping cleanup")
 
 
+@socketio.on('scan_available_frequencies')
+def handle_scan_frequencies(data):
+    """
+    Request agent to scan folder and detect all available frequencies.
+    Used for frequency map mode to populate frequency dropdown.
+    """
+    user_id = data.get('user_id') if data else None
+    file_handle = data.get('file_handle', '')
+
+    if not user_id:
+        logger.error("Scan frequencies request missing user_id")
+        emit('available_frequencies_response', {'status': 'error', 'message': 'User ID is required'})
+        return
+
+    agent_mapping = get_agent_session_by_user_id(user_id)
+    if not agent_mapping:
+        logger.warning(f"No agent found for user_id: {user_id}")
+        emit('available_frequencies_response', {'status': 'error', 'message': 'Agent not connected'})
+        return
+
+    agent_sid = agent_mapping['agent_sid']
+    logger.info(f"Requesting frequency scan from agent (user_id: {user_id}, handle: {file_handle})")
+
+    emit('request_frequency_scan', {
+        'file_handle': file_handle,
+        'requester_sid': request.sid
+    }, to=agent_sid)
+
+
 @socketio.on('start_analysis_session')
 def handle_start_analysis_session(data):
     session_id = get_session_id()
@@ -2400,6 +2429,33 @@ def get_cv_segments_with_yield(file_path, params, selected_electrode, client_sid
     except Exception as e:
         logger.error(f"Error in get_cv_segments_with_yield: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
+
+
+@socketio.on('frequency_scan_result')
+def handle_frequency_scan_result(data):
+    """
+    Receive frequency scan results from agent and forward to requesting web viewer.
+    """
+    frequencies = data.get('frequencies', [])
+    requester_sid = data.get('requester_sid')
+    status = data.get('status', 'success')
+
+    if status == 'error':
+        message = data.get('message', 'Unknown error')
+        logger.error(f"Frequency scan error: {message}")
+        socketio.emit('available_frequencies_response', {
+            'status': 'error',
+            'message': message
+        }, to=requester_sid)
+        return
+
+    logger.info(f"Frequency scan result: {len(frequencies)} frequencies detected")
+
+    socketio.emit('available_frequencies_response', {
+        'status': 'success',
+        'frequencies': frequencies,
+        'file_handle': data.get('file_handle', '')
+    }, to=requester_sid)
 
 
 @socketio.on('cv_data_from_agent')

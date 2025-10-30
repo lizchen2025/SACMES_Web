@@ -306,7 +306,8 @@ def file_matches_filters(filename):
             #    - CV doesn't use frequency, just handle + file number
 
             # First try SWV pattern (handle + frequency in filename)
-            match_swv = re.search(r'_(\d+)Hz_{1,2}(\d+)\.', filename, re.IGNORECASE)
+            # Support SWV_75Hz_1.txt, SWV_75Hz__1.txt, and SWV_75Hz1.txt formats
+            match_swv = re.search(r'_(\d+)Hz_?_?(\d+)\.', filename, re.IGNORECASE)
             if match_swv:
                 # SWV format: extract frequency from filename
                 freq, num = int(match_swv.group(1)), int(match_swv.group(2))
@@ -516,6 +517,54 @@ def on_set_filters(data):
     agent_thread = threading.Thread(target=monitor_directory_loop, args=(directory,), daemon=True)
     agent_thread.start()
     app.log("File monitoring thread started successfully")
+
+
+@sio.on('request_frequency_scan')
+def on_request_frequency_scan(data):
+    """
+    Scan the monitored directory for all available frequencies.
+    Used for frequency map mode to populate frequency dropdown.
+    """
+    file_handle = data.get('file_handle', '')
+    requester_sid = data.get('requester_sid')
+
+    directory = app.watch_directory.get()
+    if directory == "No folder selected":
+        app.log("Cannot scan frequencies: No folder selected")
+        return
+
+    try:
+        frequencies = set()
+        file_extension = '.txt'
+
+        for filename in os.listdir(directory):
+            if not filename.endswith(file_extension):
+                continue
+
+            if file_handle and not filename.startswith(file_handle):
+                continue
+
+            match = re.search(r'_(\d+)Hz\.', filename, re.IGNORECASE)
+            if match:
+                freq = int(match.group(1))
+                frequencies.add(freq)
+
+        frequencies_list = sorted(list(frequencies))
+        app.log(f"Detected frequencies: {frequencies_list}")
+
+        sio.emit('frequency_scan_result', {
+            'frequencies': frequencies_list,
+            'file_handle': file_handle,
+            'requester_sid': requester_sid
+        })
+
+    except Exception as e:
+        app.log(f"Error scanning frequencies: {str(e)}")
+        sio.emit('frequency_scan_result', {
+            'status': 'error',
+            'message': str(e),
+            'requester_sid': requester_sid
+        })
 
 
 @sio.on('file_processing_complete')
