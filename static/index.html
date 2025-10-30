@@ -2010,10 +2010,16 @@
             return currentUserId;
         }
 
+        // Expose globally for modules to use
+        window.getCurrentUserId = getCurrentUserId;
+
         // Helper function to check if connected
         function isConnectedToAgent() {
             return currentUserId !== null;
         }
+
+        // Expose globally for modules to use
+        window.isConnectedToAgent = isConnectedToAgent;
 
         // Initialize socket event listeners after socketManager is available
         function initializeUserIdSocketListeners() {

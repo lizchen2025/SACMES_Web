@@ -195,14 +195,24 @@ export class SWVModule {
         if (scanFreqBtn) {
             scanFreqBtn.addEventListener('click', () => {
                 const fileHandle = this.dom.params.fileHandleInput.value.trim();
-                if (typeof getCurrentUserId === 'function') {
-                    this.socketManager.emit('scan_available_frequencies', {
-                        user_id: getCurrentUserId(),
-                        file_handle: fileHandle
-                    });
-                    scanFreqBtn.textContent = 'Scanning...';
-                    scanFreqBtn.disabled = true;
+
+                if (typeof window.getCurrentUserId !== 'function') {
+                    alert('Please connect to your agent first by entering your User ID on the welcome page.');
+                    return;
                 }
+
+                const userId = window.getCurrentUserId();
+                if (!userId) {
+                    alert('Please connect to your agent first by entering your User ID on the welcome page.');
+                    return;
+                }
+
+                this.socketManager.emit('scan_available_frequencies', {
+                    user_id: userId,
+                    file_handle: fileHandle
+                });
+                scanFreqBtn.textContent = 'Scanning...';
+                scanFreqBtn.disabled = true;
             });
         }
 

@@ -286,9 +286,9 @@ def file_matches_filters(filename):
 
     try:
         if analysis_mode == 'frequency_map':
-            # Frequency Map mode: handle_freqHz.txt (NO file number)
-            # Pattern: handle_100Hz.txt
-            match_freq_map = re.search(r'_(\d+)Hz\.', filename, re.IGNORECASE)
+            # Frequency Map mode: handle_freqHz.txt or handle_freqHz_.txt (NO file number)
+            # Pattern: handle_100Hz.txt or handle_100Hz_.txt
+            match_freq_map = re.search(r'_(\d+)Hz_?\.', filename, re.IGNORECASE)
             if match_freq_map:
                 freq = int(match_freq_map.group(1))
                 # Check if frequency is in the list
@@ -544,7 +544,7 @@ def on_request_frequency_scan(data):
             if file_handle and not filename.startswith(file_handle):
                 continue
 
-            match = re.search(r'_(\d+)Hz\.', filename, re.IGNORECASE)
+            match = re.search(r'_(\d+)Hz_?\.', filename, re.IGNORECASE)
             if match:
                 freq = int(match.group(1))
                 frequencies.add(freq)
