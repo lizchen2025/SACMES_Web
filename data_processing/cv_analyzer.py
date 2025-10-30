@@ -689,6 +689,8 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
             peak_min_voltage = params.get('peak_min_voltage')
             peak_max_voltage = params.get('peak_max_voltage')
 
+            logger.info(f"CV voltage range parameters: peak_min={peak_min_voltage}, peak_max={peak_max_voltage}, low_voltage={low_voltage}, high_voltage={high_voltage}")
+
             # Convert peak range limits to base units if specified
             if peak_min_voltage is not None and voltage_units != 'V':
                 peak_min_voltage = convert_units(peak_min_voltage, voltage_units, 'base')
@@ -697,6 +699,8 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
 
             # First apply the general voltage range
             voltage_mask = (p_raw >= low_voltage) & (p_raw <= high_voltage)
+            points_after_general = np.sum(voltage_mask)
+            logger.info(f"After general voltage range filtering: {points_after_general}/{len(p_raw)} points remain")
 
             # Then apply peak detection range if specified
             if peak_min_voltage is not None or peak_max_voltage is not None:
@@ -704,8 +708,14 @@ def analyze_cv_data(file_path, params, selected_electrode=None):
                     voltage_mask = voltage_mask & (p_raw >= peak_min_voltage)
                 if peak_max_voltage is not None:
                     voltage_mask = voltage_mask & (p_raw <= peak_max_voltage)
+                points_after_peak = np.sum(voltage_mask)
+                logger.info(f"After peak detection range filtering: {points_after_peak}/{points_after_general} points remain")
 
             p_adj, i_adj = p_raw[voltage_mask].tolist(), i_raw[voltage_mask].tolist()
+            if len(p_adj) > 0:
+                logger.info(f"Final voltage range: [{min(p_adj):.4f}, {max(p_adj):.4f}]V")
+            else:
+                logger.warning("No data remaining after voltage filtering")
 
             if len(p_adj) < 3:
                 continue  # Not enough data in range

@@ -328,6 +328,8 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
     peak_min_voltage = analysis_params.get('peak_min_voltage')
     peak_max_voltage = analysis_params.get('peak_max_voltage')
 
+    logger.info(f"Voltage range parameters: peak_min={peak_min_voltage}, peak_max={peak_max_voltage}, xstart={xstart_val}, xend={xend_val}")
+
     # Convert peak range limits to base units if specified
     if peak_min_voltage is not None and voltage_units != 'V':
         peak_min_voltage = convert_units(peak_min_voltage, voltage_units, 'base')
@@ -339,6 +341,8 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
     range_indices = [i for i, p in enumerate(sorted_potentials) if
                      min(xend_val, xstart_val) <= p <= max(xend_val, xstart_val)]
 
+    logger.info(f"After xstart/xend filtering: {len(range_indices)}/{len(sorted_potentials)} points remain")
+
     # Then apply user-defined peak detection range if specified
     if peak_min_voltage is not None or peak_max_voltage is not None:
         peak_range_indices = []
@@ -349,6 +353,8 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
             if peak_max_voltage is not None and p > peak_max_voltage:
                 continue
             peak_range_indices.append(i)
+        logger.info(f"After peak detection range filtering: {len(peak_range_indices)}/{len(range_indices)} points remain")
+        logger.info(f"Voltage range of filtered data: [{min([sorted_potentials[i] for i in peak_range_indices]):.4f}, {max([sorted_potentials[i] for i in peak_range_indices]):.4f}]V")
         range_indices = peak_range_indices
 
     if not range_indices:
