@@ -605,10 +605,13 @@ export class SWVModule {
                     recalculated.normalized_peak_trends[freq][i] = rawPeaks[freq][i] / normFactors[freq];
                 }
             }
-            const lowPeak = rawPeaks[lowFreqStr] ? rawPeaks[lowFreqStr][i] : null;
-            const highPeak = rawPeaks[highFreqStr] ? rawPeaks[highFreqStr][i] : null;
-            if (lowPeak !== null && highPeak !== null && highPeak !== 0) {
-                recalculated.kdm_trend[i] = lowPeak / highPeak;
+
+            // KDM calculation using normalized peaks
+            // Formula: ((high_freq_normalized - low_freq_normalized) + 1) * 100
+            const lowNormalized = recalculated.normalized_peak_trends[lowFreqStr] ? recalculated.normalized_peak_trends[lowFreqStr][i] : null;
+            const highNormalized = recalculated.normalized_peak_trends[highFreqStr] ? recalculated.normalized_peak_trends[highFreqStr][i] : null;
+            if (lowNormalized !== null && highNormalized !== null) {
+                recalculated.kdm_trend[i] = ((highNormalized - lowNormalized) + 1) * 100;
             }
         }
         return recalculated;
@@ -1041,7 +1044,7 @@ export class SWVModule {
 
         PlotlyPlotter.renderFullTrendPlot('peakCurrentTrendPlot', trendData, freqStrs, xAxisTitle, firstPlotYTitle, this.state.currentNumFiles, '', 'peak', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
         PlotlyPlotter.renderFullTrendPlot('normalizedPeakTrendPlot', trendData, freqStrs, xAxisTitle, 'Normalized Current', this.state.currentNumFiles, '', 'normalized', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
-        PlotlyPlotter.renderFullTrendPlot('kdmTrendPlot', trendData, freqStrs, xAxisTitle, 'KDM Value', this.state.currentNumFiles, '', 'kdm', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
+        PlotlyPlotter.renderFullTrendPlot('kdmTrendPlot', trendData, freqStrs, xAxisTitle, 'KDM (%)', this.state.currentNumFiles, '', 'kdm', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
     }
     
     _setupElectrodeControls() {

@@ -404,10 +404,14 @@ def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
             peak = peak_current_trends[freq_str][i]
             if peak is not None and norm_factors.get(freq_str):
                 normalized_peak_trends[freq_str][i] = peak / norm_factors[freq_str]
-        low_peak = peak_current_trends.get(low_freq_str, [])[i]
-        high_peak = peak_current_trends.get(high_freq_str, [])[i]
-        if low_peak is not None and high_peak is not None and high_peak != 0:
-            kdm_trend[i] = low_peak / high_peak
+
+        # KDM calculation using normalized peaks
+        # Formula: ((high_freq_normalized - low_freq_normalized) + 1) * 100
+        low_normalized = normalized_peak_trends.get(low_freq_str, [])[i]
+        high_normalized = normalized_peak_trends.get(high_freq_str, [])[i]
+        if low_normalized is not None and high_normalized is not None:
+            kdm_trend[i] = ((high_normalized - low_normalized) + 1) * 100
+
     return {"x_axis_values": x_axis_values, "peak_current_trends": peak_current_trends,
             "normalized_peak_trends": normalized_peak_trends, "kdm_trend": kdm_trend}
 
@@ -994,7 +998,7 @@ def generate_csv_data(session_id, current_electrode=None):
         ])
     for freq in frequencies:
         header.append(f'Normalized_Peak_{freq}Hz')
-    header.append('KDM')
+    header.append('KDM_%')
     writer.writerow(header)
 
     # Recalculate full trends to ensure data is consistent
@@ -1154,8 +1158,8 @@ def generate_csv_data_all_electrodes(session_id):
         writer.writerow([])
 
     # Section 3: KDM
-    writer.writerow(['# KDM (Peak Current Deviation Metric)'])
-    header = ['File_Number'] + [f'E{int(k)+1}_KDM' for k in all_electrode_keys] + ['Mean_KDM', 'Std_KDM']
+    writer.writerow(['# KDM (%) - Formula: ((High_Freq_Normalized - Low_Freq_Normalized) + 1) * 100'])
+    header = ['File_Number'] + [f'E{int(k)+1}_KDM_%' for k in all_electrode_keys] + ['Mean_KDM_%', 'Std_KDM_%']
     writer.writerow(header)
 
     for i in range(num_files):
@@ -1187,7 +1191,7 @@ def generate_csv_data_all_electrodes(session_id):
     summary_header = ['Electrode']
     for freq in frequencies:
         summary_header.extend([f'Avg_Peak_{freq}Hz_A', f'Std_Peak_{freq}Hz_A'])
-    summary_header.extend(['Avg_KDM', 'Std_KDM'])
+    summary_header.extend(['Avg_KDM_%', 'Std_KDM_%'])
     writer.writerow(summary_header)
 
     for electrode_key in all_electrode_keys:
