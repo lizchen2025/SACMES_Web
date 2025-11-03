@@ -1472,45 +1472,57 @@
             <!-- Frequency Map Visualization Container (Hidden by default) -->
             <div id="frequencyMapContainer" class="hidden">
                 <div class="grid grid-cols-1 gap-6">
-                    <!-- Held Session Plots (Hidden by default, shown in hold mode) -->
-                    <div id="heldSessionPlotsContainer" class="hidden">
-                        <h3 id="heldSessionTitle" class="text-xl font-bold text-gray-800 mb-4 text-center bg-blue-100 py-2 rounded-lg">Session 1</h3>
+                    <!-- Hold Mode: Side-by-Side Voltammogram Layout -->
+                    <div id="holdModeVoltammogramContainer" class="hidden">
+                        <!-- Top Row: Side-by-Side Voltammograms -->
+                        <div class="grid grid-cols-2 gap-4 mb-4">
+                            <!-- Left: Held Session Voltammogram -->
+                            <div class="border rounded-lg p-4 bg-gradient-to-r from-blue-50 to-purple-50">
+                                <h4 class="text-lg font-semibold text-gray-700 mb-2">
+                                    <span id="heldSessionVoltammogramTitle">Session 1</span> - Voltammogram Overlay
+                                </h4>
+                                <div id="heldSessionVoltammogramPlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                                    <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
+                                </div>
+                            </div>
 
-                        <!-- Held Session Voltammogram -->
-                        <div class="border rounded-lg p-4 bg-gradient-to-r from-blue-50 to-purple-50 mb-4">
-                            <h4 class="text-lg font-semibold text-gray-700 mb-2">Voltammogram Overlay</h4>
-                            <div id="heldSessionVoltammogramPlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
-                                <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
+                            <!-- Right: Current Session Voltammogram -->
+                            <div class="border rounded-lg p-4 bg-gradient-to-r from-green-50 to-teal-50">
+                                <h4 class="text-lg font-semibold text-gray-700 mb-2">
+                                    <span id="currentSessionVoltammogramTitle">Session 2</span> - Current Voltammogram
+                                </h4>
+                                <div id="frequencyMapVoltammogramPlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                                    <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
+                                </div>
+                                <p id="currentFrequencyLabel" class="text-sm text-gray-600 mt-2 text-center">No frequency selected</p>
                             </div>
                         </div>
 
-                        <!-- Held Session Charge Plot -->
-                        <div class="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-pink-50 mb-4">
-                            <h4 class="text-lg font-semibold text-gray-700 mb-2">Charge vs Frequency</h4>
-                            <div id="heldSessionChargePlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                        <!-- Bottom Row: Overlaid Charge vs Frequency Plot -->
+                        <div class="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-pink-50">
+                            <h4 class="text-lg font-semibold text-gray-700 mb-2">Charge vs Frequency (Both Sessions)</h4>
+                            <div id="frequencyMapChargePlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
                                 <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
                             </div>
-                            <p class="text-xs text-gray-500 mt-2 text-center">Logarithmic frequency scale</p>
+                            <p class="text-xs text-gray-500 mt-2 text-center">Logarithmic frequency scale - Both sessions overlaid with legend</p>
                         </div>
                     </div>
 
-                    <!-- Current Session Plots -->
-                    <div id="currentSessionPlotsContainer">
-                        <h3 id="currentSessionTitle" class="hidden text-xl font-bold text-gray-800 mb-4 text-center bg-green-100 py-2 rounded-lg">Session 2</h3>
-
+                    <!-- Non-Hold Mode: Single Session Layout -->
+                    <div id="nonHoldModeContainer">
                         <!-- Voltammogram Plot (Top) -->
                         <div class="border rounded-lg p-4 bg-gradient-to-r from-blue-50 to-purple-50">
                             <h4 class="text-lg font-semibold text-gray-700 mb-2">Current Voltammogram</h4>
-                            <div id="frequencyMapVoltammogramPlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                            <div id="nonHoldVoltammogramPlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
                                 <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
                             </div>
-                            <p id="currentFrequencyLabel" class="text-sm text-gray-600 mt-2 text-center">No frequency selected</p>
+                            <p id="nonHoldFrequencyLabel" class="text-sm text-gray-600 mt-2 text-center">No frequency selected</p>
                         </div>
 
                         <!-- Frequency vs Charge Plot (Bottom) -->
                         <div class="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-pink-50">
                             <h4 class="text-lg font-semibold text-gray-700 mb-2">Frequency Map: Charge vs Frequency</h4>
-                            <div id="frequencyMapChargePlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                            <div id="nonHoldChargePlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
                                 <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
                             </div>
                             <p class="text-xs text-gray-500 mt-2 text-center">Logarithmic frequency scale</p>

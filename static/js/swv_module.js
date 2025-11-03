@@ -58,15 +58,17 @@ export class SWVModule {
                 electrodeControls: document.getElementById('electrodeControls'),
                 continuousMonitorContainer: document.getElementById('continuousMonitorContainer'),
                 frequencyMapContainer: document.getElementById('frequencyMapContainer'),
-                heldSessionPlotsContainer: document.getElementById('heldSessionPlotsContainer'),
-                currentSessionPlotsContainer: document.getElementById('currentSessionPlotsContainer'),
-                heldSessionTitle: document.getElementById('heldSessionTitle'),
-                currentSessionTitle: document.getElementById('currentSessionTitle'),
+                holdModeVoltammogramContainer: document.getElementById('holdModeVoltammogramContainer'),
+                nonHoldModeContainer: document.getElementById('nonHoldModeContainer'),
+                heldSessionVoltammogramTitle: document.getElementById('heldSessionVoltammogramTitle'),
+                currentSessionVoltammogramTitle: document.getElementById('currentSessionVoltammogramTitle'),
                 heldSessionVoltammogramPlot: document.getElementById('heldSessionVoltammogramPlot'),
-                heldSessionChargePlot: document.getElementById('heldSessionChargePlot'),
                 frequencyMapVoltammogramPlot: document.getElementById('frequencyMapVoltammogramPlot'),
                 frequencyMapChargePlot: document.getElementById('frequencyMapChargePlot'),
+                nonHoldVoltammogramPlot: document.getElementById('nonHoldVoltammogramPlot'),
+                nonHoldChargePlot: document.getElementById('nonHoldChargePlot'),
                 currentFrequencyLabel: document.getElementById('currentFrequencyLabel'),
+                nonHoldFrequencyLabel: document.getElementById('nonHoldFrequencyLabel'),
                 analyzedFrequenciesCount: document.getElementById('analyzedFrequenciesCount'),
                 latestFrequency: document.getElementById('latestFrequency'),
                 latestCharge: document.getElementById('latestCharge'),
@@ -1306,22 +1308,20 @@ export class SWVModule {
         const isHoldMode = !!this.state.heldData;
 
         if (isHoldMode) {
-            // Show held session plots container
-            if (this.dom.visualization.heldSessionPlotsContainer) {
-                this.dom.visualization.heldSessionPlotsContainer.classList.remove('hidden');
+            // Show hold mode layout, hide non-hold mode layout
+            if (this.dom.visualization.holdModeVoltammogramContainer) {
+                this.dom.visualization.holdModeVoltammogramContainer.classList.remove('hidden');
+            }
+            if (this.dom.visualization.nonHoldModeContainer) {
+                this.dom.visualization.nonHoldModeContainer.classList.add('hidden');
             }
 
-            // Show current session title
-            if (this.dom.visualization.currentSessionTitle) {
-                this.dom.visualization.currentSessionTitle.classList.remove('hidden');
+            // Update session titles in voltammogram headers
+            if (this.dom.visualization.heldSessionVoltammogramTitle) {
+                this.dom.visualization.heldSessionVoltammogramTitle.textContent = this.state.heldSessionName;
             }
-
-            // Update session titles
-            if (this.dom.visualization.heldSessionTitle) {
-                this.dom.visualization.heldSessionTitle.textContent = this.state.heldSessionName;
-            }
-            if (this.dom.visualization.currentSessionTitle) {
-                this.dom.visualization.currentSessionTitle.textContent = this.state.currentSessionName;
+            if (this.dom.visualization.currentSessionVoltammogramTitle) {
+                this.dom.visualization.currentSessionVoltammogramTitle.textContent = this.state.currentSessionName;
             }
 
             // Update hold mode status
@@ -1330,17 +1330,15 @@ export class SWVModule {
                 this.dom.visualization.holdModeStatus.classList.remove('hidden');
             }
 
-            // Immediately render held session plots (they don't change)
-            this._renderHeldSessionPlots();
+            // Immediately render held session voltammogram (left side, doesn't change)
+            this._renderHeldSessionVoltammogram();
         } else {
-            // Hide held session plots container
-            if (this.dom.visualization.heldSessionPlotsContainer) {
-                this.dom.visualization.heldSessionPlotsContainer.classList.add('hidden');
+            // Show non-hold mode layout, hide hold mode layout
+            if (this.dom.visualization.holdModeVoltammogramContainer) {
+                this.dom.visualization.holdModeVoltammogramContainer.classList.add('hidden');
             }
-
-            // Hide current session title
-            if (this.dom.visualization.currentSessionTitle) {
-                this.dom.visualization.currentSessionTitle.classList.add('hidden');
+            if (this.dom.visualization.nonHoldModeContainer) {
+                this.dom.visualization.nonHoldModeContainer.classList.remove('hidden');
             }
 
             // Clear hold mode status
@@ -1353,29 +1351,23 @@ export class SWVModule {
         console.log('Frequency Map visualization setup complete');
     }
 
-    _renderHeldSessionPlots() {
-        // Render held session plots from saved data
+    _renderHeldSessionVoltammogram() {
+        // Render held session voltammogram overlay (left side in hold mode)
         const electrodeKey = this.state.currentElectrode !== null ? this.state.currentElectrode.toString() : 'averaged';
         const heldElectrodeData = this.state.heldData[electrodeKey] || {};
 
-        console.log('Rendering held session plots...');
+        console.log('Rendering held session voltammogram...');
 
         // Generate color palette
         const colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan'];
 
-        // Render held session voltammogram overlay
+        // Render held session voltammogram overlay (without baseline)
         this._renderVoltammogramOverlay(
             this.dom.visualization.heldSessionVoltammogramPlot,
             heldElectrodeData,
             colors,
-            'Voltammogram Overlay'
-        );
-
-        // Render held session charge vs frequency
-        this._renderChargeVsFrequency(
-            this.dom.visualization.heldSessionChargePlot,
-            heldElectrodeData,
-            'Charge vs Frequency'
+            '', // No title needed, it's in the header
+            false // Don't show baseline for held session
         );
 
         // Trigger resize to fix any layout issues
@@ -1383,12 +1375,9 @@ export class SWVModule {
             if (this.dom.visualization.heldSessionVoltammogramPlot) {
                 Plotly.Plots.resize(this.dom.visualization.heldSessionVoltammogramPlot);
             }
-            if (this.dom.visualization.heldSessionChargePlot) {
-                Plotly.Plots.resize(this.dom.visualization.heldSessionChargePlot);
-            }
         }, 100);
 
-        console.log('Held session plots rendered');
+        console.log('Held session voltammogram rendered');
     }
 
     _restoreFrequencyMapPlotDivs() {
@@ -1951,9 +1940,17 @@ export class SWVModule {
     }
 
     _updateFrequencyMapVoltammogram(freqData) {
-        const plotDiv = this.dom.visualization.frequencyMapVoltammogramPlot;
+        // Choose plot div based on hold mode
+        const isHoldMode = !!this.state.heldData;
+        const plotDiv = isHoldMode
+            ? this.dom.visualization.frequencyMapVoltammogramPlot  // Right side in hold mode
+            : this.dom.visualization.nonHoldVoltammogramPlot;      // Non-hold mode plot
 
-        // Show individual frequency plot
+        const labelDiv = isHoldMode
+            ? this.dom.visualization.currentFrequencyLabel
+            : this.dom.visualization.nonHoldFrequencyLabel;
+
+        // Show individual frequency plot with baseline
         const traces = [];
 
         // Smoothed data trace
@@ -1968,7 +1965,7 @@ export class SWVModule {
             });
         }
 
-        // Regression line trace
+        // Regression line trace (baseline)
         if (freqData.regression_line && freqData.regression_line.length > 0) {
             traces.push({
                 x: freqData.adjusted_potentials || freqData.potentials,
@@ -1996,8 +1993,10 @@ export class SWVModule {
         Plotly.react(plotDiv, traces, layout, { responsive: true });
 
         // Update label
-        this.dom.visualization.currentFrequencyLabel.textContent =
-            `Current: ${freqData.frequency} Hz | Peak: ${freqData.peak_value.toExponential(4)} A | Charge: ${freqData.charge.toExponential(4)} C`;
+        if (labelDiv) {
+            labelDiv.textContent =
+                `Current: ${freqData.frequency} Hz | Peak: ${freqData.peak_value.toExponential(4)} A | Charge: ${freqData.charge.toExponential(4)} C`;
+        }
     }
 
     _updateFrequencyMapOverlay() {
@@ -2013,17 +2012,29 @@ export class SWVModule {
         // Generate color palette for different frequencies
         const colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan'];
 
-        // Always render current session overlay (held session already rendered in setup)
+        // Choose plot div based on hold mode
+        const isHoldMode = !!this.state.heldData;
+        const plotDiv = isHoldMode
+            ? this.dom.visualization.frequencyMapVoltammogramPlot  // Right side in hold mode
+            : this.dom.visualization.nonHoldVoltammogramPlot;      // Non-hold mode plot
+
+        const labelDiv = isHoldMode
+            ? this.dom.visualization.currentFrequencyLabel
+            : this.dom.visualization.nonHoldFrequencyLabel;
+
+        // Render overlay without baseline (final summary view)
         this._renderVoltammogramOverlay(
-            this.dom.visualization.frequencyMapVoltammogramPlot,
+            plotDiv,
             electrodeFreqData,
             colors,
-            'Frequency Map: All Frequencies Overlay'
+            'All Frequencies Overlay' // Title
         );
 
         // Update label
-        this.dom.visualization.currentFrequencyLabel.textContent =
-            `Analysis Complete - Showing all ${analyzedFreqs.length} frequencies`;
+        if (labelDiv) {
+            labelDiv.textContent =
+                `Analysis Complete - Showing all ${analyzedFreqs.length} frequencies`;
+        }
 
         console.log(`   ✓ Overlay plot complete!`);
     }
@@ -2090,12 +2101,26 @@ export class SWVModule {
             return; // No data to plot yet
         }
 
-        // Always render current session (held session already rendered in setup)
-        this._renderChargeVsFrequency(
-            this.dom.visualization.frequencyMapChargePlot,
-            electrodeFreqData,
-            'Frequency Map: Charge vs Frequency'
-        );
+        const isHoldMode = !!this.state.heldData;
+
+        if (isHoldMode) {
+            // Hold mode: overlay both sessions on the same plot
+            const heldElectrodeData = this.state.heldData[electrodeKey] || {};
+            this._renderChargeVsFrequencyOverlay(
+                this.dom.visualization.frequencyMapChargePlot,
+                heldElectrodeData,
+                electrodeFreqData,
+                this.state.heldSessionName,
+                this.state.currentSessionName
+            );
+        } else {
+            // Non-hold mode: render to non-hold plot div
+            this._renderChargeVsFrequency(
+                this.dom.visualization.nonHoldChargePlot,
+                electrodeFreqData,
+                'Frequency Map: Charge vs Frequency'
+            );
+        }
     }
 
     _renderChargeVsFrequency(plotDiv, frequencyData, titleText) {
@@ -2148,6 +2173,58 @@ export class SWVModule {
         Plotly.react(plotDiv, [trace], layout, { responsive: true });
     }
 
+    _renderChargeVsFrequencyOverlay(plotDiv, heldSessionData, currentSessionData, heldSessionName, currentSessionName) {
+        // Get frequencies from both sessions
+        const heldFreqs = Object.keys(heldSessionData).map(f => parseFloat(f)).sort((a, b) => a - b);
+        const currentFreqs = Object.keys(currentSessionData).map(f => parseFloat(f)).sort((a, b) => a - b);
+
+        const traces = [];
+
+        // Held session trace (blue)
+        if (heldFreqs.length > 0) {
+            const heldCharges = heldFreqs.map(freq => heldSessionData[freq].charge);
+            traces.push({
+                x: heldFreqs,
+                y: heldCharges,
+                type: 'scatter',
+                mode: 'markers+lines',
+                name: heldSessionName || 'Session 1',
+                marker: { size: 8, color: 'blue' },
+                line: { color: 'blue', width: 2 }
+            });
+        }
+
+        // Current session trace (green)
+        if (currentFreqs.length > 0) {
+            const currentCharges = currentFreqs.map(freq => currentSessionData[freq].charge);
+            traces.push({
+                x: currentFreqs,
+                y: currentCharges,
+                type: 'scatter',
+                mode: 'markers+lines',
+                name: currentSessionName || 'Session 2',
+                marker: { size: 8, color: 'green' },
+                line: { color: 'green', width: 2 }
+            });
+        }
+
+        const layout = {
+            title: 'Charge vs Frequency (Both Sessions)',
+            xaxis: {
+                title: 'Frequency (Hz)',
+                type: 'log', // Logarithmic scale
+                autorange: true
+            },
+            yaxis: { title: 'Charge (C)' },
+            showlegend: true,
+            legend: { x: 1.05, y: 1, xanchor: 'left' },
+            margin: { l: 60, r: 120, t: 50, b: 50 },
+            hovermode: 'closest'
+        };
+
+        Plotly.react(plotDiv, traces, layout, { responsive: true });
+    }
+
     _updateFrequencyMapStats() {
         // Update stats for current electrode
         const electrodeKey = this.state.currentElectrode !== null ? this.state.currentElectrode.toString() : 'averaged';
@@ -2197,10 +2274,10 @@ export class SWVModule {
         // Update electrode button states
         this._setupElectrodeControls();
 
-        // If in hold mode, update held session plots for the new electrode
+        // If in hold mode, update held session voltammogram for the new electrode
         const isHoldMode = !!this.state.heldData;
         if (isHoldMode) {
-            this._renderHeldSessionPlots();
+            this._renderHeldSessionVoltammogram();
         }
 
         // Get data for this electrode
