@@ -136,12 +136,7 @@ export class SWVModule {
         this.dom.backToWelcomeBtn.addEventListener('click', () => this.uiManager.showScreen('welcomeScreen'));
         
         this.dom.visualization.backToSWVBtn.addEventListener('click', () => {
-            this.dom.visualization.adjustmentControls.classList.add('hidden');
-            this.dom.visualization.exportDataBtn.classList.add('hidden');
-            this.uiManager.showScreen('swvAnalysisScreen');
-            this.state.isAnalysisRunning = false;
-            this.dom.startAnalysisBtn.textContent = 'Start Analysis & Sync';
-            this.dom.startAnalysisBtn.disabled = false;
+            this._handleBackToSettings();
         });
         
         this.dom.visualization.exportDataBtn.addEventListener('click', () => {
@@ -256,7 +251,7 @@ export class SWVModule {
 
                 // Clear current frequency map data to prepare for next session
                 this.state.frequencyMapData = {};
-                this.state.analyzedFrequencies = [];
+                this.state.analyzedFrequencies = {};
             });
         }
 
@@ -877,6 +872,54 @@ export class SWVModule {
         return rawPeaks;
     }
 
+    _handleBackToSettings() {
+        console.log('Returning to settings - clearing all data and hold mode');
+
+        // Hide visualization controls
+        this.dom.visualization.adjustmentControls.classList.add('hidden');
+        this.dom.visualization.exportDataBtn.classList.add('hidden');
+
+        // Reset button state
+        this.state.isAnalysisRunning = false;
+        this.dom.startAnalysisBtn.textContent = 'Start Analysis & Sync';
+        this.dom.startAnalysisBtn.disabled = false;
+
+        // Clear all analysis data
+        this.state.rawTrendData = null;
+        this.state.lastCalculatedData = null;
+        this.state.electrodeData = {};
+        this.state.frequencyMapData = {};
+        this.state.analyzedFrequencies = {};
+
+        // Clear hold mode data
+        this.state.heldData = null;
+        this.state.heldSessionName = null;
+        this.state.currentSessionName = null;
+
+        // Hide hold mode UI elements
+        if (this.dom.visualization.holdModeStatus) {
+            this.dom.visualization.holdModeStatus.textContent = '';
+            this.dom.visualization.holdModeStatus.classList.add('hidden');
+        }
+
+        // Reset analysis mode to default (continuous)
+        this.state.analysisMode = 'continuous';
+
+        // Update radio buttons to reflect continuous mode
+        const continuousRadio = document.querySelector('input[name="analysisMode"][value="continuous"]');
+        if (continuousRadio) {
+            continuousRadio.checked = true;
+        }
+
+        // Update UI for continuous mode
+        this._updateUIForMode('continuous');
+
+        // Navigate back to settings screen
+        this.uiManager.showScreen('swvAnalysisScreen');
+
+        console.log('State cleared, returned to default continuous mode');
+    }
+
     _handlePostProcessUpdate() {
         const recalculatedData = this._recalculateTrends();
         if (recalculatedData) {
@@ -995,7 +1038,7 @@ export class SWVModule {
         }
         if (backToSWVBtn) {
             backToSWVBtn.textContent = 'Back to SWV Settings';
-            backToSWVBtn.onclick = () => this.uiManager.showScreen('swvAnalysisScreen');
+            backToSWVBtn.onclick = () => this._handleBackToSettings();
         }
 
         // Check analysis mode and setup appropriate visualization
