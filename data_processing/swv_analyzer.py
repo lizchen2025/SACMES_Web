@@ -503,25 +503,56 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
         if len(adjusted_potentials) > 2:
             # Peak finding must be done on smoothed data
             first_derivative = np.gradient(np.array(adjusted_smoothed_currents), np.array(adjusted_potentials))
-            peak_candidates = []
+            positive_peak_candidates = []  # Peaks (mountains)
+            negative_peak_candidates = []  # Valleys (troughs)
 
             # Log some debug information
             logger.info(f"Peak detection: Data points={len(adjusted_potentials)}, Current range=[{min(adjusted_smoothed_currents):.4f}, {max(adjusted_smoothed_currents):.4f}]")
 
-            # Since data is sorted by potential, scan direction is always increasing
+            # Detect both positive peaks (derivative: + to -) and negative peaks (derivative: - to +)
             for i in range(1, len(first_derivative)):
                 if first_derivative[i - 1] > 0 and first_derivative[i] <= 0:
-                    peak_candidates.append((adjusted_smoothed_currents[i], adjusted_potentials[i], i))
+                    # Positive peak (mountain)
+                    positive_peak_candidates.append((adjusted_smoothed_currents[i], adjusted_potentials[i], i))
+                elif first_derivative[i - 1] < 0 and first_derivative[i] >= 0:
+                    # Negative peak (valley/trough)
+                    negative_peak_candidates.append((adjusted_smoothed_currents[i], adjusted_potentials[i], i))
 
-            logger.info(f"Peak detection: Found {len(peak_candidates)} peak candidates")
+            logger.info(f"Peak detection: Found {len(positive_peak_candidates)} positive peaks, {len(negative_peak_candidates)} negative valleys")
+
+            # Determine which type of peak is more prominent
+            peak_candidates = []
+            if positive_peak_candidates and negative_peak_candidates:
+                # Compare the magnitude of the most prominent positive and negative peaks
+                max_positive = max(positive_peak_candidates, key=lambda x: x[0])
+                min_negative = min(negative_peak_candidates, key=lambda x: x[0])
+
+                # Choose based on absolute magnitude from zero
+                if abs(max_positive[0]) > abs(min_negative[0]):
+                    peak_candidates = positive_peak_candidates
+                    peak_type = "positive"
+                    logger.info(f"Selecting positive peak (magnitude: {abs(max_positive[0]):.4e} > {abs(min_negative[0]):.4e})")
+                else:
+                    peak_candidates = negative_peak_candidates
+                    peak_type = "negative"
+                    logger.info(f"Selecting negative valley (magnitude: {abs(min_negative[0]):.4e} > {abs(max_positive[0]):.4e})")
+            elif positive_peak_candidates:
+                peak_candidates = positive_peak_candidates
+                peak_type = "positive"
+                logger.info("Only positive peaks found")
+            elif negative_peak_candidates:
+                peak_candidates = negative_peak_candidates
+                peak_type = "negative"
+                logger.info("Only negative valleys found")
 
             if peak_candidates:
-                original_peak_current, peak_potential, peak_index = max(peak_candidates, key=lambda x: x[0])
-                logger.info(f"Peak detection: Selected peak at V={peak_potential:.4f}, I={original_peak_current:.4f}, index={peak_index}")
+                # Select the most prominent peak based on type
+                if peak_type == "positive":
+                    original_peak_current, peak_potential, peak_index = max(peak_candidates, key=lambda x: x[0])
+                else:
+                    original_peak_current, peak_potential, peak_index = min(peak_candidates, key=lambda x: x[0])
 
-                # Determine if peak is in negative or positive current region
-                peak_is_negative = original_peak_current < 0
-                logger.info(f"Peak polarity: {'negative' if peak_is_negative else 'positive'} (peak current: {original_peak_current:.4e})")
+                logger.info(f"Peak detection: Selected {peak_type} peak at V={peak_potential:.4f}, I={original_peak_current:.4f}, index={peak_index}")
 
                 # --- Intelligent Convex Hull Based Tangent Algorithm ---
                 points = list(zip(adjusted_potentials, adjusted_smoothed_currents))
@@ -529,9 +560,11 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
                 def cross_product(p1, p2, p3):
                     return (p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0])
 
-                # Build appropriate hull based on peak polarity
-                if peak_is_negative:
-                    # Negative peak: use upper convex hull (from right to left)
+                # Build appropriate hull based on peak TYPE (not current sign)
+                # For positive peaks (mountains): baseline connects valleys below the peak -> use LOWER hull
+                # For negative peaks (valleys): baseline connects ridges above the valley -> use UPPER hull
+                if peak_type == "negative":
+                    # Negative peak (valley): use upper convex hull to find baseline above the valley
                     upper_hull = []
                     for p in reversed(points):
                         while len(upper_hull) >= 2 and cross_product(upper_hull[-2], upper_hull[-1], p) <= 0:
@@ -539,16 +572,16 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
                         upper_hull.append(p)
                     upper_hull.reverse()  # Reverse back to left-to-right order
                     hull = upper_hull
-                    logger.info(f"Using upper hull for negative peak (hull points: {len(hull)})")
+                    logger.info(f"Using upper hull for negative peak/valley (hull points: {len(hull)})")
                 else:
-                    # Positive peak: use lower convex hull (from left to right)
+                    # Positive peak (mountain): use lower convex hull to find baseline below the peak
                     lower_hull = []
                     for p in points:
                         while len(lower_hull) >= 2 and cross_product(lower_hull[-2], lower_hull[-1], p) <= 0:
                             lower_hull.pop()
                         lower_hull.append(p)
                     hull = lower_hull
-                    logger.info(f"Using lower hull for positive peak (hull points: {len(hull)})")
+                    logger.info(f"Using lower hull for positive peak/mountain (hull points: {len(hull)})")
 
                 # Find the baseline edge on the hull that spans the peak
                 baseline_edge_found = False
@@ -576,15 +609,17 @@ def analyze_swv_data(file_path, analysis_params, selected_electrode=None):
                         logger.warning(f"Peak outside hull segments, using hull endpoints as baseline: Left({V_left_baseline:.4f}V, {I_left_baseline:.4e}A), Right({V_right_baseline:.4f}V, {I_right_baseline:.4e}A)")
                     else:
                         # Only one hull point (degenerate case)
-                        if peak_is_negative:
+                        if peak_type == "negative":
+                            # For valley, use the highest point as baseline
                             max_idx = np.argmax(adjusted_smoothed_currents)
                             V_left_baseline = V_right_baseline = adjusted_potentials[max_idx]
                             I_left_baseline = I_right_baseline = adjusted_smoothed_currents[max_idx]
                         else:
+                            # For mountain, use the lowest point as baseline
                             min_idx = np.argmin(adjusted_smoothed_currents)
                             V_left_baseline = V_right_baseline = adjusted_potentials[min_idx]
                             I_left_baseline = I_right_baseline = adjusted_smoothed_currents[min_idx]
-                        logger.warning(f"Degenerate hull, using {'max' if peak_is_negative else 'min'} current point")
+                        logger.warning(f"Degenerate hull, using {'max' if peak_type == 'negative' else 'min'} current point")
 
                 # --- Apply chosen baseline ---
                 if V_left_baseline is not None:
