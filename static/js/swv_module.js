@@ -93,6 +93,8 @@ export class SWVModule {
                 postProcessInjectionPointInput: document.getElementById('postProcessInjectionPointInput'),
                 updateInjectionPointBtn: document.getElementById('updateInjectionPointBtn'),
                 applyPostProcessNormalizationBtn: document.getElementById('applyPostProcessNormalizationBtn'),
+                replicationInput: document.getElementById('replicationInput'),
+                applyReplicationBtn: document.getElementById('applyReplicationBtn'),
             },
         };
 
@@ -112,6 +114,8 @@ export class SWVModule {
             frequencyMapData: {}, // {frequency: {potentials, currents, charge, etc.}}
             analyzedFrequencies: {}, // {electrode: [frequencies]} - analyzed frequencies per electrode
             heldData: null, // Holds previous session data for comparison
+            groupedData: null, // Holds grouped data when replication is applied
+            currentReplication: 1, // Current replication value (1 = no grouping)
             heldSessionName: null, // Name of the held session
             currentSessionName: null // Name of the current session
         };
@@ -146,6 +150,19 @@ export class SWVModule {
                 this.dom.visualization.exportDataBtn.dataset.filename = filename;
                 this.dom.visualization.exportStatus.textContent = 'Generating export file...';
 
+                // Check if replication grouping is applied
+                if (this.state.groupedData && this.state.currentReplication > 1) {
+                    // Generate grouped CSV in frontend
+                    const csvData = this._generateGroupedCSV();
+                    if (csvData) {
+                        this.dom.visualization.exportStatus.textContent = `Export successful! Downloading ${filename}...`;
+                        this._triggerCsvDownload(csvData, filename);
+                    } else {
+                        this.dom.visualization.exportStatus.textContent = 'Export failed: No grouped data available.';
+                    }
+                    return;
+                }
+
                 // Check if connected to agent
                 if (typeof isConnectedToAgent === 'function' && !isConnectedToAgent()) {
                     alert('Please connect to an agent first by entering your User ID.');
@@ -153,7 +170,7 @@ export class SWVModule {
                     return;
                 }
 
-                // Export all electrodes
+                // Export all electrodes (ungrouped data via server)
                 this.socketManager.emit('request_export_data', {
                     user_id: getCurrentUserId()
                 });
@@ -266,6 +283,7 @@ export class SWVModule {
         // Use a single handler for all adjustment updates
         this.dom.visualization.updateInjectionPointBtn.addEventListener('click', () => this._handlePostProcessUpdate());
         this.dom.visualization.applyPostProcessNormalizationBtn.addEventListener('click', () => this._handlePostProcessUpdate());
+        this.dom.visualization.applyReplicationBtn.addEventListener('click', () => this._handleReplicationGrouping());
 
         // Add listener for x-axis options change during analysis
         this.dom.settings.xAxisOptionsInput.addEventListener('change', () => {
@@ -627,6 +645,109 @@ export class SWVModule {
         document.body.removeChild(link);
     }
 
+    _generateGroupedCSV() {
+        if (!this.state.groupedData) {
+            console.error('No grouped data available for export');
+            return null;
+        }
+
+        const csvLines = [];
+        const data = this.state.groupedData;
+        const replication = this.state.currentReplication;
+
+        // Metadata
+        csvLines.push(`# SACMES SWV Data - Grouped by Replication`);
+        csvLines.push(`# Export Date: ${new Date().toISOString()}`);
+        csvLines.push(`# Replication: n=${replication}`);
+        csvLines.push(`# Original Data Points: ${this.state.currentNumFiles}`);
+        csvLines.push(`# Grouped Data Points: ${data.num_groups}`);
+        csvLines.push(`# Frequencies (Hz): ${this.state.currentFrequencies.join(', ')}`);
+        csvLines.push(`# X-axis: ${this.state.currentXAxisOptions}`);
+        csvLines.push('');
+
+        const xAxisLabel = this.state.currentXAxisOptions === 'Experiment Time' ? 'Time (min)' : 'Group Number';
+        const freqStrings = this.state.currentFrequencies.map(String).sort((a, b) => parseInt(a) - parseInt(b));
+
+        // Peak Current Trends section
+        csvLines.push(`## Peak Current Trends`);
+        csvLines.push('');
+
+        // Build header for peak current
+        const peakHeader = [xAxisLabel, 'X_SE'];
+        freqStrings.forEach(freq => {
+            peakHeader.push(`${freq}Hz_Mean`);
+            peakHeader.push(`${freq}Hz_SE`);
+        });
+        csvLines.push(peakHeader.join(','));
+
+        // Build data rows for peak current
+        for (let i = 0; i < data.num_groups; i++) {
+            const row = [];
+            row.push(data.x_axis_values[i] !== null ? data.x_axis_values[i].toFixed(4) : 'N/A');
+            row.push(data.x_axis_errors[i] !== null ? data.x_axis_errors[i].toFixed(6) : 'N/A');
+
+            freqStrings.forEach(freq => {
+                const mean = data.peak_current_trends[freq][i];
+                const se = data.peak_current_errors[freq][i];
+                row.push(mean !== null ? mean.toExponential(6) : 'N/A');
+                row.push(se !== null ? se.toExponential(6) : 'N/A');
+            });
+
+            csvLines.push(row.join(','));
+        }
+
+        csvLines.push('');
+
+        // Normalized Peak Current Trends section
+        csvLines.push(`## Normalized Peak Current Trends`);
+        csvLines.push('');
+
+        // Build header for normalized peak
+        const normHeader = [xAxisLabel, 'X_SE'];
+        freqStrings.forEach(freq => {
+            normHeader.push(`${freq}Hz_Mean`);
+            normHeader.push(`${freq}Hz_SE`);
+        });
+        csvLines.push(normHeader.join(','));
+
+        // Build data rows for normalized peak
+        for (let i = 0; i < data.num_groups; i++) {
+            const row = [];
+            row.push(data.x_axis_values[i] !== null ? data.x_axis_values[i].toFixed(4) : 'N/A');
+            row.push(data.x_axis_errors[i] !== null ? data.x_axis_errors[i].toFixed(6) : 'N/A');
+
+            freqStrings.forEach(freq => {
+                const mean = data.normalized_peak_trends[freq][i];
+                const se = data.normalized_peak_errors[freq][i];
+                row.push(mean !== null ? mean.toFixed(6) : 'N/A');
+                row.push(se !== null ? se.toFixed(6) : 'N/A');
+            });
+
+            csvLines.push(row.join(','));
+        }
+
+        csvLines.push('');
+
+        // KDM Trend section
+        csvLines.push(`## KDM Trend`);
+        csvLines.push('');
+
+        const kdmHeader = [xAxisLabel, 'X_SE', 'KDM_Mean (%)', 'KDM_SE (%)'];
+        csvLines.push(kdmHeader.join(','));
+
+        for (let i = 0; i < data.num_groups; i++) {
+            const row = [];
+            row.push(data.x_axis_values[i] !== null ? data.x_axis_values[i].toFixed(4) : 'N/A');
+            row.push(data.x_axis_errors[i] !== null ? data.x_axis_errors[i].toFixed(6) : 'N/A');
+            row.push(data.kdm_trend[i] !== null ? data.kdm_trend[i].toFixed(4) : 'N/A');
+            row.push(data.kdm_errors[i] !== null ? data.kdm_errors[i].toFixed(4) : 'N/A');
+
+            csvLines.push(row.join(','));
+        }
+
+        return csvLines.join('\n');
+    }
+
     _generateHoldModeCSV() {
         // Generate CSV for both held and current sessions
         const csvLines = [];
@@ -895,6 +1016,13 @@ export class SWVModule {
         this.state.heldData = null;
         this.state.heldSessionName = null;
         this.state.currentSessionName = null;
+
+        // Clear replication grouping data
+        this.state.groupedData = null;
+        this.state.currentReplication = 1;
+        if (this.dom.visualization.replicationInput) {
+            this.dom.visualization.replicationInput.value = '1';
+        }
 
         // Hide hold mode UI elements
         if (this.dom.visualization.holdModeStatus) {
@@ -2105,6 +2233,263 @@ export class SWVModule {
 
         // Update charge chart
         this._updateFrequencyChargeChart();
+    }
+
+    _handleReplicationGrouping() {
+        // Get replication value from input
+        const replication = parseInt(this.dom.visualization.replicationInput.value);
+
+        if (!replication || replication < 1) {
+            alert('Please enter a valid replication value (≥ 1)');
+            return;
+        }
+
+        // Get the current calculated data
+        const originalData = this.state.lastCalculatedData;
+        if (!originalData) {
+            alert('No data available to group. Please run analysis first.');
+            return;
+        }
+
+        console.log(`Grouping data with replication n=${replication}`);
+
+        // Store current replication value
+        this.state.currentReplication = replication;
+
+        // If replication is 1, no grouping needed
+        if (replication === 1) {
+            this.state.groupedData = null;
+            this._renderTrendPlots(originalData);
+            return;
+        }
+
+        // Group the data
+        const groupedData = this._groupDataByReplication(originalData, replication);
+
+        // Store grouped data in state
+        this.state.groupedData = groupedData;
+
+        // Render grouped data with error bars
+        this._renderTrendPlotsWithErrorBars(groupedData);
+    }
+
+    _groupDataByReplication(data, replication) {
+        // Calculate number of groups
+        const numDataPoints = data.x_axis_values.length;
+        const numGroups = Math.floor(numDataPoints / replication);
+
+        if (numGroups === 0) {
+            alert(`Not enough data points for replication n=${replication}. Only ${numDataPoints} data points available.`);
+            return null;
+        }
+
+        console.log(`Grouping ${numDataPoints} data points into ${numGroups} groups`);
+
+        // Initialize grouped data structure
+        const groupedData = {
+            x_axis_values: [],
+            x_axis_errors: [],
+            peak_current_trends: {},
+            peak_current_errors: {},
+            normalized_peak_trends: {},
+            normalized_peak_errors: {},
+            kdm_trend: [],
+            kdm_errors: [],
+            num_groups: numGroups,
+            replication: replication
+        };
+
+        // Helper function to calculate mean and standard error
+        const calculateStats = (values) => {
+            const validValues = values.filter(v => v !== null && v !== undefined && !isNaN(v));
+            if (validValues.length === 0) return { mean: null, se: null };
+
+            const mean = validValues.reduce((sum, v) => sum + v, 0) / validValues.length;
+
+            if (validValues.length === 1) {
+                return { mean, se: 0 };
+            }
+
+            // Calculate standard deviation
+            const variance = validValues.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / (validValues.length - 1);
+            const std = Math.sqrt(variance);
+
+            // Calculate standard error: SE = SD / sqrt(n)
+            const se = std / Math.sqrt(validValues.length);
+
+            return { mean, se };
+        };
+
+        // Group x-axis values
+        for (let g = 0; g < numGroups; g++) {
+            const startIdx = g * replication;
+            const endIdx = Math.min(startIdx + replication, numDataPoints);
+            const groupValues = data.x_axis_values.slice(startIdx, endIdx);
+
+            const stats = calculateStats(groupValues);
+            groupedData.x_axis_values.push(stats.mean);
+            groupedData.x_axis_errors.push(stats.se);
+        }
+
+        // Group peak current trends for each frequency
+        const freqStrings = Object.keys(data.peak_current_trends);
+        for (const freqStr of freqStrings) {
+            groupedData.peak_current_trends[freqStr] = [];
+            groupedData.peak_current_errors[freqStr] = [];
+
+            for (let g = 0; g < numGroups; g++) {
+                const startIdx = g * replication;
+                const endIdx = Math.min(startIdx + replication, numDataPoints);
+                const groupValues = data.peak_current_trends[freqStr].slice(startIdx, endIdx);
+
+                const stats = calculateStats(groupValues);
+                groupedData.peak_current_trends[freqStr].push(stats.mean);
+                groupedData.peak_current_errors[freqStr].push(stats.se);
+            }
+        }
+
+        // Group normalized peak trends for each frequency
+        for (const freqStr of freqStrings) {
+            groupedData.normalized_peak_trends[freqStr] = [];
+            groupedData.normalized_peak_errors[freqStr] = [];
+
+            for (let g = 0; g < numGroups; g++) {
+                const startIdx = g * replication;
+                const endIdx = Math.min(startIdx + replication, numDataPoints);
+                const groupValues = data.normalized_peak_trends[freqStr].slice(startIdx, endIdx);
+
+                const stats = calculateStats(groupValues);
+                groupedData.normalized_peak_trends[freqStr].push(stats.mean);
+                groupedData.normalized_peak_errors[freqStr].push(stats.se);
+            }
+        }
+
+        // Group KDM trend
+        for (let g = 0; g < numGroups; g++) {
+            const startIdx = g * replication;
+            const endIdx = Math.min(startIdx + replication, numDataPoints);
+            const groupValues = data.kdm_trend.slice(startIdx, endIdx);
+
+            const stats = calculateStats(groupValues);
+            groupedData.kdm_trend.push(stats.mean);
+            groupedData.kdm_errors.push(stats.se);
+        }
+
+        return groupedData;
+    }
+
+    _renderTrendPlotsWithErrorBars(groupedData) {
+        if (!groupedData) return;
+
+        const injectionPoint = parseInt(this.dom.visualization.postProcessInjectionPointInput.value) || null;
+        const freqStrs = this.state.currentFrequencies.map(String);
+        const xAxisTitle = (this.state.currentXAxisOptions === "Experiment Time") ? 'Experiment Time (min)' : 'Group Number';
+
+        // Determine Y-axis title based on analysis mode
+        const selectedOptions = this.dom.settings.selectedOptionsInput.value;
+        const isAUCMode = selectedOptions === "Area Under the Curve";
+        const firstPlotYTitle = isAUCMode ? 'AUC (a.u.)' : `Peak Current (${this.dom.settings.currentUnitsInput.value})`;
+
+        // Render plots with error bars
+        this._renderTrendPlotWithErrorBars('peakCurrentTrendPlot', groupedData, freqStrs, xAxisTitle, firstPlotYTitle, 'peak', injectionPoint);
+        this._renderTrendPlotWithErrorBars('normalizedPeakTrendPlot', groupedData, freqStrs, xAxisTitle, 'Normalized Current', 'normalized', injectionPoint);
+        this._renderTrendPlotWithErrorBars('kdmTrendPlot', groupedData, freqStrs, xAxisTitle, 'KDM (%)', 'kdm', injectionPoint);
+    }
+
+    _renderTrendPlotWithErrorBars(plotDivId, data, freqStrings, xAxisTitle, yAxisTitle, trendType, injectionPoint) {
+        document.getElementById(plotDivId).innerHTML = '';
+
+        let traces = [];
+        const xData = data.x_axis_values;
+
+        if (!xData || xData.length === 0) {
+            document.getElementById(plotDivId).innerHTML = '<p class="text-gray-400">No data available to plot.</p>';
+            return;
+        }
+
+        const colors = {
+            lowFreqBefore: '#E6194B', highFreqBefore: '#4363d8', kdmBefore: '#911EB4',
+            lowFreqAfter: '#F58231', highFreqAfter: '#42D4F4', kdmAfter: '#3CB44B',
+            otherFreqBase: ['#FABEBE', '#FFE119', '#BF360C', '#A9A9A9', '#800000', '#AA6E28', '#808000', '#F032E6', '#000075', '#F58231']
+        };
+
+        const kdmHighFreq = this.state.currentKdmHighFreq;
+        const kdmLowFreq = this.state.currentKdmLowFreq;
+
+        if (trendType === "peak" || trendType === "normalized") {
+            const trendKey = trendType === "peak" ? "peak_current_trends" : "normalized_peak_trends";
+            const errorKey = trendType === "peak" ? "peak_current_errors" : "normalized_peak_errors";
+
+            freqStrings.forEach((freqStr, i) => {
+                const freq = parseInt(freqStr);
+                const yData = data[trendKey][freqStr] || [];
+                const yErrors = data[errorKey][freqStr] || [];
+
+                let color;
+                if (freq === kdmLowFreq) {
+                    color = colors.lowFreqBefore;
+                } else if (freq === kdmHighFreq) {
+                    color = colors.highFreqBefore;
+                } else {
+                    const colorIndex = i % colors.otherFreqBase.length;
+                    color = colors.otherFreqBase[colorIndex];
+                }
+
+                traces.push({
+                    x: xData,
+                    y: yData,
+                    error_y: {
+                        type: 'data',
+                        array: yErrors,
+                        visible: true,
+                        color: color
+                    },
+                    mode: 'markers+lines',
+                    name: `${freqStr}Hz`,
+                    marker: { size: 8, color: color },
+                    line: { color: color }
+                });
+            });
+        } else if (trendType === "kdm") {
+            const yData = data.kdm_trend || [];
+            const yErrors = data.kdm_errors || [];
+
+            traces.push({
+                x: xData,
+                y: yData,
+                error_y: {
+                    type: 'data',
+                    array: yErrors,
+                    visible: true,
+                    color: colors.kdmBefore
+                },
+                mode: 'markers+lines',
+                name: 'KDM',
+                marker: { size: 8, color: colors.kdmBefore },
+                line: { color: colors.kdmBefore }
+            });
+        }
+
+        const layout = {
+            title: '',
+            xaxis: {
+                title: xAxisTitle,
+                autorange: true
+            },
+            yaxis: {
+                title: yAxisTitle,
+                autorange: true
+            },
+            margin: { t: 40, b: 60, l: 60, r: 20 },
+            showlegend: true,
+            legend: {
+                x: 1.05,
+                y: 1,
+                xanchor: 'left'
+            }
+        };
+
+        Plotly.newPlot(plotDivId, traces, layout);
     }
 }
 
