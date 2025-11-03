@@ -949,22 +949,30 @@ class AgentApp:
             self.update_status("Connecting...", "orange")
             self.log(f"Attempting to connect to server at {server_url_to_connect}...")
 
-            # Check if already connected to avoid unnecessary disconnection
+            # Check if already connected and if URL has changed
             if sio.connected:
-                self.log("Already connected to server - reusing existing connection")
-                self.update_status("Connected", "green")
+                # Check if the URL has changed
+                if hasattr(self, 'last_connected_url') and self.last_connected_url == server_url_to_connect:
+                    self.log("Already connected to the same server - reusing existing connection")
+                    self.update_status("Connected", "green")
 
-                # Send consent data if available
-                if hasattr(self, 'consent_data'):
-                    try:
-                        self.log(f"Sending consent data: {self.consent_data}")
-                        sio.emit('agent_consent', self.consent_data)
-                        self.log("Consent data sent to server successfully.")
-                    except Exception as e:
-                        self.log(f"Could not log consent to server: {e}")
+                    # Send consent data if available
+                    if hasattr(self, 'consent_data'):
+                        try:
+                            self.log(f"Sending consent data: {self.consent_data}")
+                            sio.emit('agent_consent', self.consent_data)
+                            self.log("Consent data sent to server successfully.")
+                        except Exception as e:
+                            self.log(f"Could not log consent to server: {e}")
 
-                self.log("Agent is ready and waiting for analysis instructions from the server...")
-                return
+                    self.log("Agent is ready and waiting for analysis instructions from the server...")
+                    return
+                else:
+                    # URL has changed, disconnect first
+                    self.log(f"Server URL changed from {getattr(self, 'last_connected_url', 'N/A')} to {server_url_to_connect}")
+                    self.log("Disconnecting from old server...")
+                    sio.disconnect()
+                    self.log("Disconnected from old server")
 
             self.log("Preparing connection with authentication...")
             headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
@@ -976,6 +984,9 @@ class AgentApp:
             self.log(f"Initiating Socket.IO connection with User ID: {user_id}...")
             sio.connect(connection_url, headers=headers, socketio_path='socket.io', transports=['polling'])
             self.log("Socket.IO connection established!")
+
+            # Save the connected URL for future comparison
+            self.last_connected_url = server_url_to_connect
 
             # Diagnostic: List all registered event handlers
             registered_events = list(sio.handlers.get('/', {}).keys())

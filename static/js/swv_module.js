@@ -2069,6 +2069,12 @@ export class SWVModule {
         // Update electrode button states
         this._setupElectrodeControls();
 
+        // If in hold mode, update held session plots for the new electrode
+        const isHoldMode = !!this.state.heldData;
+        if (isHoldMode) {
+            this._renderHeldSessionPlots();
+        }
+
         // Get data for this electrode
         const electrodeKey = electrodeIdx !== null ? electrodeIdx.toString() : 'averaged';
         const electrodeFreqData = this.state.frequencyMapData[electrodeKey] || {};
