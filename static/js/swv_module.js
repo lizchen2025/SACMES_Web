@@ -93,7 +93,6 @@ export class SWVModule {
                 postProcessLowFrequencyOffsetInput: document.getElementById('postProcessLowFrequencyOffsetInput'),
                 postProcessLowFrequencySlopeInput: document.getElementById('postProcessLowFrequencySlopeInput'),
                 postProcessInjectionPointInput: document.getElementById('postProcessInjectionPointInput'),
-                updateInjectionPointBtn: document.getElementById('updateInjectionPointBtn'),
                 applyPostProcessNormalizationBtn: document.getElementById('applyPostProcessNormalizationBtn'),
                 replicationInput: document.getElementById('replicationInput'),
                 applyReplicationBtn: document.getElementById('applyReplicationBtn'),
@@ -282,9 +281,10 @@ export class SWVModule {
             });
         }
 
-        // Use a single handler for all adjustment updates
-        this.dom.visualization.updateInjectionPointBtn.addEventListener('click', () => this._handlePostProcessUpdate());
+        // Apply adjustments button (re-normalize, injection point, low freq offset/slope)
         this.dom.visualization.applyPostProcessNormalizationBtn.addEventListener('click', () => this._handlePostProcessUpdate());
+
+        // Apply replication button (separate, for grouping data after analysis)
         this.dom.visualization.applyReplicationBtn.addEventListener('click', () => this._handleReplicationGrouping());
 
         // Add listener for x-axis options change during analysis
@@ -933,14 +933,27 @@ export class SWVModule {
             recalculated.normalized_peak_trends[freq] = Array(num_files).fill(null);
         }
 
+        // Get low frequency adjustment parameters
+        const lowFreqOffset = parseFloat(this.dom.visualization.postProcessLowFrequencyOffsetInput.value) || 0;
+        const lowFreqSlope = parseFloat(this.dom.visualization.postProcessLowFrequencySlopeInput.value) || 0;
+
         for (let i = 0; i < num_files; i++) {
+            // First normalize all frequencies
             for (const freq of freqStrings) {
                 if (rawPeaks[freq] && rawPeaks[freq][i] !== null) {
                     recalculated.normalized_peak_trends[freq][i] = rawPeaks[freq][i] / normFactors[freq];
                 }
             }
 
-            // KDM calculation using normalized peaks
+            // Apply low frequency adjustments (offset + slope)
+            // Total adjustment = (Slope × file_number) + Offset
+            if (recalculated.normalized_peak_trends[lowFreqStr] && recalculated.normalized_peak_trends[lowFreqStr][i] !== null) {
+                const fileNumber = i + 1; // 1-based file number
+                const totalAdjustment = (lowFreqSlope * fileNumber) + lowFreqOffset;
+                recalculated.normalized_peak_trends[lowFreqStr][i] += totalAdjustment;
+            }
+
+            // KDM calculation using normalized (and adjusted) peaks
             // Formula: ((high_freq_normalized - low_freq_normalized) + 1) * 100
             const lowNormalized = recalculated.normalized_peak_trends[lowFreqStr] ? recalculated.normalized_peak_trends[lowFreqStr][i] : null;
             const highNormalized = recalculated.normalized_peak_trends[highFreqStr] ? recalculated.normalized_peak_trends[highFreqStr][i] : null;
