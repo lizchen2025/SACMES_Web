@@ -1082,6 +1082,9 @@ export class SWVModule {
                 this.dom.visualization.holdModeStatus.textContent = `Held: ${this.state.heldSessionName} | Ready for: ${this.state.currentSessionName}`;
                 this.dom.visualization.holdModeStatus.classList.remove('hidden');
             }
+
+            // Immediately render held session plots (they don't change)
+            this._renderHeldSessionPlots();
         } else {
             // Hide held session plots container
             if (this.dom.visualization.heldSessionPlotsContainer) {
@@ -1101,6 +1104,34 @@ export class SWVModule {
         }
 
         console.log('Frequency Map visualization setup complete');
+    }
+
+    _renderHeldSessionPlots() {
+        // Render held session plots from saved data
+        const electrodeKey = this.state.currentElectrode !== null ? this.state.currentElectrode.toString() : 'averaged';
+        const heldElectrodeData = this.state.heldData[electrodeKey] || {};
+
+        console.log('Rendering held session plots...');
+
+        // Generate color palette
+        const colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan'];
+
+        // Render held session voltammogram overlay
+        this._renderVoltammogramOverlay(
+            this.dom.visualization.heldSessionVoltammogramPlot,
+            heldElectrodeData,
+            colors,
+            'Voltammogram Overlay'
+        );
+
+        // Render held session charge vs frequency
+        this._renderChargeVsFrequency(
+            this.dom.visualization.heldSessionChargePlot,
+            heldElectrodeData,
+            'Charge vs Frequency'
+        );
+
+        console.log('Held session plots rendered');
     }
 
     _restoreFrequencyMapPlotDivs() {
@@ -1725,42 +1756,17 @@ export class SWVModule {
         // Generate color palette for different frequencies
         const colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan'];
 
-        // Check if we're in hold mode
-        const isHoldMode = this.state.heldData !== null;
+        // Always render current session overlay (held session already rendered in setup)
+        this._renderVoltammogramOverlay(
+            this.dom.visualization.frequencyMapVoltammogramPlot,
+            electrodeFreqData,
+            colors,
+            'Frequency Map: All Frequencies Overlay'
+        );
 
-        if (isHoldMode) {
-            // Render held session to its own plot
-            this._renderVoltammogramOverlay(
-                this.dom.visualization.heldSessionVoltammogramPlot,
-                this.state.heldData[electrodeKey] || {},
-                colors,
-                'Voltammogram Overlay'
-            );
-
-            // Render current session to its own plot
-            this._renderVoltammogramOverlay(
-                this.dom.visualization.frequencyMapVoltammogramPlot,
-                electrodeFreqData,
-                colors,
-                'Voltammogram Overlay'
-            );
-
-            // Update label
-            this.dom.visualization.currentFrequencyLabel.textContent =
-                `Analysis Complete - Showing all ${analyzedFreqs.length} frequencies`;
-        } else {
-            // Regular mode: render only current session
-            this._renderVoltammogramOverlay(
-                this.dom.visualization.frequencyMapVoltammogramPlot,
-                electrodeFreqData,
-                colors,
-                'Frequency Map: All Frequencies Overlay'
-            );
-
-            // Update label
-            this.dom.visualization.currentFrequencyLabel.textContent =
-                `Analysis Complete - Showing all ${analyzedFreqs.length} frequencies`;
-        }
+        // Update label
+        this.dom.visualization.currentFrequencyLabel.textContent =
+            `Analysis Complete - Showing all ${analyzedFreqs.length} frequencies`;
 
         console.log(`   ✓ Overlay plot complete!`);
     }
@@ -1768,6 +1774,25 @@ export class SWVModule {
     _renderVoltammogramOverlay(plotDiv, frequencyData, colors, titleText) {
         const traces = [];
         const freqs = Object.keys(frequencyData).map(f => parseFloat(f)).sort((a, b) => a - b);
+
+        if (freqs.length === 0) {
+            // No data to plot
+            Plotly.react(plotDiv, [], {
+                title: titleText,
+                xaxis: { title: 'Potential (V)', autorange: 'reversed' },
+                yaxis: { title: 'Current (A)' },
+                annotations: [{
+                    text: 'Waiting for data...',
+                    xref: 'paper',
+                    yref: 'paper',
+                    x: 0.5,
+                    y: 0.5,
+                    showarrow: false,
+                    font: { size: 16, color: 'gray' }
+                }]
+            }, { responsive: true });
+            return;
+        }
 
         freqs.forEach((freq, index) => {
             const freqData = frequencyData[freq];
@@ -1808,36 +1833,36 @@ export class SWVModule {
             return; // No data to plot yet
         }
 
-        // Check if we're in hold mode
-        const isHoldMode = this.state.heldData !== null;
-
-        if (isHoldMode) {
-            // Render held session to its own plot
-            const heldElectrodeData = this.state.heldData[electrodeKey] || {};
-            this._renderChargeVsFrequency(
-                this.dom.visualization.heldSessionChargePlot,
-                heldElectrodeData,
-                'Charge vs Frequency'
-            );
-
-            // Render current session to its own plot
-            this._renderChargeVsFrequency(
-                this.dom.visualization.frequencyMapChargePlot,
-                electrodeFreqData,
-                'Charge vs Frequency'
-            );
-        } else {
-            // Regular mode: render only current session
-            this._renderChargeVsFrequency(
-                this.dom.visualization.frequencyMapChargePlot,
-                electrodeFreqData,
-                'Frequency Map: Charge vs Frequency'
-            );
-        }
+        // Always render current session (held session already rendered in setup)
+        this._renderChargeVsFrequency(
+            this.dom.visualization.frequencyMapChargePlot,
+            electrodeFreqData,
+            'Frequency Map: Charge vs Frequency'
+        );
     }
 
     _renderChargeVsFrequency(plotDiv, frequencyData, titleText) {
         const freqs = Object.keys(frequencyData).map(f => parseFloat(f)).sort((a, b) => a - b);
+
+        if (freqs.length === 0) {
+            // No data to plot
+            Plotly.react(plotDiv, [], {
+                title: titleText,
+                xaxis: { title: 'Frequency (Hz)' },
+                yaxis: { title: 'Charge (C)' },
+                annotations: [{
+                    text: 'Waiting for data...',
+                    xref: 'paper',
+                    yref: 'paper',
+                    x: 0.5,
+                    y: 0.5,
+                    showarrow: false,
+                    font: { size: 16, color: 'gray' }
+                }]
+            }, { responsive: true });
+            return;
+        }
+
         const charges = freqs.map(freq => frequencyData[freq].charge);
 
         const trace = {
