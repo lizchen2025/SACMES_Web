@@ -21,6 +21,7 @@ export class SocketManager {
         this.eventHandlers = {}; // To store custom event handlers
 
         this._setupSocketListeners();
+        this._setupPageUnloadHandler();
         this._updateConnectionStatus('disconnected'); // Initial status
     }
 
@@ -97,4 +98,33 @@ export class SocketManager {
 
     // [REMOVED] The checkBackendStatus function is no longer needed
     // as it was causing console errors. WebSocket status is sufficient.
+
+    _setupPageUnloadHandler() {
+        // Ensure clean disconnect when page is closed or refreshed
+        window.addEventListener('beforeunload', () => {
+            console.log('Page unloading - disconnecting socket');
+            if (this.socket && this.socket.connected) {
+                // Disconnect immediately without reconnection
+                this.socket.disconnect();
+            }
+        });
+
+        // Also handle visibilitychange for better mobile support
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                console.log('Page hidden - socket may disconnect');
+                // Socket.IO will handle this automatically, but log for debugging
+            } else if (document.visibilityState === 'visible') {
+                console.log('Page visible - socket should reconnect if needed');
+            }
+        });
+    }
+
+    // Public method to manually disconnect (e.g., when user logs out)
+    disconnect() {
+        if (this.socket && this.socket.connected) {
+            console.log('Manually disconnecting socket');
+            this.socket.disconnect();
+        }
+    }
 }

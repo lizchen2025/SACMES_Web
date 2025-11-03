@@ -1598,17 +1598,57 @@ def handle_connect():
         # SECURITY: Check if user_id is already in use
         existing_agent = get_agent_session_by_user_id(user_id)
         if existing_agent:
-            # User ID collision detected - reject connection
-            logger.error(f"SECURITY: User ID collision detected! user_id={user_id} is already in use by agent_sid={existing_agent.get('agent_sid')}")
-            logger.error(f"Rejecting new connection attempt from sid={request.sid}")
+            existing_sid = existing_agent.get('agent_sid')
 
-            # Notify the connecting agent that user_id is taken
-            emit('connection_rejected', {
-                'reason': 'user_id_collision',
-                'message': f'User ID {user_id} is already in use. Please restart your agent to generate a new User ID.',
-                'user_id': user_id
-            })
-            return False  # Reject connection
+            # Check if the existing connection is still active
+            try:
+                # Try to check if the old socket is still connected
+                # Flask-SocketIO uses socketio.server.manager to track active connections
+                is_still_connected = False
+                if hasattr(socketio, 'server') and hasattr(socketio.server, 'manager'):
+                    # Check if the old sid is in the active connections
+                    namespace = '/'
+                    if namespace in socketio.server.manager.rooms:
+                        rooms = socketio.server.manager.rooms[namespace]
+                        # Check if existing_sid has any active rooms (means it's connected)
+                        is_still_connected = existing_sid in rooms
+
+                if is_still_connected:
+                    # Old connection is truly still active - reject new connection
+                    logger.error(f"SECURITY: User ID collision detected! user_id={user_id} is already ACTIVELY connected by agent_sid={existing_sid}")
+                    logger.error(f"Rejecting new connection attempt from sid={request.sid}")
+
+                    # Notify the connecting agent that user_id is taken
+                    emit('connection_rejected', {
+                        'reason': 'user_id_collision',
+                        'message': f'User ID {user_id} is already in use by an active agent. Please restart your agent to generate a new User ID.',
+                        'user_id': user_id
+                    })
+                    return False  # Reject connection
+                else:
+                    # Old connection is stale (disconnected but not cleaned up yet)
+                    logger.warning(f"Replacing stale agent mapping for user_id={user_id} (old sid={existing_sid} is no longer connected)")
+
+                    # Clean up the stale mapping immediately
+                    old_session_id = existing_agent.get('session_id')
+                    if old_session_id:
+                        # Clear agent_sid from old session
+                        set_session_agent_sid(old_session_id, None)
+                        logger.info(f"Cleared stale agent_sid from old session {old_session_id}")
+
+                    # Clean up global tracker if it matches
+                    if agent_session_tracker.get('agent_sid') == existing_sid:
+                        agent_session_tracker['current_session'] = None
+                        agent_session_tracker['agent_sid'] = None
+                        logger.info(f"Cleared stale agent from global tracker")
+
+                    # Continue to allow connection and will overwrite the stale mapping below
+
+            except Exception as e:
+                logger.error(f"Error checking connection status for existing agent: {e}")
+                # On error, be conservative and allow the reconnection
+                # (assuming it's a genuine reconnection attempt)
+                logger.warning(f"Could not verify old connection status, allowing reconnection for user_id={user_id}")
 
         # For agents: create a unique session for this agent connection
         # This prevents data pollution between multiple concurrent agent sessions
@@ -1668,26 +1708,31 @@ def handle_disconnect():
 
     if disconnected_user_id:
         # This is an agent disconnection
-        logger.warning(f"AGENT disconnecting: User ID: {disconnected_user_id}, SID: {disconnected_sid}. Grace period for reconnection...")
+        logger.warning(f"AGENT disconnecting: User ID: {disconnected_user_id}, SID: {disconnected_sid}")
 
-        # Schedule cleanup after a short delay to allow for reconnection
+        # Get current session before cleanup
+        disconnected_session = None
+        if agent_session_tracker.get('agent_sid') == disconnected_sid:
+            disconnected_session = agent_session_tracker.get('current_session')
+
+        # MODIFIED: Shorter grace period (0.5 seconds instead of 2)
+        # This allows for quick reconnections but cleans up faster
         def delayed_agent_cleanup():
             import time
-            time.sleep(2)  # 2 second grace period
+            time.sleep(0.5)  # 0.5 second grace period
 
-            # Check if agent reconnected (user_id would have new mapping)
+            # Check if agent reconnected (user_id would have new mapping with different sid)
             current_mapping = get_agent_session_by_user_id(disconnected_user_id)
 
             if current_mapping and current_mapping.get('agent_sid') == disconnected_sid:
                 # Agent did not reconnect, clean up
-                logger.warning(f"Agent (User ID: {disconnected_user_id}) did not reconnect. Cleaning up...")
+                logger.warning(f"Agent (User ID: {disconnected_user_id}) did not reconnect within grace period. Cleaning up...")
 
                 # Unregister from user_id mapping
                 unregister_agent_user(disconnected_user_id)
 
                 # DEPRECATED: Clear global tracker if it matches
                 if agent_session_tracker.get('agent_sid') == disconnected_sid:
-                    disconnected_session = agent_session_tracker.get('current_session')
                     agent_session_tracker['current_session'] = None
                     agent_session_tracker['agent_sid'] = None
                     if disconnected_session:

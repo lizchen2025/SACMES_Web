@@ -1057,7 +1057,18 @@ class AgentApp:
 
     def on_closing(self):
         if messagebox.askokcancel("Quit", "Are you sure you want to close the agent?"):
+            self.log("Closing agent - disconnecting from server...")
             self.stop_monitoring()
+
+            # Explicitly disconnect socket to ensure clean shutdown
+            if sio.connected:
+                try:
+                    self.log("Disconnecting socket connection...")
+                    sio.disconnect()
+                    self.log("Socket disconnected successfully")
+                except Exception as e:
+                    self.log(f"Error disconnecting socket: {e}")
+
             self.root.destroy()
 
 
