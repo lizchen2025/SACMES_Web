@@ -636,49 +636,68 @@ export class SWVModule {
         // Generate CSV for both held and current sessions
         const csvLines = [];
 
-        // Header
+        // Metadata
         csvLines.push(`# SACMES Frequency Map Data - Hold Mode Comparison`);
         csvLines.push(`# Export Date: ${new Date().toISOString()}`);
         csvLines.push(`# Session 1: ${this.state.heldSessionName}`);
         csvLines.push(`# Session 2: ${this.state.currentSessionName}`);
+        csvLines.push(`# Unit: Charge (C)`);
         csvLines.push('');
 
-        // Get all electrodes (union of both sessions)
-        const heldElectrodes = Object.keys(this.state.heldData);
-        const currentElectrodes = Object.keys(this.state.frequencyMapData);
-        const allElectrodes = [...new Set([...heldElectrodes, ...currentElectrodes])];
-
-        // For each electrode, export data
-        allElectrodes.forEach(electrodeKey => {
-            const electrodeName = electrodeKey === 'averaged' ? 'Averaged' : `Electrode ${electrodeKey}`;
-            csvLines.push(`## ${electrodeName}`);
+        // Helper function to generate CSV for one session
+        const generateSessionCSV = (sessionName, sessionData) => {
+            csvLines.push(`## ${sessionName}`);
             csvLines.push('');
 
-            // Get frequencies from both sessions
-            const heldElectrodeData = this.state.heldData[electrodeKey] || {};
-            const currentElectrodeData = this.state.frequencyMapData[electrodeKey] || {};
-            const heldFreqs = Object.keys(heldElectrodeData).map(f => parseFloat(f)).sort((a, b) => a - b);
-            const currentFreqs = Object.keys(currentElectrodeData).map(f => parseFloat(f)).sort((a, b) => a - b);
-            const allFreqs = [...new Set([...heldFreqs, ...currentFreqs])].sort((a, b) => a - b);
+            // Get averaged and individual electrode data
+            const averagedData = sessionData['averaged'] || {};
+            const individualElectrodes = Object.keys(sessionData)
+                .filter(key => key !== 'averaged')
+                .map(key => parseInt(key))
+                .sort((a, b) => a - b);
 
-            // Table header
-            csvLines.push(`Frequency (Hz),${this.state.heldSessionName} - Peak (A),${this.state.heldSessionName} - Charge (C),${this.state.currentSessionName} - Peak (A),${this.state.currentSessionName} - Charge (C)`);
+            // Get all frequencies
+            const allFreqsSet = new Set();
+            Object.values(sessionData).forEach(electrodeData => {
+                Object.keys(electrodeData).forEach(freq => allFreqsSet.add(parseFloat(freq)));
+            });
+            const frequencies = Array.from(allFreqsSet).sort((a, b) => a - b);
 
-            // Data rows
-            allFreqs.forEach(freq => {
-                const heldData = heldElectrodeData[freq];
-                const currentData = currentElectrodeData[freq];
+            // Build header row
+            const headerParts = ['Frequency (Hz)', 'Averaged'];
+            individualElectrodes.forEach(idx => {
+                headerParts.push(`Electrode ${idx + 1}`); // 1-based numbering
+            });
+            csvLines.push(headerParts.join(','));
 
-                const heldPeak = heldData ? heldData.peak_value : 'N/A';
-                const heldCharge = heldData ? heldData.charge : 'N/A';
-                const currentPeak = currentData ? currentData.peak_value : 'N/A';
-                const currentCharge = currentData ? currentData.charge : 'N/A';
+            // Build data rows
+            frequencies.forEach(freq => {
+                const rowParts = [freq];
 
-                csvLines.push(`${freq},${heldPeak},${heldCharge},${currentPeak},${currentCharge}`);
+                // Averaged charge
+                const avgFreqData = averagedData[freq];
+                rowParts.push(avgFreqData ? avgFreqData.charge : 'N/A');
+
+                // Individual electrode charges
+                individualElectrodes.forEach(idx => {
+                    const electrodeData = sessionData[idx.toString()];
+                    const freqData = electrodeData ? electrodeData[freq] : null;
+                    rowParts.push(freqData ? freqData.charge : 'N/A');
+                });
+
+                csvLines.push(rowParts.join(','));
             });
 
             csvLines.push('');
-        });
+        };
+
+        // Generate held session data
+        generateSessionCSV(this.state.heldSessionName, this.state.heldData);
+
+        csvLines.push(''); // Extra blank line between sessions
+
+        // Generate current session data
+        generateSessionCSV(this.state.currentSessionName, this.state.frequencyMapData);
 
         return csvLines.join('\n');
     }
@@ -1136,6 +1155,16 @@ export class SWVModule {
             heldElectrodeData,
             'Charge vs Frequency'
         );
+
+        // Trigger resize to fix any layout issues
+        setTimeout(() => {
+            if (this.dom.visualization.heldSessionVoltammogramPlot) {
+                Plotly.Plots.resize(this.dom.visualization.heldSessionVoltammogramPlot);
+            }
+            if (this.dom.visualization.heldSessionChargePlot) {
+                Plotly.Plots.resize(this.dom.visualization.heldSessionChargePlot);
+            }
+        }, 100);
 
         console.log('Held session plots rendered');
     }

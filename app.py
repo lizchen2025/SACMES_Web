@@ -3731,7 +3731,8 @@ def generate_frequency_map_csv_data(session_id, current_electrode=None):
 
 def generate_frequency_map_all_electrodes_csv(session_id):
     """
-    Generates CSV with all electrodes data combined, including mean and std.
+    Generates CSV with charge data for all electrodes.
+    Format: Frequency (Hz), Averaged, Electrode 1, Electrode 2, ...
 
     Args:
         session_id: Session ID to retrieve data from
@@ -3750,16 +3751,12 @@ def generate_frequency_map_all_electrodes_csv(session_id):
     if not all_results:
         return ""
 
-    # Get all electrode keys
-    electrode_keys = sorted([k for k in all_results.keys()],
-                           key=lambda x: int(x) if x != 'averaged' else -1)
+    # Separate averaged and individual electrodes
+    averaged_data = all_results.get('averaged', {})
+    individual_electrodes = sorted([int(k) for k in all_results.keys() if k != 'averaged'])
 
-    if not electrode_keys:
-        return ""
-
-    # Get all frequencies from first electrode
-    first_electrode_key = electrode_keys[0]
-    frequencies = sorted([int(freq) for freq in all_results[first_electrode_key].keys()])
+    # Get all frequencies from averaged data
+    frequencies = sorted([int(freq) for freq in averaged_data.keys()])
 
     if not frequencies:
         return ""
@@ -3768,102 +3765,36 @@ def generate_frequency_map_all_electrodes_csv(session_id):
     writer = csv.writer(string_io)
 
     # Write metadata
-    writer.writerow(['# SACMES Frequency Map Analysis Report - All Electrodes'])
+    writer.writerow(['# SACMES Frequency Map Analysis Report'])
     writer.writerow(['# Export Date:', str(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))])
-    writer.writerow(['# Electrodes:', ', '.join([f"E{int(k)+1}" if k != 'averaged' else 'Averaged' for k in electrode_keys])])
+    electrode_list = ['Averaged'] + [f"Electrode {idx + 1}" for idx in individual_electrodes]
+    writer.writerow(['# Electrodes:', ', '.join(electrode_list)])
     writer.writerow(['# Number of Frequencies:', len(frequencies)])
+    writer.writerow(['# Unit: Charge (C)'])
     writer.writerow([])
 
-    # Write Peak Current data
-    writer.writerow(['# Peak Current (A)'])
-    peak_header = ['Frequency_Hz'] + [f"E{int(k)+1}_Peak_A" if k != 'averaged' else 'Averaged_Peak_A'
-                                       for k in electrode_keys] + ['Mean_Peak_A', 'Std_Peak_A']
-    writer.writerow(peak_header)
-
-    for freq in frequencies:
-        freq_key = str(freq)
-        row = [freq]
-        peak_values = []
-
-        for electrode_key in electrode_keys:
-            result = all_results.get(electrode_key, {}).get(freq_key, {})
-            peak_value = result.get('peak_value', 0)
-            row.append(f"{peak_value:.6e}")
-            peak_values.append(peak_value)
-
-        # Calculate mean and std
-        if peak_values:
-            mean_peak = np.mean(peak_values)
-            std_peak = np.std(peak_values, ddof=1) if len(peak_values) > 1 else 0
-            row.append(f"{mean_peak:.6e}")
-            row.append(f"{std_peak:.6e}")
-        else:
-            row.extend(['', ''])
-
-        writer.writerow(row)
-
-    writer.writerow([])
-
-    # Write Charge data
-    writer.writerow(['# Charge (C)'])
-    charge_header = ['Frequency_Hz'] + [f"E{int(k)+1}_Charge_C" if k != 'averaged' else 'Averaged_Charge_C'
-                                         for k in electrode_keys] + ['Mean_Charge_C', 'Std_Charge_C']
+    # Write Charge data header
+    charge_header = ['Frequency (Hz)', 'Averaged'] + [f"Electrode {idx + 1}" for idx in individual_electrodes]
     writer.writerow(charge_header)
 
+    # Write charge data rows
     for freq in frequencies:
         freq_key = str(freq)
         row = [freq]
-        charge_values = []
 
-        for electrode_key in electrode_keys:
+        # Add averaged charge
+        avg_result = averaged_data.get(freq_key, {})
+        avg_charge = avg_result.get('charge', 0)
+        row.append(f"{avg_charge:.6e}")
+
+        # Add individual electrode charges
+        for electrode_idx in individual_electrodes:
+            electrode_key = str(electrode_idx)
             result = all_results.get(electrode_key, {}).get(freq_key, {})
             charge_value = result.get('charge', 0)
             row.append(f"{charge_value:.6e}")
-            charge_values.append(charge_value)
-
-        # Calculate mean and std
-        if charge_values:
-            mean_charge = np.mean(charge_values)
-            std_charge = np.std(charge_values, ddof=1) if len(charge_values) > 1 else 0
-            row.append(f"{mean_charge:.6e}")
-            row.append(f"{std_charge:.6e}")
-        else:
-            row.extend(['', ''])
 
         writer.writerow(row)
-
-    writer.writerow([])
-
-    # Write summary statistics per electrode
-    writer.writerow(['# Summary Statistics per Electrode'])
-    summary_header = ['Electrode', 'Avg_Peak_A', 'Std_Peak_A', 'Avg_Charge_C', 'Std_Charge_C']
-    writer.writerow(summary_header)
-
-    for electrode_key in electrode_keys:
-        electrode_label = f"E{int(electrode_key)+1}" if electrode_key != 'averaged' else 'Averaged'
-
-        electrode_peaks = []
-        electrode_charges = []
-
-        for freq in frequencies:
-            freq_key = str(freq)
-            result = all_results.get(electrode_key, {}).get(freq_key, {})
-            electrode_peaks.append(result.get('peak_value', 0))
-            electrode_charges.append(result.get('charge', 0))
-
-        if electrode_peaks:
-            avg_peak = np.mean(electrode_peaks)
-            std_peak = np.std(electrode_peaks, ddof=1) if len(electrode_peaks) > 1 else 0
-            avg_charge = np.mean(electrode_charges)
-            std_charge = np.std(electrode_charges, ddof=1) if len(electrode_charges) > 1 else 0
-
-            writer.writerow([
-                electrode_label,
-                f"{avg_peak:.6e}",
-                f"{std_peak:.6e}",
-                f"{avg_charge:.6e}",
-                f"{std_charge:.6e}"
-            ])
 
     return string_io.getvalue()
 
