@@ -3731,8 +3731,8 @@ def generate_frequency_map_csv_data(session_id, current_electrode=None):
 
 def generate_frequency_map_all_electrodes_csv(session_id):
     """
-    Generates CSV with charge data for all electrodes.
-    Format: Frequency (Hz), Averaged, Electrode 1, Electrode 2, ...
+    Generates CSV with charge and peak current data for all electrodes.
+    Format: Metadata + Charge section (Freq, Averaged, Electrodes, Std) + Peak section (Freq, Averaged, Electrodes, Std)
 
     Args:
         session_id: Session ID to retrieve data from
@@ -3751,12 +3751,16 @@ def generate_frequency_map_all_electrodes_csv(session_id):
     if not all_results:
         return ""
 
-    # Separate averaged and individual electrodes
-    averaged_data = all_results.get('averaged', {})
+    # Get individual electrodes (exclude 'averaged' if it exists)
     individual_electrodes = sorted([int(k) for k in all_results.keys() if k != 'averaged'])
 
-    # Get all frequencies from averaged data
-    frequencies = sorted([int(freq) for freq in averaged_data.keys()])
+    # Get all frequencies from all electrodes (union of all frequency keys)
+    all_freq_set = set()
+    for electrode_data in all_results.values():
+        if isinstance(electrode_data, dict):
+            all_freq_set.update(electrode_data.keys())
+
+    frequencies = sorted([int(freq) for freq in all_freq_set])
 
     if not frequencies:
         return ""
@@ -3767,32 +3771,96 @@ def generate_frequency_map_all_electrodes_csv(session_id):
     # Write metadata
     writer.writerow(['# SACMES Frequency Map Analysis Report'])
     writer.writerow(['# Export Date:', str(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))])
-    electrode_list = ['Averaged'] + [f"Electrode {idx + 1}" for idx in individual_electrodes]
+    electrode_list = [f"Electrode {idx + 1}" for idx in individual_electrodes]
     writer.writerow(['# Electrodes:', ', '.join(electrode_list)])
     writer.writerow(['# Number of Frequencies:', len(frequencies)])
-    writer.writerow(['# Unit: Charge (C)'])
     writer.writerow([])
 
-    # Write Charge data header
-    charge_header = ['Frequency (Hz)', 'Averaged'] + [f"Electrode {idx + 1}" for idx in individual_electrodes]
+    # Write Charge data section
+    writer.writerow(['# Charge (C)'])
+    charge_header = ['Frequency (Hz)', 'Averaged'] + [f"Electrode {idx + 1}" for idx in individual_electrodes] + ['Std']
     writer.writerow(charge_header)
 
-    # Write charge data rows
     for freq in frequencies:
         freq_key = str(freq)
         row = [freq]
+        charge_values = []
 
-        # Add averaged charge
-        avg_result = averaged_data.get(freq_key, {})
-        avg_charge = avg_result.get('charge', 0)
-        row.append(f"{avg_charge:.6e}")
-
-        # Add individual electrode charges
+        # Collect individual electrode charges
         for electrode_idx in individual_electrodes:
             electrode_key = str(electrode_idx)
-            result = all_results.get(electrode_key, {}).get(freq_key, {})
-            charge_value = result.get('charge', 0)
-            row.append(f"{charge_value:.6e}")
+            electrode_data = all_results.get(electrode_key, {})
+            result = electrode_data.get(freq_key)
+            if result and 'charge' in result:
+                charge_values.append(result['charge'])
+            else:
+                charge_values.append(None)
+
+        # Calculate averaged and std
+        valid_charges = [c for c in charge_values if c is not None]
+        if valid_charges:
+            mean_charge = np.mean(valid_charges)
+            std_charge = np.std(valid_charges, ddof=1) if len(valid_charges) > 1 else 0
+            row.append(f"{mean_charge:.6e}")
+        else:
+            row.append('N/A')
+
+        # Add individual values
+        for charge in charge_values:
+            row.append(f"{charge:.6e}" if charge is not None else 'N/A')
+
+        # Add std
+        if valid_charges and len(valid_charges) > 1:
+            row.append(f"{std_charge:.6e}")
+        elif valid_charges:
+            row.append('0.000000e+00')
+        else:
+            row.append('N/A')
+
+        writer.writerow(row)
+
+    writer.writerow([])
+
+    # Write Peak Current data section
+    writer.writerow(['# Peak Current (A)'])
+    peak_header = ['Frequency (Hz)', 'Averaged'] + [f"Electrode {idx + 1}" for idx in individual_electrodes] + ['Std']
+    writer.writerow(peak_header)
+
+    for freq in frequencies:
+        freq_key = str(freq)
+        row = [freq]
+        peak_values = []
+
+        # Collect individual electrode peaks
+        for electrode_idx in individual_electrodes:
+            electrode_key = str(electrode_idx)
+            electrode_data = all_results.get(electrode_key, {})
+            result = electrode_data.get(freq_key)
+            if result and 'peak_value' in result:
+                peak_values.append(result['peak_value'])
+            else:
+                peak_values.append(None)
+
+        # Calculate averaged and std
+        valid_peaks = [p for p in peak_values if p is not None]
+        if valid_peaks:
+            mean_peak = np.mean(valid_peaks)
+            std_peak = np.std(valid_peaks, ddof=1) if len(valid_peaks) > 1 else 0
+            row.append(f"{mean_peak:.6e}")
+        else:
+            row.append('N/A')
+
+        # Add individual values
+        for peak in peak_values:
+            row.append(f"{peak:.6e}" if peak is not None else 'N/A')
+
+        # Add std
+        if valid_peaks and len(valid_peaks) > 1:
+            row.append(f"{std_peak:.6e}")
+        elif valid_peaks:
+            row.append('0.000000e+00')
+        else:
+            row.append('N/A')
 
         writer.writerow(row)
 

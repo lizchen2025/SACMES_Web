@@ -641,16 +641,24 @@ export class SWVModule {
         csvLines.push(`# Export Date: ${new Date().toISOString()}`);
         csvLines.push(`# Session 1: ${this.state.heldSessionName}`);
         csvLines.push(`# Session 2: ${this.state.currentSessionName}`);
-        csvLines.push(`# Unit: Charge (C)`);
         csvLines.push('');
 
-        // Helper function to generate CSV for one session
-        const generateSessionCSV = (sessionName, sessionData) => {
-            csvLines.push(`## ${sessionName}`);
-            csvLines.push('');
+        // Helper function to calculate mean and std
+        const calculateStats = (values) => {
+            const validValues = values.filter(v => v !== null && v !== undefined && !isNaN(v));
+            if (validValues.length === 0) return { mean: null, std: null };
 
-            // Get averaged and individual electrode data
-            const averagedData = sessionData['averaged'] || {};
+            const mean = validValues.reduce((sum, v) => sum + v, 0) / validValues.length;
+            if (validValues.length === 1) return { mean, std: 0 };
+
+            const variance = validValues.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / (validValues.length - 1);
+            const std = Math.sqrt(variance);
+            return { mean, std };
+        };
+
+        // Helper function to generate CSV for one session
+        const generateSessionData = (sessionName, sessionData) => {
+            // Get individual electrode data
             const individualElectrodes = Object.keys(sessionData)
                 .filter(key => key !== 'averaged')
                 .map(key => parseInt(key))
@@ -663,41 +671,84 @@ export class SWVModule {
             });
             const frequencies = Array.from(allFreqsSet).sort((a, b) => a - b);
 
-            // Build header row
-            const headerParts = ['Frequency (Hz)', 'Averaged'];
-            individualElectrodes.forEach(idx => {
-                headerParts.push(`Electrode ${idx + 1}`); // 1-based numbering
-            });
-            csvLines.push(headerParts.join(','));
+            // Build charge section
+            csvLines.push(`## ${sessionName} - Charge (C)`);
+            csvLines.push('');
 
-            // Build data rows
+            const chargeHeader = ['Frequency (Hz)', 'Averaged', ...individualElectrodes.map(idx => `Electrode ${idx + 1}`), 'Std'];
+            csvLines.push(chargeHeader.join(','));
+
             frequencies.forEach(freq => {
-                const rowParts = [freq];
+                const chargeValues = [];
+                const row = [freq];
 
-                // Averaged charge
-                const avgFreqData = averagedData[freq];
-                rowParts.push(avgFreqData ? avgFreqData.charge : 'N/A');
-
-                // Individual electrode charges
+                // Collect individual electrode charges
                 individualElectrodes.forEach(idx => {
                     const electrodeData = sessionData[idx.toString()];
                     const freqData = electrodeData ? electrodeData[freq] : null;
-                    rowParts.push(freqData ? freqData.charge : 'N/A');
+                    chargeValues.push(freqData ? freqData.charge : null);
                 });
 
-                csvLines.push(rowParts.join(','));
+                // Calculate averaged and std
+                const chargeStats = calculateStats(chargeValues);
+                row.push(chargeStats.mean !== null ? chargeStats.mean.toExponential(6) : 'N/A');
+
+                // Add individual values
+                chargeValues.forEach(val => {
+                    row.push(val !== null ? val.toExponential(6) : 'N/A');
+                });
+
+                // Add std
+                row.push(chargeStats.std !== null ? chargeStats.std.toExponential(6) : 'N/A');
+
+                csvLines.push(row.join(','));
+            });
+
+            csvLines.push('');
+
+            // Build peak section
+            csvLines.push(`## ${sessionName} - Peak Current (A)`);
+            csvLines.push('');
+
+            const peakHeader = ['Frequency (Hz)', 'Averaged', ...individualElectrodes.map(idx => `Electrode ${idx + 1}`), 'Std'];
+            csvLines.push(peakHeader.join(','));
+
+            frequencies.forEach(freq => {
+                const peakValues = [];
+                const row = [freq];
+
+                // Collect individual electrode peaks
+                individualElectrodes.forEach(idx => {
+                    const electrodeData = sessionData[idx.toString()];
+                    const freqData = electrodeData ? electrodeData[freq] : null;
+                    peakValues.push(freqData ? freqData.peak_value : null);
+                });
+
+                // Calculate averaged and std
+                const peakStats = calculateStats(peakValues);
+                row.push(peakStats.mean !== null ? peakStats.mean.toExponential(6) : 'N/A');
+
+                // Add individual values
+                peakValues.forEach(val => {
+                    row.push(val !== null ? val.toExponential(6) : 'N/A');
+                });
+
+                // Add std
+                row.push(peakStats.std !== null ? peakStats.std.toExponential(6) : 'N/A');
+
+                csvLines.push(row.join(','));
             });
 
             csvLines.push('');
         };
 
         // Generate held session data
-        generateSessionCSV(this.state.heldSessionName, this.state.heldData);
+        generateSessionData(this.state.heldSessionName, this.state.heldData);
 
         csvLines.push(''); // Extra blank line between sessions
 
         // Generate current session data
-        generateSessionCSV(this.state.currentSessionName, this.state.frequencyMapData);
+        generateSessionData(this.state.currentSessionName, this.state.frequencyMapData);
 
         return csvLines.join('\n');
     }
