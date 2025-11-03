@@ -66,6 +66,13 @@ export class SWVModule {
                 latestCharge: document.getElementById('latestCharge'),
                 exportFrequencyMapDataBtn: document.getElementById('exportFrequencyMapDataBtn'),
                 exportFrequencyMapStatus: document.getElementById('exportFrequencyMapStatus'),
+                holdFrequencyMapDataBtn: document.getElementById('holdFrequencyMapDataBtn'),
+                sessionNamingModal: document.getElementById('sessionNamingModal'),
+                currentSessionNameInput: document.getElementById('currentSessionNameInput'),
+                nextSessionNameInput: document.getElementById('nextSessionNameInput'),
+                confirmSessionNamingBtn: document.getElementById('confirmSessionNamingBtn'),
+                cancelSessionNamingBtn: document.getElementById('cancelSessionNamingBtn'),
+                holdModeStatus: document.getElementById('holdFrequencyMapStatus'),
                 individualPlotsContainer: document.getElementById('individualPlotsContainer'),
                 trendPlotsContainer: document.getElementById('trendPlotsContainer'),
                 adjustmentControls: document.getElementById('adjustmentControls'),
@@ -97,7 +104,10 @@ export class SWVModule {
             currentElectrode: null, // Currently displayed electrode (null for averaged)
             electrodeData: {}, // Raw data for each electrode
             frequencyMapData: {}, // {frequency: {potentials, currents, charge, etc.}}
-            analyzedFrequencies: [] // List of frequencies already analyzed in frequency map mode
+            analyzedFrequencies: [], // List of frequencies already analyzed in frequency map mode
+            heldData: null, // Holds previous session data for comparison
+            heldSessionName: null, // Name of the held session
+            currentSessionName: null // Name of the current session
         };
 
         this._setupEventListeners();
@@ -158,18 +168,118 @@ export class SWVModule {
                     this.dom.visualization.exportFrequencyMapDataBtn.dataset.filename = filename;
                     this.dom.visualization.exportFrequencyMapStatus.textContent = 'Generating export file...';
 
-                    // Check if connected to agent
-                    if (typeof isConnectedToAgent === 'function' && !isConnectedToAgent()) {
-                        alert('Please connect to an agent first by entering your User ID.');
-                        this.dom.visualization.exportFrequencyMapStatus.textContent = '';
-                        return;
-                    }
+                    // Check if we're in hold mode
+                    if (this.state.heldData !== null) {
+                        // Generate CSV directly in frontend for hold mode
+                        const csvData = this._generateHoldModeCSV();
+                        this.dom.visualization.exportFrequencyMapStatus.textContent = `Export successful! Downloading ${filename}...`;
+                        this._triggerCsvDownload(csvData, filename);
+                    } else {
+                        // Check if connected to agent
+                        if (typeof isConnectedToAgent === 'function' && !isConnectedToAgent()) {
+                            alert('Please connect to an agent first by entering your User ID.');
+                            this.dom.visualization.exportFrequencyMapStatus.textContent = '';
+                            return;
+                        }
 
-                    this.socketManager.emit('request_export_frequency_map_data', {
-                        user_id: getCurrentUserId(),
-                        export_all: true
-                    });
+                        // Use server-side export for regular mode
+                        this.socketManager.emit('request_export_frequency_map_data', {
+                            user_id: getCurrentUserId(),
+                            export_all: true
+                        });
+                    }
                 }
+            });
+        }
+
+        // Hold Frequency Map Data button
+        if (this.dom.visualization.holdFrequencyMapDataBtn) {
+            this.dom.visualization.holdFrequencyMapDataBtn.addEventListener('click', () => {
+                // Check if already in hold mode - offer to clear
+                if (this.state.heldData !== null) {
+                    const confirmClear = confirm('Clear hold mode and return to single-session view?');
+                    if (confirmClear) {
+                        this.state.heldData = null;
+                        this.state.heldSessionName = null;
+                        this.state.currentSessionName = null;
+
+                        // Update status message
+                        if (this.dom.visualization.holdModeStatus) {
+                            this.dom.visualization.holdModeStatus.textContent = '';
+                            this.dom.visualization.holdModeStatus.classList.add('hidden');
+                        }
+
+                        // Update button text
+                        this.dom.visualization.holdFrequencyMapDataBtn.textContent = 'Hold Current Data';
+
+                        // Refresh visualization
+                        this._updateFrequencyMapOverlay();
+                        this._updateFrequencyChargeChart();
+                    }
+                    return;
+                }
+
+                // Check if we have frequency map data to hold
+                if (!this.state.frequencyMapData || Object.keys(this.state.frequencyMapData).length === 0) {
+                    alert('No frequency map data available to hold. Please run an analysis first.');
+                    return;
+                }
+
+                // Show the session naming modal
+                this.dom.visualization.sessionNamingModal.classList.remove('hidden');
+
+                // Pre-fill with default names if empty
+                if (!this.dom.visualization.currentSessionNameInput.value) {
+                    this.dom.visualization.currentSessionNameInput.value = 'Session 1';
+                }
+                if (!this.dom.visualization.nextSessionNameInput.value) {
+                    this.dom.visualization.nextSessionNameInput.value = 'Session 2';
+                }
+            });
+        }
+
+        // Session naming modal - Confirm button
+        if (this.dom.visualization.confirmSessionNamingBtn) {
+            this.dom.visualization.confirmSessionNamingBtn.addEventListener('click', () => {
+                const currentName = this.dom.visualization.currentSessionNameInput.value.trim();
+                const nextName = this.dom.visualization.nextSessionNameInput.value.trim();
+
+                if (!currentName || !nextName) {
+                    alert('Please provide names for both sessions.');
+                    return;
+                }
+
+                // Store the current data as held data
+                this.state.heldData = JSON.parse(JSON.stringify(this.state.frequencyMapData));
+                this.state.heldSessionName = currentName;
+                this.state.currentSessionName = nextName;
+
+                // Update status message
+                if (this.dom.visualization.holdModeStatus) {
+                    this.dom.visualization.holdModeStatus.textContent = `Held: ${currentName} | Ready for: ${nextName}`;
+                    this.dom.visualization.holdModeStatus.classList.remove('hidden');
+                }
+
+                // Update button text
+                this.dom.visualization.holdFrequencyMapDataBtn.textContent = 'Clear Hold Mode';
+
+                // Hide modal
+                this.dom.visualization.sessionNamingModal.classList.add('hidden');
+
+                // Navigate back to settings page
+                this.uiManager.showScreen('swvAnalysisScreen');
+
+                // Clear current frequency map data to prepare for next session
+                this.state.frequencyMapData = {};
+                this.state.analyzedFrequencies = [];
+            });
+        }
+
+        // Session naming modal - Cancel button
+        if (this.dom.visualization.cancelSessionNamingBtn) {
+            this.dom.visualization.cancelSessionNamingBtn.addEventListener('click', () => {
+                // Hide modal without saving
+                this.dom.visualization.sessionNamingModal.classList.add('hidden');
             });
         }
 
@@ -535,6 +645,57 @@ export class SWVModule {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+    }
+
+    _generateHoldModeCSV() {
+        // Generate CSV for both held and current sessions
+        const csvLines = [];
+
+        // Header
+        csvLines.push(`# SACMES Frequency Map Data - Hold Mode Comparison`);
+        csvLines.push(`# Export Date: ${new Date().toISOString()}`);
+        csvLines.push(`# Session 1: ${this.state.heldSessionName}`);
+        csvLines.push(`# Session 2: ${this.state.currentSessionName}`);
+        csvLines.push('');
+
+        // Get all electrodes (union of both sessions)
+        const heldElectrodes = Object.keys(this.state.heldData);
+        const currentElectrodes = Object.keys(this.state.frequencyMapData);
+        const allElectrodes = [...new Set([...heldElectrodes, ...currentElectrodes])];
+
+        // For each electrode, export data
+        allElectrodes.forEach(electrodeKey => {
+            const electrodeName = electrodeKey === 'averaged' ? 'Averaged' : `Electrode ${electrodeKey}`;
+            csvLines.push(`## ${electrodeName}`);
+            csvLines.push('');
+
+            // Get frequencies from both sessions
+            const heldElectrodeData = this.state.heldData[electrodeKey] || {};
+            const currentElectrodeData = this.state.frequencyMapData[electrodeKey] || {};
+            const heldFreqs = Object.keys(heldElectrodeData).map(f => parseFloat(f)).sort((a, b) => a - b);
+            const currentFreqs = Object.keys(currentElectrodeData).map(f => parseFloat(f)).sort((a, b) => a - b);
+            const allFreqs = [...new Set([...heldFreqs, ...currentFreqs])].sort((a, b) => a - b);
+
+            // Table header
+            csvLines.push(`Frequency (Hz),${this.state.heldSessionName} - Peak (A),${this.state.heldSessionName} - Charge (C),${this.state.currentSessionName} - Peak (A),${this.state.currentSessionName} - Charge (C)`);
+
+            // Data rows
+            allFreqs.forEach(freq => {
+                const heldData = heldElectrodeData[freq];
+                const currentData = currentElectrodeData[freq];
+
+                const heldPeak = heldData ? heldData.peak_value : 'N/A';
+                const heldCharge = heldData ? heldData.charge : 'N/A';
+                const currentPeak = currentData ? currentData.peak_value : 'N/A';
+                const currentCharge = currentData ? currentData.charge : 'N/A';
+
+                csvLines.push(`${freq},${heldPeak},${heldCharge},${currentPeak},${currentCharge}`);
+            });
+
+            csvLines.push('');
+        });
+
+        return csvLines.join('\n');
     }
 
     _recalculateTrends() {
@@ -907,6 +1068,26 @@ export class SWVModule {
         if (this.dom.visualization.electrodeControls) {
             console.log('Showing electrodeControls for frequency map');
             this.dom.visualization.electrodeControls.style.display = 'flex';
+        }
+
+        // Update hold button text based on current state
+        if (this.dom.visualization.holdFrequencyMapDataBtn) {
+            if (this.state.heldData !== null) {
+                this.dom.visualization.holdFrequencyMapDataBtn.textContent = 'Clear Hold Mode';
+            } else {
+                this.dom.visualization.holdFrequencyMapDataBtn.textContent = 'Hold Current Data';
+            }
+        }
+
+        // Update hold mode status display
+        if (this.dom.visualization.holdModeStatus) {
+            if (this.state.heldData !== null) {
+                this.dom.visualization.holdModeStatus.textContent = `Held: ${this.state.heldSessionName} | Ready for: ${this.state.currentSessionName}`;
+                this.dom.visualization.holdModeStatus.classList.remove('hidden');
+            } else {
+                this.dom.visualization.holdModeStatus.textContent = '';
+                this.dom.visualization.holdModeStatus.classList.add('hidden');
+            }
         }
 
         console.log('Frequency Map visualization setup complete');
@@ -1537,19 +1718,48 @@ export class SWVModule {
         const colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan'];
 
         const traces = [];
+
+        // Check if we're in hold mode
+        const isHoldMode = this.state.heldData !== null;
+
+        if (isHoldMode) {
+            // Add held session data
+            const heldElectrodeData = this.state.heldData[electrodeKey] || {};
+            const heldFreqs = Object.keys(heldElectrodeData).map(f => parseFloat(f)).sort((a, b) => a - b);
+
+            console.log(`   Hold Mode: Adding ${heldFreqs.length} held frequencies`);
+
+            heldFreqs.forEach((freq, index) => {
+                const freqData = heldElectrodeData[freq];
+                if (freqData && freqData.smoothed_currents && freqData.smoothed_currents.length > 0) {
+                    traces.push({
+                        x: freqData.potentials,
+                        y: freqData.smoothed_currents,
+                        type: 'scatter',
+                        mode: 'markers',
+                        name: `${this.state.heldSessionName}: ${freq} Hz`,
+                        marker: { size: 3, color: colors[index % colors.length], symbol: 'circle' },
+                        opacity: 0.6
+                    });
+                }
+            });
+        }
+
+        // Add current session data
         const sortedFreqs = analyzedFreqs.slice().sort((a, b) => a - b);
 
         sortedFreqs.forEach((freq, index) => {
             const freqData = electrodeFreqData[freq];
             if (freqData && freqData.smoothed_currents && freqData.smoothed_currents.length > 0) {
+                const sessionPrefix = isHoldMode ? `${this.state.currentSessionName}: ` : '';
                 console.log(`   ✓ Adding trace for ${freq}Hz (${freqData.smoothed_currents.length} points, color: ${colors[index % colors.length]})`);
                 traces.push({
                     x: freqData.potentials,
                     y: freqData.smoothed_currents,
                     type: 'scatter',
                     mode: 'markers',
-                    name: `${freq} Hz`,
-                    marker: { size: 3, color: colors[index % colors.length] }
+                    name: `${sessionPrefix}${freq} Hz`,
+                    marker: { size: 3, color: colors[index % colors.length], symbol: isHoldMode ? 'square' : 'circle' }
                 });
             } else {
                 console.warn(`   ✗ Missing data for ${freq}Hz`);
@@ -1558,8 +1768,12 @@ export class SWVModule {
 
         console.log(`   Total traces: ${traces.length}`);
 
+        const plotTitle = isHoldMode
+            ? `Comparison: ${this.state.heldSessionName} vs ${this.state.currentSessionName}`
+            : 'Frequency Map: All Frequencies Overlay';
+
         const layout = {
-            title: 'Frequency Map: All Frequencies Overlay',
+            title: plotTitle,
             xaxis: {
                 title: 'Potential (V)',
                 autorange: 'reversed' // Texas convention
@@ -1575,8 +1789,13 @@ export class SWVModule {
         Plotly.react(plotDiv, traces, layout, { responsive: true });
 
         // Update label
-        this.dom.visualization.currentFrequencyLabel.textContent =
-            `Analysis Complete - Showing all ${sortedFreqs.length} frequencies`;
+        if (isHoldMode) {
+            this.dom.visualization.currentFrequencyLabel.textContent =
+                `Hold Mode: ${this.state.heldSessionName} (${Object.keys(this.state.heldData[electrodeKey] || {}).length} freqs) vs ${this.state.currentSessionName} (${sortedFreqs.length} freqs)`;
+        } else {
+            this.dom.visualization.currentFrequencyLabel.textContent =
+                `Analysis Complete - Showing all ${sortedFreqs.length} frequencies`;
+        }
         console.log(`   ✓ Overlay plot complete!`);
     }
 
@@ -1592,34 +1811,61 @@ export class SWVModule {
             return; // No data to plot yet
         }
 
+        const traces = [];
+
+        // Check if we're in hold mode
+        const isHoldMode = this.state.heldData !== null;
+
+        if (isHoldMode) {
+            // Add held session data
+            const heldElectrodeData = this.state.heldData[electrodeKey] || {};
+            const heldFreqs = Object.keys(heldElectrodeData).map(f => parseFloat(f)).sort((a, b) => a - b);
+            const heldCharges = heldFreqs.map(freq => heldElectrodeData[freq].charge);
+
+            traces.push({
+                x: heldFreqs,
+                y: heldCharges,
+                type: 'scatter',
+                mode: 'markers+lines',
+                name: this.state.heldSessionName,
+                marker: { size: 8, color: 'rgba(66, 135, 245, 0.6)', symbol: 'circle' },
+                line: { color: 'rgba(66, 135, 245, 0.6)', width: 2, dash: 'dot' }
+            });
+        }
+
         // Sort data by frequency
         const sortedFrequencies = analyzedFreqs.slice().sort((a, b) => a - b);
         const charges = sortedFrequencies.map(freq => electrodeFreqData[freq].charge);
 
-        const trace = {
+        traces.push({
             x: sortedFrequencies,
             y: charges,
             type: 'scatter',
             mode: 'markers+lines',
-            name: 'Charge vs Frequency',
-            marker: { size: 8, color: 'blue' },
+            name: isHoldMode ? this.state.currentSessionName : 'Charge vs Frequency',
+            marker: { size: 8, color: 'blue', symbol: isHoldMode ? 'square' : 'circle' },
             line: { color: 'blue', width: 2 }
-        };
+        });
+
+        const plotTitle = isHoldMode
+            ? `Comparison: ${this.state.heldSessionName} vs ${this.state.currentSessionName}`
+            : 'Frequency Map: Charge vs Frequency';
 
         const layout = {
-            title: 'Frequency Map: Charge vs Frequency',
+            title: plotTitle,
             xaxis: {
                 title: 'Frequency (Hz)',
                 type: 'log', // Logarithmic scale
                 autorange: true
             },
             yaxis: { title: 'Charge (C)' },
-            showlegend: false,
+            showlegend: isHoldMode,
+            legend: isHoldMode ? { x: 0.02, y: 0.98 } : undefined,
             margin: { l: 60, r: 30, t: 50, b: 50 },
             hovermode: 'closest'
         };
 
-        Plotly.react(plotDiv, [trace], layout, { responsive: true });
+        Plotly.react(plotDiv, traces, layout, { responsive: true });
     }
 
     _updateFrequencyMapStats() {
