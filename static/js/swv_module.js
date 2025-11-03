@@ -110,7 +110,7 @@ export class SWVModule {
             currentElectrode: null, // Currently displayed electrode (null for averaged)
             electrodeData: {}, // Raw data for each electrode
             frequencyMapData: {}, // {frequency: {potentials, currents, charge, etc.}}
-            analyzedFrequencies: [], // List of frequencies already analyzed in frequency map mode
+            analyzedFrequencies: {}, // {electrode: [frequencies]} - analyzed frequencies per electrode
             heldData: null, // Holds previous session data for comparison
             heldSessionName: null, // Name of the held session
             currentSessionName: null // Name of the current session
@@ -854,8 +854,11 @@ export class SWVModule {
             }
         }
         
-        // Preserve analysisMode when updating state
+        // Preserve analysisMode and hold mode data when updating state
         const currentAnalysisMode = this.state.analysisMode;
+        const heldData = this.state.heldData;
+        const heldSessionName = this.state.heldSessionName;
+        const currentSessionName = this.state.currentSessionName;
 
         this.state = {
             isAnalysisRunning: true,
@@ -871,7 +874,10 @@ export class SWVModule {
             currentElectrode: selectedElectrodes.length > 0 ? selectedElectrodes[0] : null,
             electrodeData: {},
             frequencyMapData: {},  // Reset frequency map data {electrode: {frequency: data}}
-            analyzedFrequencies: {}  // Reset analyzed frequencies {electrode: [frequencies]}
+            analyzedFrequencies: {},  // Reset analyzed frequencies {electrode: [frequencies]}
+            heldData: heldData,  // Preserve held session data
+            heldSessionName: heldSessionName,  // Preserve held session name
+            currentSessionName: currentSessionName  // Preserve current session name
         };
         
         this.dom.visualization.postProcessNormalizationPointInput.value = this.dom.params.normalizationPointInput.value;
@@ -1056,7 +1062,7 @@ export class SWVModule {
         }
 
         // Check if we're in hold mode and show/hide appropriate containers
-        const isHoldMode = this.state.heldData !== null;
+        const isHoldMode = !!this.state.heldData;
 
         if (isHoldMode) {
             // Show held session plots container
