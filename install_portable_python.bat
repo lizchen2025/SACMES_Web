@@ -22,7 +22,8 @@ echo.
 echo Components:
 echo   - Python %PYTHON_VERSION% (embeddable)
 echo   - tkinter GUI library (pre-packaged)
-echo   - python-socketio
+echo   - python-socketio (with WebSocket support)
+echo   - websocket-client (for WebSocket transport)
 echo   - requests
 echo.
 echo Installation location: %PYTHON_DIR%
@@ -167,12 +168,12 @@ if not exist "%~dp0get-pip.py" (
 echo Installing pip...
 "%PYTHON_DIR%\python.exe" "%~dp0get-pip.py" --no-warn-script-location >nul 2>&1
 
-echo Installing python-socketio and requests...
-"%PYTHON_DIR%\python.exe" -m pip install python-socketio requests --quiet
+echo Installing python-socketio, websocket-client, and requests...
+"%PYTHON_DIR%\python.exe" -m pip install python-socketio websocket-client requests --quiet
 
 if errorlevel 1 (
     echo [WARN] Package installation encountered issues, retrying...
-    "%PYTHON_DIR%\python.exe" -m pip install python-socketio requests
+    "%PYTHON_DIR%\python.exe" -m pip install python-socketio websocket-client requests
 )
 
 echo [OK] Packages installed
@@ -206,6 +207,10 @@ if errorlevel 1 (
 )
 
 "%PYTHON_DIR%\python.exe" -c "import socketio; print('  [OK] python-socketio')"
+"%PYTHON_DIR%\python.exe" -c "import websocket; print('  [OK] websocket-client')"
+if errorlevel 1 (
+    echo   [WARN] websocket-client import failed - WebSocket transport may not work
+)
 "%PYTHON_DIR%\python.exe" -c "import requests; print('  [OK] requests')"
 
 echo.

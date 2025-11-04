@@ -73,7 +73,14 @@ REM Check socketio
 "%SCRIPT_DIR%sacmes_python\python.exe" -c "import socketio" >nul 2>&1
 if errorlevel 1 (
     echo [WARN] python-socketio not found, installing...
-    "%SCRIPT_DIR%sacmes_python\python.exe" -m pip install python-socketio requests --quiet
+    "%SCRIPT_DIR%sacmes_python\python.exe" -m pip install python-socketio websocket-client requests --quiet
+)
+
+REM Check websocket-client for WebSocket transport support
+"%SCRIPT_DIR%sacmes_python\python.exe" -c "import websocket" >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] websocket-client not found, installing for WebSocket support...
+    "%SCRIPT_DIR%sacmes_python\python.exe" -m pip install websocket-client --quiet
 )
 
 echo [OK] All dependencies verified

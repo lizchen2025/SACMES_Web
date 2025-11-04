@@ -51,10 +51,10 @@ echo.
 
 REM Install minimal dependencies
 echo [4/6] Installing minimal dependencies...
-pip install --no-cache-dir "python-socketio>=5.0.0,<6.0.0" "requests>=2.25.0"
+pip install --no-cache-dir "python-socketio>=5.0.0,<6.0.0" "websocket-client>=1.0.0" "requests>=2.25.0"
 if %errorlevel% neq 0 (
     echo ERROR: Failed to install dependencies
-    pip install --no-cache-dir python-socketio requests
+    pip install --no-cache-dir python-socketio websocket-client requests
     if %errorlevel% neq 0 (
         echo ERROR: Failed to install dependencies
         pause
