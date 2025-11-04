@@ -268,13 +268,12 @@ file_processing_complete = False
 pending_file_ack = None
 
 # --- Socket.IO Client Setup ---
-# WebSocket-first configuration for reduced server load and lower latency
+# Note: transports parameter is specified in connect() method, not in Client() init
 sio = socketio.Client(
     reconnection_attempts=5,
     reconnection_delay=5,
     logger=True,
-    engineio_logger=True,
-    transports=['websocket', 'polling']  # WebSocket优先，polling作为fallback
+    engineio_logger=True
 )
 
 
@@ -989,7 +988,8 @@ class AgentApp:
             connection_url = f"{server_url_to_connect}?user_id={user_id}"
 
             self.log(f"Initiating Socket.IO connection with User ID: {user_id}...")
-            sio.connect(connection_url, headers=headers, socketio_path='socket.io', transports=['polling'])
+            # WebSocket-first configuration for reduced server load and lower latency
+            sio.connect(connection_url, headers=headers, socketio_path='socket.io', transports=['websocket', 'polling'])
             self.log("Socket.IO connection established!")
 
             # Save the connected URL for future comparison
