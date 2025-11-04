@@ -268,7 +268,14 @@ file_processing_complete = False
 pending_file_ack = None
 
 # --- Socket.IO Client Setup ---
-sio = socketio.Client(reconnection_attempts=5, reconnection_delay=5, logger=True, engineio_logger=True)
+# WebSocket-first configuration for reduced server load and lower latency
+sio = socketio.Client(
+    reconnection_attempts=5,
+    reconnection_delay=5,
+    logger=True,
+    engineio_logger=True,
+    transports=['websocket', 'polling']  # WebSocket优先，polling作为fallback
+)
 
 
 # --- Core Agent Logic (Unchanged) ---

@@ -14,6 +14,7 @@ import uuid
 import redis
 import json
 import threading
+import socket
 import numpy as np
 from datetime import datetime
 from flask import Flask, send_from_directory, request, session
@@ -173,7 +174,7 @@ socketio = SocketIO(
     randomization_factor=0.5
 )
 
-# Redis connection - construct URL securely
+# Redis connection - construct URL securely with connection pool optimization
 REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
 REDIS_PORT = os.environ.get('REDIS_PORT', '6379')
 REDIS_DB = os.environ.get('REDIS_DB', '0')
@@ -185,10 +186,34 @@ else:
 
 # Allow override via environment variable
 REDIS_URL = os.environ.get('REDIS_URL', REDIS_URL)
+
+# Create connection pool with optimized settings for multi-user deployment
 try:
-    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    # Build keepalive options with cross-platform compatibility
+    keepalive_options = {}
+    if hasattr(socket, 'TCP_KEEPIDLE'):
+        keepalive_options[socket.TCP_KEEPIDLE] = 60
+    if hasattr(socket, 'TCP_KEEPINTVL'):
+        keepalive_options[socket.TCP_KEEPINTVL] = 10
+    if hasattr(socket, 'TCP_KEEPCNT'):
+        keepalive_options[socket.TCP_KEEPCNT] = 3
+
+    redis_pool = redis.ConnectionPool(
+        host=REDIS_HOST,
+        port=int(REDIS_PORT),
+        db=int(REDIS_DB),
+        password=REDIS_PASSWORD,
+        max_connections=50,           # Limit connections for 10-user concurrent scenario
+        socket_timeout=5,             # 5 second timeout for operations
+        socket_connect_timeout=2,     # 2 second timeout for initial connection
+        socket_keepalive=True,        # Enable TCP keepalive
+        socket_keepalive_options=keepalive_options if keepalive_options else None,
+        retry_on_timeout=True,        # Auto retry on timeout
+        decode_responses=True
+    )
+    redis_client = redis.Redis(connection_pool=redis_pool)
     redis_client.ping()  # Test connection
-    logger.info("Successfully connected to Redis")
+    logger.info(f"Successfully connected to Redis with connection pool (max_connections=50)")
 except Exception as e:
     logger.error(f"Failed to connect to Redis: {e}")
     redis_client = None

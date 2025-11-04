@@ -31,7 +31,8 @@
       "Bash(cmd /c \"sacmes_python\\python.exe -c \"\"import socketio; print(''socketio OK'')\"\" 2>&1\")",
       "Bash(cmd /c CLEANUP_OTHER_SOLUTIONS.bat)",
       "Bash(cmd /c test_extract.bat)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(du:*)"
     ],
     "deny": [],
     "ask": []
