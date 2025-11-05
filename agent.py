@@ -348,6 +348,10 @@ def file_matches_filters(filename):
 
 
 def send_file_to_server(file_path):
+    """
+    Send a file to the server and wait for confirmation.
+    Returns: True if file was successfully sent and confirmed, False otherwise
+    """
     global file_processing_complete, pending_file_ack, is_monitoring_active
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -391,29 +395,37 @@ def send_file_to_server(file_path):
                     app.log(f"[Processing] Waiting for server... {int(timeout_counter)}s (file: '{filename}')")
                     last_log_time = int(timeout_counter)
 
-            # Check if stopped by user/server
-            if not is_monitoring_active:
-                app.log(f"[Info] File sending interrupted by stop command for '{filename}'")
-            elif file_processing_complete:
-                elapsed = f"{timeout_counter:.1f}s" if timeout_counter < 1 else f"{int(timeout_counter)}s"
-                app.log(f"<-- Server confirmed processing complete for '{filename}' (took {elapsed})")
-            else:
-                app.log(f"[Warning] Timeout ({max_wait_time}s) waiting for server confirmation for '{filename}' - continuing anyway")
-
             # Reset state
             pending_file_ack = None
 
-            # Flow Control: Add delay between file sends to prevent overwhelming server
-            # This ensures steady data flow and prevents WebSocket buffer overflow
-            if file_send_interval > 0 and is_monitoring_active:
-                time.sleep(file_send_interval)
+            # Check if stopped by user/server
+            if not is_monitoring_active:
+                app.log(f"[Info] File sending interrupted by stop command for '{filename}'")
+                return False  # Failed: interrupted
+            elif file_processing_complete:
+                elapsed = f"{timeout_counter:.1f}s" if timeout_counter < 1 else f"{int(timeout_counter)}s"
+                app.log(f"<-- Server confirmed processing complete for '{filename}' (took {elapsed})")
+
+                # Flow Control: Add delay between file sends to prevent overwhelming server
+                # This ensures steady data flow and prevents WebSocket buffer overflow
+                if file_send_interval > 0 and is_monitoring_active:
+                    time.sleep(file_send_interval)
+
+                return True  # Success: confirmed by server
+            else:
+                app.log(f"[Warning] Timeout ({max_wait_time}s) waiting for server confirmation for '{filename}' - continuing anyway")
+                # Even on timeout, we consider it "sent" to avoid re-sending
+                # The server may still be processing it
+                return True
 
         else:
             app.log(f"[Warning] Cannot send '{filename}', not connected.")
             is_monitoring_active = False
+            return False  # Failed: not connected
     except Exception as e:
         app.log(f"[Error] Could not read or send file {file_path}: {e}")
         pending_file_ack = None
+        return False  # Failed: exception occurred
 
 
 def monitor_directory_loop(directory):
@@ -445,8 +457,13 @@ def monitor_directory_loop(directory):
                             app.log("Monitoring stopped, aborting file sending.")
                             return
                         app.log(f"Sending file: {filename}")
-                        send_file_to_server(os.path.join(directory, filename))
-                        processed_files.add(filename)
+                        # Only mark as processed if successfully sent
+                        if send_file_to_server(os.path.join(directory, filename)):
+                            processed_files.add(filename)
+                        else:
+                            app.log(f"[Warning] File '{filename}' not sent, will retry later")
+                            # If sending failed, stop monitoring to avoid accumulating failures
+                            return
                 else:
                     # Continuous/CV mode: group by file number
                     files_by_number = defaultdict(list)
@@ -471,8 +488,13 @@ def monitor_directory_loop(directory):
                                 app.log("Monitoring stopped, aborting file sending.")
                                 return
                             app.log(f"Sending file: {filename}")
-                            send_file_to_server(os.path.join(directory, filename))
-                            processed_files.add(filename)
+                            # Only mark as processed if successfully sent
+                            if send_file_to_server(os.path.join(directory, filename)):
+                                processed_files.add(filename)
+                            else:
+                                app.log(f"[Warning] File '{filename}' not sent, will retry later")
+                                # If sending failed, stop monitoring to avoid accumulating failures
+                                return
             else:
                 # Show a few example files to help with debugging
                 if len(all_files) > 0:
@@ -807,6 +829,102 @@ def on_adjust_send_rate(data):
     app.log(f"[FLOW CONTROL] Reason: {reason}")
 
 
+# --- Advanced Settings Dialog (Hidden Menu) ---
+class AdvancedSettingsDialog:
+    def __init__(self, parent):
+        self.parent = parent
+        self.dialog = None
+        self.result = None
+
+    def show(self):
+        """Show the advanced settings dialog"""
+        self.dialog = tk.Toplevel(self.parent)
+        self.dialog.title("Advanced Settings")
+        self.dialog.geometry("400x250")
+        self.dialog.resizable(False, False)
+
+        # Center the dialog
+        self.dialog.transient(self.parent)
+        self.dialog.grab_set()
+
+        # Main frame
+        main_frame = tk.Frame(self.dialog, padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        title_label = tk.Label(main_frame, text="Flow Control Settings",
+                              font=("Helvetica", 12, "bold"))
+        title_label.pack(pady=(0, 15))
+
+        # Current rate display
+        global file_send_interval
+        current_rate = int(1 / file_send_interval) if file_send_interval > 0 else 0
+        info_text = f"Current: {current_rate} files/sec ({file_send_interval:.2f}s interval)"
+        current_label = tk.Label(main_frame, text=info_text, fg="blue")
+        current_label.pack(pady=(0, 10))
+
+        # Rate slider frame
+        slider_frame = tk.Frame(main_frame)
+        slider_frame.pack(fill=tk.X, pady=10)
+
+        tk.Label(slider_frame, text="Send Rate (files/sec):").pack(anchor="w")
+
+        # Value display
+        self.rate_var = tk.IntVar(value=current_rate)
+        self.rate_display = tk.Label(slider_frame, text=f"{current_rate} files/sec",
+                                     font=("Helvetica", 10, "bold"), fg="green")
+        self.rate_display.pack(pady=5)
+
+        # Slider (1-20 files/sec)
+        def update_display(val):
+            rate = int(float(val))
+            self.rate_var.set(rate)
+            self.rate_display.config(text=f"{rate} files/sec")
+
+        self.rate_slider = tk.Scale(slider_frame, from_=1, to=20, orient=tk.HORIZONTAL,
+                                   command=update_display, length=300)
+        self.rate_slider.set(current_rate)
+        self.rate_slider.pack(fill=tk.X)
+
+        # Info text
+        info_label = tk.Label(main_frame, text="1-5: Slow (server under load)\n"
+                                              "6-10: Normal\n"
+                                              "11-20: Fast (use with caution)",
+                             justify=tk.LEFT, fg="gray")
+        info_label.pack(pady=10)
+
+        # Buttons
+        button_frame = tk.Frame(main_frame)
+        button_frame.pack(pady=(10, 0))
+
+        tk.Button(button_frame, text="Apply", command=self.apply_settings,
+                 bg="#4CAF50", fg="white", width=10).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="Cancel", command=self.dialog.destroy,
+                 width=10).pack(side=tk.LEFT, padx=5)
+
+        # Wait for dialog to close
+        self.parent.wait_window(self.dialog)
+
+    def apply_settings(self):
+        """Apply the new rate settings"""
+        global file_send_interval
+
+        new_rate = self.rate_var.get()
+        new_interval = 1.0 / new_rate if new_rate > 0 else 0.1
+
+        old_rate = int(1 / file_send_interval) if file_send_interval > 0 else 0
+        file_send_interval = new_interval
+
+        app.log(f"[MANUAL SETTING] Send rate changed: {old_rate} → {new_rate} files/sec")
+        app.log(f"[MANUAL SETTING] New interval: {new_interval:.3f}s between files")
+
+        messagebox.showinfo("Settings Applied",
+                           f"Send rate updated to {new_rate} files/sec\n"
+                           f"({new_interval:.3f}s interval between files)",
+                           parent=self.dialog)
+        self.dialog.destroy()
+
+
 # --- GUI Application Class ---
 class AgentApp:
     def __init__(self, root):
@@ -904,7 +1022,16 @@ class AgentApp:
         self.log_text = scrolledtext.ScrolledText(log_frame, state='disabled', wrap=tk.WORD, font=("Courier New", 9))
         self.log_text.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
 
+        # Hidden menu: Triple-click on User ID label to open advanced settings
+        self.user_id_label.bind('<Triple-Button-1>', lambda _: self.open_advanced_settings())
+
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def open_advanced_settings(self):
+        """Open the advanced settings dialog (hidden menu)"""
+        self.log("[HIDDEN MENU] Opening advanced settings...")
+        dialog = AdvancedSettingsDialog(self.root)
+        dialog.show()
 
     def select_folder(self):
         directory = filedialog.askdirectory()
