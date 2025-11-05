@@ -7,7 +7,7 @@ export class SocketManager {
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            timeout: 60000,  // Extended timeout to match backend (60s)
+            timeout: 120000,  // Extended timeout to match backend (120s, was 60s)
 
             // Additional settings for OpenShift stability
             forceNew: false,
@@ -29,6 +29,10 @@ export class SocketManager {
         this.socket.on('connect', () => {
             console.log('Socket.IO connected!');
             this._updateConnectionStatus('connected');
+
+            // Auto-reconnect: Re-register web viewer if user_id exists
+            this._handleReconnection();
+
             // Emit 'connect' to our custom handlers, so other modules know we are connected.
             if (this.eventHandlers['connect']) {
                 this.eventHandlers['connect'].forEach(handler => handler());
@@ -79,6 +83,18 @@ export class SocketManager {
                 connectionStatusEl.textContent = 'Disconnected';
             } else if (status === 'reconnecting') {
                 connectionStatusEl.textContent = 'Reconnecting...';
+            }
+        }
+    }
+
+    _handleReconnection() {
+        // Check if user_id exists (from window.getCurrentUserId function in index.html)
+        if (typeof window.getCurrentUserId === 'function') {
+            const userId = window.getCurrentUserId();
+            if (userId) {
+                console.log(`[RECONNECTION] Re-registering web viewer for user_id: ${userId}`);
+                // Re-send check_agent_connection to re-register this web viewer's new SID
+                this.socket.emit('check_agent_connection', { user_id: userId });
             }
         }
     }

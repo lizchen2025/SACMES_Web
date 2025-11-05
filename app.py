@@ -155,8 +155,8 @@ socketio = SocketIO(
     logger=True,
     engineio_logger=True,
 
-    # OpenShift-optimized settings to prevent disconnections
-    ping_timeout=60,        # Extended timeout for heavy operations (default: 20s)
+    # OpenShift-optimized settings to prevent disconnections during heavy file transfers
+    ping_timeout=120,       # Increased to 120s for bulk file uploads (was 60s)
     ping_interval=25,       # More frequent heartbeats (default: 25s)
 
     # Prevent disconnections during processing
@@ -236,6 +236,80 @@ fallback_data = {}  # {session_id: {'agent_sid': None, 'web_viewer_sids': set(),
 MAX_CONCURRENT_FILE_TASKS = 30  # Supports ~10 users with 3 concurrent files each
 file_processing_semaphore = Semaphore(MAX_CONCURRENT_FILE_TASKS)
 logger.info(f"File processing concurrency limit set to {MAX_CONCURRENT_FILE_TASKS}")
+
+# Flow control - track agent sending rates
+# {user_id: {'current_interval': 0.1, 'last_adjusted': timestamp}}
+agent_rate_tracking = {}
+
+# Flow control thresholds
+LOAD_THRESHOLD_HIGH = 0.80  # 80% capacity - slow down agents
+LOAD_THRESHOLD_LOW = 0.30   # 30% capacity - allow agents to speed up
+RATE_SLOW = 0.2    # 5 files/sec when under load
+RATE_NORMAL = 0.1  # 10 files/sec normal operation
+RATE_CHECK_INTERVAL = 2.0  # Don't adjust same agent more than once per 2 seconds
+
+def check_and_adjust_agent_rate(user_id, agent_sid):
+    """
+    Monitor server load and adjust agent sending rate if needed.
+    Called each time agent sends a file.
+    """
+    try:
+        # Calculate current load
+        available_slots = file_processing_semaphore.balance
+        used_slots = MAX_CONCURRENT_FILE_TASKS - available_slots
+        load_ratio = used_slots / MAX_CONCURRENT_FILE_TASKS
+
+        # Get agent's current rate settings
+        if user_id not in agent_rate_tracking:
+            agent_rate_tracking[user_id] = {
+                'current_interval': RATE_NORMAL,
+                'last_adjusted': 0
+            }
+
+        current_time = time.time()
+        agent_info = agent_rate_tracking[user_id]
+        time_since_adjust = current_time - agent_info['last_adjusted']
+
+        # Avoid adjusting too frequently
+        if time_since_adjust < RATE_CHECK_INTERVAL:
+            return
+
+        # Determine if adjustment is needed
+        should_slow_down = (load_ratio > LOAD_THRESHOLD_HIGH and
+                           agent_info['current_interval'] < RATE_SLOW)
+        should_speed_up = (load_ratio < LOAD_THRESHOLD_LOW and
+                          agent_info['current_interval'] > RATE_NORMAL)
+
+        if should_slow_down:
+            # Server is under load, slow down this agent
+            new_interval = RATE_SLOW
+            reason = f"server load high ({load_ratio*100:.0f}% capacity)"
+            logger.info(f"[FLOW CONTROL] Slowing down agent {user_id}: {load_ratio*100:.0f}% load")
+
+            socketio.emit('adjust_send_rate', {
+                'interval': new_interval,
+                'reason': reason
+            }, to=agent_sid)
+
+            agent_info['current_interval'] = new_interval
+            agent_info['last_adjusted'] = current_time
+
+        elif should_speed_up:
+            # Server load is low, allow agent to speed up
+            new_interval = RATE_NORMAL
+            reason = f"server load normal ({load_ratio*100:.0f}% capacity)"
+            logger.info(f"[FLOW CONTROL] Speeding up agent {user_id}: {load_ratio*100:.0f}% load")
+
+            socketio.emit('adjust_send_rate', {
+                'interval': new_interval,
+                'reason': reason
+            }, to=agent_sid)
+
+            agent_info['current_interval'] = new_interval
+            agent_info['last_adjusted'] = current_time
+
+    except Exception as e:
+        logger.error(f"Error in flow control adjustment: {e}")
 
 # --- Session Management Helper Functions ---
 def get_session_id():
@@ -2126,6 +2200,9 @@ def handle_instrument_data(data):
     agent_session_id = agent_mapping['session_id']
     logger.debug(f"Processing SWV data for user_id: {user_id}, session: {agent_session_id}")
 
+    # FLOW CONTROL: Check server load and adjust agent rate if needed
+    check_and_adjust_agent_rate(user_id, request.sid)
+
     original_filename = data.get('filename', 'unknown_file.txt')
     file_content = data.get('content', '')
     logger.info(f"Received data from agent (session {agent_session_id}): {original_filename}")
@@ -2259,6 +2336,9 @@ def handle_cv_instrument_data(data):
     agent_session_id = agent_mapping['session_id']
     session_id = agent_session_id
     logger.debug(f"Processing CV data for user_id: {user_id}, session: {session_id}")
+
+    # FLOW CONTROL: Check server load and adjust agent rate if needed
+    check_and_adjust_agent_rate(user_id, request.sid)
 
     original_filename = data.get('filename', 'unknown_file.txt')
     file_content = data.get('content', '')
