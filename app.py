@@ -1,6 +1,7 @@
 # app.py (Version with CSV Export Functionality)
 
 import eventlet
+from eventlet.semaphore import Semaphore
 
 eventlet.monkey_patch()
 
@@ -229,6 +230,12 @@ active_sessions = {}  # {session_id: {'agent_sid': sid, 'web_viewer_sids': set()
 # Global fallback for when Redis is not available
 # Changed to per-session storage to prevent data pollution between users
 fallback_data = {}  # {session_id: {'agent_sid': None, 'web_viewer_sids': set(), ...}}
+
+# Concurrency control - limit simultaneous file processing tasks
+# This prevents memory/CPU overload when multiple users upload files simultaneously
+MAX_CONCURRENT_FILE_TASKS = 30  # Supports ~10 users with 3 concurrent files each
+file_processing_semaphore = Semaphore(MAX_CONCURRENT_FILE_TASKS)
+logger.info(f"File processing concurrency limit set to {MAX_CONCURRENT_FILE_TASKS}")
 
 # --- Session Management Helper Functions ---
 def get_session_id():
@@ -791,6 +798,23 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
         if temp_filepath and os.path.exists(temp_filepath):
             os.remove(temp_filepath)
         logger.info(f"FREQUENCY_MAP: Finished processing '{original_filename}'")
+
+
+# --- Concurrency-controlled task wrapper ---
+def start_limited_file_task(target_function, **kwargs):
+    """
+    Start a background file processing task with concurrency control.
+    Uses semaphore to limit the number of simultaneous file processing tasks.
+    """
+    def wrapped_task():
+        with file_processing_semaphore:
+            logger.debug(f"Acquired semaphore for {target_function.__name__} (available: {file_processing_semaphore.balance})")
+            try:
+                target_function(**kwargs)
+            finally:
+                logger.debug(f"Released semaphore for {target_function.__name__} (available: {file_processing_semaphore.balance})")
+
+    socketio.start_background_task(wrapped_task)
 
 
 def process_file_in_background(original_filename, content, params_for_this_file, session_id):
@@ -1740,11 +1764,11 @@ def handle_disconnect():
         if agent_session_tracker.get('agent_sid') == disconnected_sid:
             disconnected_session = agent_session_tracker.get('current_session')
 
-        # MODIFIED: Shorter grace period (0.5 seconds instead of 2)
-        # This allows for quick reconnections but cleans up faster
+        # Grace period for agent reconnection
+        # Increased to 3 seconds to handle WebSocket reconnections during heavy data transfer
         def delayed_agent_cleanup():
             import time
-            time.sleep(0.5)  # 0.5 second grace period
+            time.sleep(3.0)  # 3 second grace period (increased from 0.5s)
 
             # Check if agent reconnected (user_id would have new mapping with different sid)
             current_mapping = get_agent_session_by_user_id(disconnected_user_id)
@@ -2152,8 +2176,8 @@ def handle_instrument_data(data):
                 params_for_this_file.setdefault('high_xstart', None)
                 params_for_this_file.setdefault('high_xend', None)
 
-                socketio.start_background_task(
-                    target=process_frequency_map_file,
+                start_limited_file_task(
+                    target_function=process_frequency_map_file,
                     original_filename=original_filename,
                     content=file_content,
                     frequency=frequency,
@@ -2196,7 +2220,7 @@ def handle_instrument_data(data):
                 params_for_this_file.setdefault('high_xstart', None)
                 params_for_this_file.setdefault('high_xend', None)
 
-                socketio.start_background_task(target=process_file_in_background,
+                start_limited_file_task(target_function=process_file_in_background,
                                              original_filename=f"{original_filename}_electrode_{electrode_idx}",
                                              content=file_content,
                                              params_for_this_file=params_for_this_file,
@@ -2210,7 +2234,7 @@ def handle_instrument_data(data):
             params_for_this_file.setdefault('high_xstart', None)
             params_for_this_file.setdefault('high_xend', None)
 
-            socketio.start_background_task(target=process_file_in_background,
+            start_limited_file_task(target_function=process_file_in_background,
                                          original_filename=original_filename,
                                          content=file_content,
                                          params_for_this_file=params_for_this_file,
@@ -2263,7 +2287,7 @@ def handle_cv_instrument_data(data):
             params_for_this_file = live_analysis_params.copy()
             params_for_this_file['selected_electrode'] = electrode_idx
 
-            socketio.start_background_task(target=process_cv_file_in_background,
+            start_limited_file_task(target_function=process_cv_file_in_background,
                                          original_filename=f"{original_filename}_electrode_{electrode_idx}",
                                          content=file_content,
                                          params_for_this_file=params_for_this_file,
@@ -2271,7 +2295,7 @@ def handle_cv_instrument_data(data):
     else:
         # Original averaging behavior for CV
         params_for_this_file = live_analysis_params.copy()
-        socketio.start_background_task(target=process_cv_file_in_background,
+        start_limited_file_task(target_function=process_cv_file_in_background,
                                      original_filename=original_filename,
                                      content=file_content,
                                      params_for_this_file=params_for_this_file,
@@ -2703,7 +2727,7 @@ def handle_cv_data_from_agent(data):
                     params_for_this_file = live_analysis_params.copy()
                     params_for_this_file['selected_electrode'] = electrode_idx
 
-                    socketio.start_background_task(target=process_cv_file_in_background,
+                    start_limited_file_task(target_function=process_cv_file_in_background,
                                                  original_filename=f"{original_filename}_electrode_{electrode_idx}",
                                                  content=file_content,
                                                  params_for_this_file=params_for_this_file,
@@ -2711,7 +2735,7 @@ def handle_cv_data_from_agent(data):
             else:
                 # Original averaging behavior for CV
                 params_for_this_file = live_analysis_params.copy()
-                socketio.start_background_task(target=process_cv_file_in_background,
+                start_limited_file_task(target_function=process_cv_file_in_background,
                                              original_filename=original_filename,
                                              content=file_content,
                                              params_for_this_file=params_for_this_file,

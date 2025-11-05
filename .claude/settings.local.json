@@ -32,7 +32,11 @@
       "Bash(cmd /c CLEANUP_OTHER_SOLUTIONS.bat)",
       "Bash(cmd /c test_extract.bat)",
       "Bash(git push:*)",
-      "Bash(du:*)"
+      "Bash(du:*)",
+      "Bash(D:minicondaenvssacmes_webpython.exe e:SACMES_webwebSACMES_Web-Multiusertemp_replace.py)",
+      "Bash(del e:SACMES_webwebSACMES_Web-Multiusertemp_replace.py 2)",
+      "Bash(nul)",
+      "Bash(tasklist:*)"
     ],
     "deny": [],
     "ask": []

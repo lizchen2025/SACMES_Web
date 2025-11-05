@@ -373,18 +373,26 @@ def send_file_to_server(file_path):
 
             # Wait for server processing complete acknowledgment (interruptible)
             timeout_counter = 0
-            max_wait_time = 30  # 30 seconds timeout
+            max_wait_time = 60  # Increased to 60 seconds for heavy data processing
+            last_log_time = 0
+
             while not file_processing_complete and timeout_counter < max_wait_time and is_monitoring_active:
                 time.sleep(0.05)  # Faster check interval for responsive stop
                 timeout_counter += 0.05
+
+                # Progress feedback every 5 seconds to show Agent is not frozen
+                if int(timeout_counter) > last_log_time and int(timeout_counter) % 5 == 0:
+                    app.log(f"[Processing] Waiting for server... {int(timeout_counter)}s (file: '{filename}')")
+                    last_log_time = int(timeout_counter)
 
             # Check if stopped by user/server
             if not is_monitoring_active:
                 app.log(f"[Info] File sending interrupted by stop command for '{filename}'")
             elif file_processing_complete:
-                app.log(f"<-- Server confirmed processing complete for '{filename}'")
+                elapsed = f"{timeout_counter:.1f}s" if timeout_counter < 1 else f"{int(timeout_counter)}s"
+                app.log(f"<-- Server confirmed processing complete for '{filename}' (took {elapsed})")
             else:
-                app.log(f"[Warning] Timeout waiting for server confirmation for '{filename}'")
+                app.log(f"[Warning] Timeout ({max_wait_time}s) waiting for server confirmation for '{filename}' - continuing anyway")
 
             # Reset state
             pending_file_ack = None
