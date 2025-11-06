@@ -354,76 +354,93 @@ def send_file_to_server(file_path):
     """
     global file_processing_complete, pending_file_ack, is_monitoring_active
     try:
+        # DIAGNOSTIC: Check connection state before attempting to send
+        if not sio.connected:
+            app.log(f"[ERROR] Cannot send file - socket not connected")
+            return False
+
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
         filename = os.path.basename(file_path)
-        if sio.connected:
-            app.log(f"--> Sending '{filename}'...")
 
-            # Reset processing state and set pending file
-            file_processing_complete = False
-            pending_file_ack = filename
+        app.log(f"[DIAGNOSTIC] Preparing to send '{filename}', size: {len(content)} bytes, connected: {sio.connected}")
 
-            # Determine if this is CV analysis based on filename pattern
-            # CV files don't have Hz in the filename (e.g., CV_60Hz_1.txt, 2025_10_03_CV_Test__1.txt)
-            # SWV files MUST have Hz in the filename (e.g., SWV_15Hz_1.txt)
-            is_cv_file = 'Hz' not in filename
+        # Reset processing state and set pending file
+        file_processing_complete = False
+        pending_file_ack = filename
 
+        # Determine if this is CV analysis based on filename pattern
+        # CV files don't have Hz in the filename (e.g., CV_60Hz_1.txt, 2025_10_03_CV_Test__1.txt)
+        # SWV files MUST have Hz in the filename (e.g., SWV_15Hz_1.txt)
+        is_cv_file = 'Hz' not in filename
+
+        app.log(f"--> Sending '{filename}' (type: {'CV' if is_cv_file else 'SWV'})...")
+
+        try:
             if is_cv_file:
                 # Send CV file to CV handler
+                app.log(f"[DIAGNOSTIC] Emitting cv_data_from_agent event...")
                 sio.emit('cv_data_from_agent', {
                     'filename': filename,
                     'content': content,
                     'preview_mode': False,
                     'status': 'success'
                 })
+                app.log(f"[DIAGNOSTIC] cv_data_from_agent emit completed")
             else:
                 # Send SWV file to SWV handler
+                app.log(f"[DIAGNOSTIC] Emitting stream_instrument_data event...")
                 sio.emit('stream_instrument_data', {'filename': filename, 'content': content})
+                app.log(f"[DIAGNOSTIC] stream_instrument_data emit completed, still connected: {sio.connected}")
+        except Exception as emit_error:
+            app.log(f"[ERROR] Failed to emit data to server: {emit_error}")
+            app.log(f"[ERROR] Connection state after emit error: {sio.connected}")
+            import traceback
+            app.log(f"[ERROR] Traceback: {traceback.format_exc()}")
+            return False
 
-            # Wait for server processing complete acknowledgment (interruptible)
-            timeout_counter = 0
-            max_wait_time = 60  # Increased to 60 seconds for heavy data processing
-            last_log_time = 0
+        # Wait for server processing complete acknowledgment (interruptible)
+        timeout_counter = 0
+        max_wait_time = 60  # Increased to 60 seconds for heavy data processing
+        last_log_time = 0
 
-            while not file_processing_complete and timeout_counter < max_wait_time and is_monitoring_active:
-                time.sleep(0.05)  # Faster check interval for responsive stop
-                timeout_counter += 0.05
+        while not file_processing_complete and timeout_counter < max_wait_time and is_monitoring_active:
+            time.sleep(0.05)  # Faster check interval for responsive stop
+            timeout_counter += 0.05
 
-                # Progress feedback every 5 seconds to show Agent is not frozen
-                if int(timeout_counter) > last_log_time and int(timeout_counter) % 5 == 0:
-                    app.log(f"[Processing] Waiting for server... {int(timeout_counter)}s (file: '{filename}')")
-                    last_log_time = int(timeout_counter)
+            # Progress feedback every 5 seconds to show Agent is not frozen
+            if int(timeout_counter) > last_log_time and int(timeout_counter) % 5 == 0:
+                app.log(f"[Processing] Waiting for server... {int(timeout_counter)}s (file: '{filename}')")
+                last_log_time = int(timeout_counter)
 
-            # Reset state
-            pending_file_ack = None
+        # Reset state
+        pending_file_ack = None
 
-            # Check if stopped by user/server
-            if not is_monitoring_active:
-                app.log(f"[Info] File sending interrupted by stop command for '{filename}'")
-                return False  # Failed: interrupted
-            elif file_processing_complete:
-                elapsed = f"{timeout_counter:.1f}s" if timeout_counter < 1 else f"{int(timeout_counter)}s"
-                app.log(f"<-- Server confirmed processing complete for '{filename}' (took {elapsed})")
+        # Check if stopped by user/server
+        if not is_monitoring_active:
+            app.log(f"[Info] File sending interrupted by stop command for '{filename}'")
+            return False  # Failed: interrupted
+        elif file_processing_complete:
+            elapsed = f"{timeout_counter:.1f}s" if timeout_counter < 1 else f"{int(timeout_counter)}s"
+            app.log(f"<-- Server confirmed processing complete for '{filename}' (took {elapsed})")
 
-                # Flow Control: Add delay between file sends to prevent overwhelming server
-                # This ensures steady data flow and prevents WebSocket buffer overflow
-                if file_send_interval > 0 and is_monitoring_active:
-                    time.sleep(file_send_interval)
+            # Flow Control: Add delay between file sends to prevent overwhelming server
+            # This ensures steady data flow and prevents WebSocket buffer overflow
+            if file_send_interval > 0 and is_monitoring_active:
+                time.sleep(file_send_interval)
 
-                return True  # Success: confirmed by server
-            else:
-                app.log(f"[Warning] Timeout ({max_wait_time}s) waiting for server confirmation for '{filename}' - continuing anyway")
-                # Even on timeout, we consider it "sent" to avoid re-sending
-                # The server may still be processing it
-                return True
-
+            return True  # Success: confirmed by server
         else:
-            app.log(f"[Warning] Cannot send '{filename}', not connected.")
-            is_monitoring_active = False
-            return False  # Failed: not connected
+            app.log(f"[Warning] Timeout ({max_wait_time}s) waiting for server confirmation for '{filename}' - continuing anyway")
+            # Even on timeout, we consider it "sent" to avoid re-sending
+            # The server may still be processing it
+            return True
+
     except Exception as e:
         app.log(f"[Error] Could not read or send file {file_path}: {e}")
+        app.log(f"[ERROR] Connection state: {sio.connected}")
+        import traceback
+        app.log(f"[ERROR] Traceback: {traceback.format_exc()}")
         pending_file_ack = None
         return False  # Failed: exception occurred
 
@@ -541,7 +558,16 @@ def connect_error(data):
 @sio.event
 def disconnect():
     app.update_status("Disconnected", "red")
-    app.log("Disconnected from server.")
+    app.log("[DISCONNECT] Disconnected from server")
+    app.log(f"[DISCONNECT] Was sending file: {pending_file_ack if pending_file_ack else 'None'}")
+    app.log(f"[DISCONNECT] Monitoring active: {is_monitoring_active}")
+
+    # Try to get disconnect reason from transport
+    import traceback
+    app.log(f"[DISCONNECT] Stack trace at disconnect:")
+    for line in traceback.format_stack():
+        if 'socketio' in line or 'agent.py' in line:
+            app.log(f"  {line.strip()}")
 
 
 @sio.on('set_filters')
@@ -846,7 +872,7 @@ class AdvancedSettingsDialog:
         """Show the advanced settings dialog"""
         self.dialog = tk.Toplevel(self.parent)
         self.dialog.title("Advanced Settings")
-        self.dialog.geometry("400x250")
+        self.dialog.geometry("400x380")  # FIXED: Increased height from 250 to 380 to show Apply/Cancel buttons
         self.dialog.resizable(False, False)
 
         # Center the dialog
@@ -1017,6 +1043,12 @@ class AgentApp:
         self.stop_button = tk.Button(control_frame, text="Stop", command=self.stop_monitoring, state=tk.DISABLED,
                                      bg="#F8D7DA")
         self.stop_button.pack(side=tk.LEFT, padx=5)
+
+        # NEW: Visible settings button for flow control
+        self.settings_button = tk.Button(control_frame, text="⚙ Settings", command=self.open_advanced_settings,
+                                        bg="#E3F2FD")
+        self.settings_button.pack(side=tk.LEFT, padx=5)
+
         tk.Label(control_frame, text="Server Status:", anchor="e").pack(side=tk.LEFT, padx=(20, 5))
         self.status_display = tk.Label(control_frame, text="Not Connected", fg="red", font=("Helvetica", 10, "bold"))
         self.status_display.pack(side=tk.LEFT)

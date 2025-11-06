@@ -154,7 +154,7 @@ socketio = SocketIO(
     cors_allowed_origins="*",
     async_mode='eventlet',
     logger=True,
-    engineio_logger=True,
+    engineio_logger=False,  # CHANGED: Disable verbose engine.io logging to hide benign "Bad file descriptor" errors during socket cleanup
 
     # OpenShift-optimized settings to prevent disconnections during heavy file transfers
     ping_timeout=120,       # Increased to 120s for bulk file uploads (was 60s)
@@ -2283,34 +2283,59 @@ def handle_stop_frequency_map_session(data):
 
 @socketio.on('stream_instrument_data')
 def handle_instrument_data(data):
-    # CONNECTION STABILITY: Log data arrival with detailed socket info
-    logger.info(f"[SOCKET] Received stream_instrument_data from sid={request.sid}, remote={request.remote_addr}")
-
-    # NEW: Verify this is from a registered agent using user_id lookup
-    user_id = get_user_id_by_agent_sid(request.sid)
-
-    if not user_id:
-        logger.warning(f"[SOCKET ERROR] Received data from unregistered agent SID: {request.sid}")
-        return
-
-    # Get agent session by user_id
-    agent_mapping = get_agent_session_by_user_id(user_id)
-    if not agent_mapping:
-        logger.error(f"[SOCKET ERROR] No active session found for user_id: {user_id}")
-        return
-
-    agent_session_id = agent_mapping['session_id']
-    logger.debug(f"[SOCKET] Processing SWV data for user_id: {user_id}, session: {agent_session_id}")
-
-    # FLOW CONTROL: Check server load and adjust agent rate if needed
     try:
-        check_and_adjust_agent_rate(user_id, request.sid)
-    except Exception as rate_error:
-        logger.error(f"[SOCKET ERROR] Flow control check failed: {rate_error}")
+        # CONNECTION STABILITY: Log data arrival with detailed socket info
+        logger.info(f"[SOCKET] ===== stream_instrument_data START =====")
+        logger.info(f"[SOCKET] From sid={request.sid}, remote={request.remote_addr}")
 
-    original_filename = data.get('filename', 'unknown_file.txt')
-    file_content = data.get('content', '')
-    logger.info(f"Received data from agent (session {agent_session_id}): {original_filename}")
+        filename = data.get('filename', 'unknown') if data else 'unknown'
+        content_size = len(data.get('content', '')) if data else 0
+        logger.info(f"[SOCKET] File: {filename}, Size: {content_size} bytes")
+
+        # NEW: Verify this is from a registered agent using user_id lookup
+        user_id = get_user_id_by_agent_sid(request.sid)
+
+        if not user_id:
+            logger.error(f"[SOCKET ERROR] UNREGISTERED agent SID: {request.sid}")
+            logger.error(f"[SOCKET ERROR] Agent connected but didn't register with user_id")
+            emit('file_validation_error', {
+                'filename': filename,
+                'error': 'Agent not registered',
+                'message': 'Agent session not found. Please reconnect agent.'
+            }, to=request.sid)
+            return
+
+        logger.info(f"[SOCKET] Agent verified: user_id={user_id}")
+
+        # Get agent session by user_id
+        agent_mapping = get_agent_session_by_user_id(user_id)
+        if not agent_mapping:
+            logger.error(f"[SOCKET ERROR] No session for user_id: {user_id}")
+            emit('file_validation_error', {
+                'filename': filename,
+                'error': 'Session not found',
+                'message': 'Agent session expired. Please reconnect.'
+            }, to=request.sid)
+            return
+
+        agent_session_id = agent_mapping['session_id']
+        logger.info(f"[SOCKET] Session: {agent_session_id}")
+
+        # FLOW CONTROL: Check server load and adjust agent rate if needed
+        try:
+            check_and_adjust_agent_rate(user_id, request.sid)
+        except Exception as rate_error:
+            logger.error(f"[SOCKET ERROR] Flow control failed: {rate_error}")
+
+        original_filename = data.get('filename', 'unknown_file.txt')
+        file_content = data.get('content', '')
+        logger.info(f"[SOCKET] Processing: {original_filename} (session {agent_session_id})")
+
+    except Exception as pre_process_error:
+        logger.error(f"[SOCKET CRITICAL] Pre-processing error: {pre_process_error}")
+        import traceback
+        logger.error(f"[SOCKET CRITICAL] Traceback:\n{traceback.format_exc()}")
+        return
 
     # SAFETY VALIDATION: Check file safety before processing
     is_safe, error_message = validate_file_safety(original_filename, file_content)
