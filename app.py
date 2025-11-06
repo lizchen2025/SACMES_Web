@@ -154,7 +154,13 @@ socketio = SocketIO(
     cors_allowed_origins="*",
     async_mode='eventlet',
     logger=True,
-    engineio_logger=False,  # CHANGED: Disable verbose engine.io logging to hide benign "Bad file descriptor" errors during socket cleanup
+    engineio_logger=False,  # Disable verbose engine.io logging to hide benign "Bad file descriptor" errors during socket cleanup
+
+    # CRITICAL FIX: Enable async handlers to prevent blocking on large messages
+    async_handlers=True,  # Allow eventlet to handle large messages asynchronously
+
+    # CRITICAL FIX: Disable http compression to prevent issues with eventlet + large messages
+    http_compression=False,  # Compression can cause issues with eventlet websocket frames
 
     # OpenShift-optimized settings to prevent disconnections during heavy file transfers
     ping_timeout=120,       # Increased to 120s for bulk file uploads (was 60s)
@@ -165,15 +171,7 @@ socketio = SocketIO(
     max_http_buffer_size=10000000,  # 10MB for large CV data files
 
     # Transport optimization for container environments
-    transports=['websocket', 'polling'],
-
-    # Additional stability settings
-    always_connect=True,
-    reconnection=True,
-    reconnection_attempts=5,
-    reconnection_delay=1,
-    reconnection_delay_max=5,
-    randomization_factor=0.5
+    transports=['websocket', 'polling']
 )
 
 # Redis connection - construct URL securely with connection pool optimization

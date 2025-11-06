@@ -1155,9 +1155,19 @@ class AgentApp:
             connection_url = f"{server_url_to_connect}?user_id={user_id}"
 
             self.log(f"Initiating Socket.IO connection with User ID: {user_id}...")
-            # WebSocket-first configuration for reduced server load and lower latency
+
+            # TRANSPORT CONFIGURATION:
+            # Option 1: WebSocket-first (better performance, but may have issues with large files in some environments)
+            # Option 2: Polling-only (more reliable for large files, slightly higher latency)
+
+            # Currently using WebSocket-first (recommended for most cases)
             sio.connect(connection_url, headers=headers, socketio_path='socket.io', transports=['websocket', 'polling'])
+
+            # WORKAROUND: If experiencing disconnections with large files, try polling-only:
+            # sio.connect(connection_url, headers=headers, socketio_path='socket.io', transports=['polling'])
+
             self.log("Socket.IO connection established!")
+            self.log(f"[CONNECTION] Transport: {sio.transport()}")
 
             # Save the connected URL for future comparison
             self.last_connected_url = server_url_to_connect
