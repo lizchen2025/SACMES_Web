@@ -960,6 +960,15 @@ export class SWVModule {
         let rawPotentials = {};
         if (this.state.rawTrendData && this.state.rawTrendData.peak_potential_trends) {
             rawPotentials = this.state.rawTrendData.peak_potential_trends;
+            console.log('[DEBUG] Peak potential data found:', Object.keys(rawPotentials).length, 'frequencies');
+            // Log sample data
+            for (const freq in rawPotentials) {
+                const validValues = rawPotentials[freq].filter(v => v !== null && v !== undefined);
+                console.log(`[DEBUG] Freq ${freq}Hz: ${validValues.length} valid potential values, sample:`, validValues.slice(0, 3));
+            }
+        } else {
+            console.warn('[DEBUG] No peak_potential_trends in rawTrendData!');
+            console.log('[DEBUG] rawTrendData keys:', this.state.rawTrendData ? Object.keys(this.state.rawTrendData) : 'rawTrendData is null');
         }
 
         const recalculated = {
@@ -1558,6 +1567,17 @@ export class SWVModule {
     }
     
     _renderTrendPlots(trendData) {
+        console.log('[DEBUG] _renderTrendPlots called with trendData keys:', Object.keys(trendData));
+        console.log('[DEBUG] peak_potential_trends present?', 'peak_potential_trends' in trendData);
+        if (trendData.peak_potential_trends) {
+            const potentialKeys = Object.keys(trendData.peak_potential_trends);
+            console.log('[DEBUG] peak_potential_trends frequencies:', potentialKeys);
+            potentialKeys.forEach(freq => {
+                const validCount = trendData.peak_potential_trends[freq].filter(v => v !== null && v !== undefined).length;
+                console.log(`[DEBUG] Freq ${freq}: ${validCount} valid potential values`);
+            });
+        }
+
         const injectionPoint = parseInt(this.dom.visualization.postProcessInjectionPointInput.value) || null;
         const resizeInterval = parseInt(this.dom.settings.resizeIntervalInput.value);
         const freqStrs = this.state.currentFrequencies.map(String);
@@ -1576,6 +1596,7 @@ export class SWVModule {
         PlotlyPlotter.renderFullTrendPlot('kdmTrendPlot', trendData, freqStrs, xAxisTitle, 'KDM (%)', this.state.currentNumFiles, '', 'kdm', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
 
         // NEW: Render peak potential trend plot (for drift detection)
+        console.log('[DEBUG] Calling renderFullTrendPlot for peakPotentialTrendPlot');
         PlotlyPlotter.renderFullTrendPlot('peakPotentialTrendPlot', trendData, freqStrs, xAxisTitle, `Peak Potential (${voltageUnits})`, this.state.currentNumFiles, '', 'peak_potential', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
     }
     

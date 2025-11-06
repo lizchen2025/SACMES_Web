@@ -560,13 +560,27 @@ def calculate_trends(raw_peaks, params, selected_electrode_key='averaged', peak_
         if low_normalized is not None and high_normalized is not None:
             kdm_trend[i] = ((high_normalized - low_normalized) + 1) * 100
 
-    return {
+    result = {
         "x_axis_values": x_axis_values,
         "peak_current_trends": peak_current_trends,
         "normalized_peak_trends": normalized_peak_trends,
         "kdm_trend": kdm_trend,
         "peak_potential_trends": peak_potential_trends  # NEW: Include peak potential trends
     }
+
+    # DEBUG: Log peak potential data availability
+    has_potential_data = any(
+        any(v is not None for v in values) if values else False
+        for values in peak_potential_trends.values()
+    )
+    logger.debug(f"calculate_trends: electrode={selected_electrode_key}, has_potential_data={has_potential_data}")
+    if has_potential_data:
+        sample_data = {freq: [v for v in values if v is not None][:3] for freq, values in peak_potential_trends.items()}
+        logger.debug(f"calculate_trends: peak_potential sample data: {sample_data}")
+    else:
+        logger.warning(f"calculate_trends: No peak potential data found! peak_potentials input: {bool(peak_potentials)}")
+
+    return result
 
 
 # --- Background Task (Updated for session support) ---
@@ -1020,6 +1034,11 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                 parsed_frequency, parsed_filenum = int(match.group(1)), int(match.group(2))
                 peak = analysis_result.get('peak_value')
                 peak_potential = analysis_result.get('peak_info', {}).get('peak_potential')  # NEW: Get peak voltage
+
+                # DEBUG: Log peak potential extraction
+                logger.debug(f"CONTINUOUS: File {parsed_filenum} @ {parsed_frequency}Hz - Peak: {peak}, Peak Potential: {peak_potential}")
+                if peak_potential is None:
+                    logger.warning(f"CONTINUOUS: peak_potential is None for {base_filename}. peak_info: {analysis_result.get('peak_info')}")
 
                 # Store data per electrode
                 electrode_key = str(selected_electrode) if selected_electrode is not None else 'averaged'

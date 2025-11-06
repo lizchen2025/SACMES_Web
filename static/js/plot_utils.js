@@ -194,16 +194,22 @@ export class PlotlyPlotter {
             traces = traces.concat(getTraceConfig(yData, 'KDM', colors.kdmBefore, colors.kdmAfter, injectFileNumIdx));
         } else if (trendType === "peak_potential") {
             // NEW: Peak potential trend (for drift detection)
+            console.log('[DEBUG] PlotlyPlotter: Rendering peak_potential plot');
+            console.log('[DEBUG] PlotlyPlotter: data has peak_potential_trends?', 'peak_potential_trends' in data);
             const trendKey = "peak_potential_trends";
             freqStrings.forEach((freqStr, i) => {
                 const freq = parseInt(freqStr);
                 const yData = data[trendKey] && data[trendKey][freqStr] ? data[trendKey][freqStr] : [];
+                console.log(`[DEBUG] PlotlyPlotter: Freq ${freqStr}Hz has ${yData.length} data points, valid: ${yData.filter(v => v !== null && v !== undefined).length}`);
                 let initialColor, injectedColor;
                 if (freq === kdmLowFreq) { initialColor = colors.lowFreqBefore; injectedColor = colors.lowFreqAfter; }
                 else if (freq === kdmHighFreq) { initialColor = colors.highFreqBefore; injectedColor = colors.highFreqAfter; }
                 else { const colorIndex = i % colors.otherFreqBase.length; initialColor = colors.otherFreqBase[colorIndex]; injectedColor = colors.otherFreqAfter[colorIndex]; }
-                traces = traces.concat(getTraceConfig(yData, `${freqStr}Hz`, initialColor, injectedColor, injectFileNumIdx));
+                const traceConfig = getTraceConfig(yData, `${freqStr}Hz`, initialColor, injectedColor, injectFileNumIdx);
+                console.log(`[DEBUG] PlotlyPlotter: Generated ${traceConfig.length} trace(s) for ${freqStr}Hz`);
+                traces = traces.concat(traceConfig);
             });
+            console.log('[DEBUG] PlotlyPlotter: Total traces for peak_potential:', traces.length);
         }
 
         // Calculate appropriate x-axis range based on data
