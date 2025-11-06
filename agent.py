@@ -433,6 +433,12 @@ def monitor_directory_loop(directory):
     app.log(f"--- Started monitoring folder: '{directory}' ---")
     app.log(f"Current filters: {current_filters}")
 
+    # CRITICAL FIX: Add small delay to allow socket connection to stabilize
+    # Prevents "Bad file descriptor" error from race condition when agent
+    # tries to send files too immediately after receiving set_filters
+    time.sleep(0.5)  # 500ms stabilization delay
+    app.log("[CONNECTION] Socket stabilization delay complete, starting file scan...")
+
     while is_monitoring_active:
         try:
             # List all files in directory

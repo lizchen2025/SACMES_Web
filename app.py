@@ -291,10 +291,16 @@ def check_and_adjust_agent_rate(user_id, agent_sid):
             reason = f"server load high ({load_ratio*100:.0f}% capacity)"
             logger.info(f"[FLOW CONTROL] Slowing down agent {user_id}: {load_ratio*100:.0f}% load")
 
-            socketio.emit('adjust_send_rate', {
-                'interval': new_interval,
-                'reason': reason
-            }, to=agent_sid)
+            try:
+                socketio.emit('adjust_send_rate', {
+                    'interval': new_interval,
+                    'reason': reason
+                }, to=agent_sid)
+                logger.debug(f"[FLOW CONTROL] Successfully sent rate adjustment to agent {agent_sid}")
+            except Exception as emit_error:
+                logger.error(f"[FLOW CONTROL] Failed to send rate adjustment to agent {agent_sid}: {emit_error}")
+                # Don't update tracking if emit failed
+                return
 
             agent_info['current_interval'] = new_interval
             agent_info['last_adjusted'] = current_time
@@ -305,10 +311,16 @@ def check_and_adjust_agent_rate(user_id, agent_sid):
             reason = f"server load normal ({load_ratio*100:.0f}% capacity)"
             logger.info(f"[FLOW CONTROL] Speeding up agent {user_id}: {load_ratio*100:.0f}% load")
 
-            socketio.emit('adjust_send_rate', {
-                'interval': new_interval,
-                'reason': reason
-            }, to=agent_sid)
+            try:
+                socketio.emit('adjust_send_rate', {
+                    'interval': new_interval,
+                    'reason': reason
+                }, to=agent_sid)
+                logger.debug(f"[FLOW CONTROL] Successfully sent rate adjustment to agent {agent_sid}")
+            except Exception as emit_error:
+                logger.error(f"[FLOW CONTROL] Failed to send rate adjustment to agent {agent_sid}: {emit_error}")
+                # Don't update tracking if emit failed
+                return
 
             agent_info['current_interval'] = new_interval
             agent_info['last_adjusted'] = current_time
@@ -1771,9 +1783,10 @@ def detect_ongoing_analysis(session_id):
 
 @socketio.on('connect')
 def handle_connect():
-    # WebSocket health monitoring
+    # WebSocket health monitoring with connection timing
     client_info = f"sid={request.sid}, remote={request.remote_addr}"
-    logger.info(f"[WEBSOCKET] New connection: {client_info}")
+    connection_timestamp = time.time()
+    logger.info(f"[WEBSOCKET] New connection at {connection_timestamp}: {client_info}")
 
     # Check if this is an agent with a specific session_id in auth data
     auth_header = request.headers.get('Authorization')
@@ -1850,7 +1863,7 @@ def handle_connect():
 
         # NEW: Register user_id mapping (multi-user support)
         register_agent_user(user_id, session_id, request.sid)
-        logger.info(f"Successfully registered unique user_id: {user_id}")
+        logger.info(f"[SOCKET] Successfully registered agent: user_id={user_id}, sid={request.sid}, session={session_id}, timestamp={connection_timestamp}")
 
         # DEPRECATED: Update global agent tracker (kept for backward compatibility)
         agent_session_tracker['current_session'] = session_id
@@ -2230,8 +2243,21 @@ def handle_start_frequency_map_session(data):
         set_session_data(agent_session_id, 'validation_error_sent', False)
 
         logger.info(f"Sending frequency map filters to agent (user_id: {user_id}, sid: {agent_sid}): {filters}")
-        emit('set_filters', filters, to=agent_sid)
-        emit('ack_start_frequency_map_session', {'status': 'success', 'message': 'Frequency map instructions sent.'})
+
+        # CRITICAL FIX: Add error handling for emit operations to prevent socket errors
+        try:
+            emit('set_filters', filters, to=agent_sid)
+            logger.debug(f"Successfully sent set_filters to agent {agent_sid}")
+        except Exception as e:
+            logger.error(f"Failed to send set_filters to agent {agent_sid}: {e}")
+            emit('ack_start_frequency_map_session', {'status': 'error', 'message': f'Failed to communicate with agent: {str(e)}'})
+            return
+
+        try:
+            emit('ack_start_frequency_map_session', {'status': 'success', 'message': 'Frequency map instructions sent.'})
+            logger.debug(f"Successfully sent ack_start_frequency_map_session to web viewer")
+        except Exception as e:
+            logger.error(f"Failed to send ack to web viewer: {e}")
     elif not agent_mapping:
         logger.warning(f"No agent found for user_id: {user_id}")
         emit('ack_start_frequency_map_session', {'status': 'error', 'message': 'Error: Local agent not detected for this User ID.'})
@@ -2257,24 +2283,30 @@ def handle_stop_frequency_map_session(data):
 
 @socketio.on('stream_instrument_data')
 def handle_instrument_data(data):
+    # CONNECTION STABILITY: Log data arrival with detailed socket info
+    logger.info(f"[SOCKET] Received stream_instrument_data from sid={request.sid}, remote={request.remote_addr}")
+
     # NEW: Verify this is from a registered agent using user_id lookup
     user_id = get_user_id_by_agent_sid(request.sid)
 
     if not user_id:
-        logger.warning(f"Received data from unregistered agent SID: {request.sid}")
+        logger.warning(f"[SOCKET ERROR] Received data from unregistered agent SID: {request.sid}")
         return
 
     # Get agent session by user_id
     agent_mapping = get_agent_session_by_user_id(user_id)
     if not agent_mapping:
-        logger.error(f"No active session found for user_id: {user_id}")
+        logger.error(f"[SOCKET ERROR] No active session found for user_id: {user_id}")
         return
 
     agent_session_id = agent_mapping['session_id']
-    logger.debug(f"Processing SWV data for user_id: {user_id}, session: {agent_session_id}")
+    logger.debug(f"[SOCKET] Processing SWV data for user_id: {user_id}, session: {agent_session_id}")
 
     # FLOW CONTROL: Check server load and adjust agent rate if needed
-    check_and_adjust_agent_rate(user_id, request.sid)
+    try:
+        check_and_adjust_agent_rate(user_id, request.sid)
+    except Exception as rate_error:
+        logger.error(f"[SOCKET ERROR] Flow control check failed: {rate_error}")
 
     original_filename = data.get('filename', 'unknown_file.txt')
     file_content = data.get('content', '')
