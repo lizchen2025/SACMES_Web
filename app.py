@@ -232,7 +232,11 @@ fallback_data = {}  # {session_id: {'agent_sid': None, 'web_viewer_sids': set(),
 
 # Concurrency control - limit simultaneous file processing tasks
 # This prevents memory/CPU overload when multiple users upload files simultaneously
-MAX_CONCURRENT_FILE_TASKS = 30  # Supports ~10 users with 3 concurrent files each
+# TUNING: Increase this if you have sufficient server resources and want faster throughput
+# - 30: Conservative (for resource-limited environments)
+# - 50: Balanced (recommended for most deployments)
+# - 100: High throughput (if analysis is fast and resources abundant)
+MAX_CONCURRENT_FILE_TASKS = 50  # CHANGED: Increased from 30 to 50 for better throughput
 file_processing_semaphore = Semaphore(MAX_CONCURRENT_FILE_TASKS)
 logger.info(f"File processing concurrency limit set to {MAX_CONCURRENT_FILE_TASKS}")
 
@@ -783,6 +787,7 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
             return
 
         if analysis_result and analysis_result.get('status') in ['success', 'warning']:
+            logger.debug(f"FREQUENCY_MAP: Analysis successful for {original_filename} @ {frequency}Hz")
             # Calculate charge in Coulombs: Charge (C) = Peak (A) / Frequency (Hz)
             peak_value = analysis_result.get('peak_value', 0)
             peak_potential = analysis_result.get('peak_info', {}).get('peak_potential')  # NEW: Get peak voltage
@@ -804,9 +809,13 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
             if already_processed:
                 logger.info(f"FREQUENCY_MAP: Frequency {frequency}Hz already processed, skipping duplicate")
                 # Still send ack to agent but don't emit update
-                agent_sid = agent_session_tracker.get('agent_sid')
+                # FIXED: Use session-based agent_sid instead of global tracker
+                agent_sid = get_session_agent_sid(session_id)
                 if agent_sid:
                     socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
+                    logger.debug(f"FREQUENCY_MAP: Sent ack for duplicate to agent {agent_sid}")
+                else:
+                    logger.warning(f"FREQUENCY_MAP: No agent_sid found for session {session_id}")
                 return
 
             # Store complete data including arrays (needed for hold mode and overlay)
@@ -830,13 +839,22 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
             # Send update to all web viewers
             all_web_viewer_sids = get_all_web_viewer_sids()
             if all_web_viewer_sids:
-                socketio.emit('frequency_map_update', {
+                update_data = {
                     'filename': original_filename,
                     'frequency': frequency,
                     'electrode_index': selected_electrode,
                     'data': frequency_map_data['results'][electrode_key][str(frequency)]
-                }, to=all_web_viewer_sids)
-                logger.info(f"FREQUENCY_MAP: Sent update to {len(all_web_viewer_sids)} web viewers")
+                }
+                socketio.emit('frequency_map_update', update_data, to=all_web_viewer_sids)
+                logger.info(f"FREQUENCY_MAP: ✓ Sent update to {len(all_web_viewer_sids)} web viewers for {original_filename} @ {frequency}Hz (peak={peak_value:.4e}A)")
+            else:
+                logger.warning(f"FREQUENCY_MAP: No web viewers to send update for {original_filename} @ {frequency}Hz")
+        else:
+            # Analysis failed or returned unexpected status
+            status = analysis_result.get('status') if analysis_result else 'None'
+            logger.error(f"FREQUENCY_MAP: ✗ Analysis FAILED for {original_filename} @ {frequency}Hz - status: {status}")
+            if analysis_result:
+                logger.error(f"FREQUENCY_MAP: Error details: {analysis_result.get('message', 'No message')}")
 
         # Track electrode completion for this file
         file_processing_key = f"file_processing_{original_filename}"
@@ -851,10 +869,13 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
 
         # Only send acknowledgment when all electrodes are processed
         if file_progress['completed'] >= file_progress['total']:
-            agent_sid = agent_session_tracker.get('agent_sid')
+            # FIXED: Use session-based agent_sid instead of global tracker
+            agent_sid = get_session_agent_sid(session_id)
             if agent_sid:
                 socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
-                logger.info(f"FREQUENCY_MAP: All electrodes complete ({file_progress['completed']}/{file_progress['total']}) - sent ack for '{original_filename}' to agent")
+                logger.info(f"FREQUENCY_MAP: All electrodes complete ({file_progress['completed']}/{file_progress['total']}) - sent ack for '{original_filename}' to agent {agent_sid}")
+            else:
+                logger.warning(f"FREQUENCY_MAP: No agent_sid found for session {session_id}, cannot send ack for '{original_filename}'")
             # Clean up tracking data
             set_session_data(session_id, file_processing_key, None)
         else:
@@ -878,10 +899,13 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
 
         # Only send acknowledgment when all electrodes are processed (or failed)
         if file_progress['completed'] >= file_progress['total']:
-            agent_sid = agent_session_tracker.get('agent_sid')
+            # FIXED: Use session-based agent_sid instead of global tracker
+            agent_sid = get_session_agent_sid(session_id)
             if agent_sid:
                 socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
-                logger.info(f"FREQUENCY_MAP: All electrodes complete ({file_progress['completed']}/{file_progress['total']}, with errors) - sent ack for '{original_filename}' to agent")
+                logger.info(f"FREQUENCY_MAP: All electrodes complete ({file_progress['completed']}/{file_progress['total']}, with errors) - sent ack for '{original_filename}' to agent {agent_sid}")
+            else:
+                logger.warning(f"FREQUENCY_MAP: No agent_sid found for session {session_id}, cannot send ack for '{original_filename}' (error case)")
             # Clean up tracking data
             set_session_data(session_id, file_processing_key, None)
         else:
@@ -1102,17 +1126,25 @@ def process_file_in_background(original_filename, content, params_for_this_file,
             logger.warning(f"Could not find user_id for session: {session_id} - skipping broadcast for privacy")
 
         # Send processing complete acknowledgment to agent
-        agent_sid = agent_session_tracker.get('agent_sid')
+        # FIXED: Use session-based agent_sid instead of global tracker
+        agent_sid = get_session_agent_sid(session_id)
         if agent_sid:
             socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
-            logger.info(f"BACKGROUND_TASK: Sent processing complete ack for '{base_filename}' to agent")
+            logger.info(f"CONTINUOUS: ✓ Sent ack for '{base_filename}' to agent {agent_sid}")
+        else:
+            logger.warning(f"CONTINUOUS: No agent_sid found for session {session_id}, cannot send ack for '{base_filename}'")
 
     except Exception as e:
-        logger.error(f"BACKGROUND_TASK: CRITICAL ERROR while processing '{original_filename}': {e}", exc_info=True)
+        logger.error(f"CONTINUOUS: ✗ ERROR processing '{original_filename}': {e}", exc_info=True)
         # Send error acknowledgment to agent even if processing failed
-        agent_sid = agent_session_tracker.get('agent_sid')
+        # FIXED: Use session-based agent_sid instead of global tracker
+        agent_sid = get_session_agent_sid(session_id)
         if agent_sid:
-            socketio.emit('file_processing_complete', {'filename': original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename}, to=agent_sid)
+            error_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename
+            socketio.emit('file_processing_complete', {'filename': error_filename}, to=agent_sid)
+            logger.info(f"CONTINUOUS: Sent error ack for '{error_filename}' to agent {agent_sid}")
+        else:
+            logger.warning(f"CONTINUOUS: No agent_sid found for session {session_id}, cannot send error ack")
     finally:
         if os.path.exists(temp_filepath): os.remove(temp_filepath)
         logger.info(f"BACKGROUND_TASK: Finished job for '{original_filename}'.")
@@ -2399,8 +2431,9 @@ def handle_instrument_data(data):
             params_for_this_file.setdefault('high_xstart', None)
             params_for_this_file.setdefault('high_xend', None)
 
-            socketio.start_background_task(
-                target=process_frequency_map_file,
+            # FIXED: Use start_limited_file_task to respect concurrency limits
+            start_limited_file_task(
+                target_function=process_frequency_map_file,
                 original_filename=original_filename,
                 content=file_content,
                 frequency=frequency,
