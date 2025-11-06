@@ -459,14 +459,52 @@ export class SWVModule {
                 }
             }
 
-            // 2. Update the source of truth for raw trend data (only for current electrode)
+            // 2. PERFORMANCE OPTIMIZATION: Handle incremental vs full data updates
+            let shouldRedraw = false;
+
+            // 2a. Incremental update: Only update single data point (reduces data transfer by 99%)
+            if (data.incremental_data && data.electrode_index === this.state.currentElectrode) {
+                const inc = data.incremental_data;
+                const freqKey = inc.frequency.toString();
+                const fileIndex = inc.file_number - 1; // Convert to 0-based index
+
+                // Initialize rawTrendData if not exists
+                if (!this.state.rawTrendData) {
+                    this.state.rawTrendData = {
+                        peak_current_trends: {},
+                        x_axis_values: []
+                    };
+                }
+
+                // Initialize this frequency's array if needed
+                if (!this.state.rawTrendData.peak_current_trends[freqKey]) {
+                    this.state.rawTrendData.peak_current_trends[freqKey] = [];
+                }
+
+                // Update single data point
+                this.state.rawTrendData.peak_current_trends[freqKey][fileIndex] = inc.peak_value;
+
+                // Ensure x_axis_values array is long enough
+                while (this.state.rawTrendData.x_axis_values.length <= fileIndex) {
+                    this.state.rawTrendData.x_axis_values.push(this.state.rawTrendData.x_axis_values.length + 1);
+                }
+
+                shouldRedraw = true;
+                console.log(`[PERF] Incremental update: file #${inc.file_number}, freq ${inc.frequency}Hz`);
+            }
+
+            // 2b. Full update: Complete synchronization (every 10 files for reliability)
             if (data.trend_data && data.electrode_index === this.state.currentElectrode) {
                 this.state.rawTrendData = {
                     peak_current_trends: data.trend_data.peak_current_trends,
                     x_axis_values: data.trend_data.x_axis_values
                 };
+                shouldRedraw = true;
+                console.log(`[PERF] Full sync update: ${data.trend_data.x_axis_values.length} files`);
+            }
 
-                // 4. Always recalculate and render the trend plots based on the UI controls
+            // 4. Redraw plots if data was updated
+            if (shouldRedraw) {
                 this._handlePostProcessUpdate();
             }
 

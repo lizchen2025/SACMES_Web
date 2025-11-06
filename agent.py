@@ -269,9 +269,9 @@ pending_file_ack = None
 
 # --- Flow Control Configuration ---
 # Time delay between sending files to prevent overwhelming the server
-# Default: 0.1 seconds = 10 files/second (configurable from server)
-file_send_interval = 0.1  # seconds between files
-max_send_rate = 10  # maximum files per second (safety limit)
+# Default: 0.05 seconds = 20 files/second (configurable from server)
+file_send_interval = 0.05  # seconds between files
+max_send_rate = 20  # maximum files per second (safety limit)
 
 # --- Socket.IO Client Setup ---
 # Note: transports parameter is specified in connect() method, not in Client() init

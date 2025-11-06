@@ -16,6 +16,7 @@ import redis
 import json
 import threading
 import socket
+import time
 import numpy as np
 from datetime import datetime
 from flask import Flask, send_from_directory, request, session
@@ -244,8 +245,8 @@ agent_rate_tracking = {}
 # Flow control thresholds
 LOAD_THRESHOLD_HIGH = 0.80  # 80% capacity - slow down agents
 LOAD_THRESHOLD_LOW = 0.30   # 30% capacity - allow agents to speed up
-RATE_SLOW = 0.2    # 5 files/sec when under load
-RATE_NORMAL = 0.1  # 10 files/sec normal operation
+RATE_SLOW = 0.1    # 10 files/sec when under load
+RATE_NORMAL = 0.05  # 20 files/sec normal operation
 RATE_CHECK_INTERVAL = 2.0  # Don't adjust same agent more than once per 2 seconds
 
 def check_and_adjust_agent_rate(user_id, agent_sid):
@@ -269,6 +270,10 @@ def check_and_adjust_agent_rate(user_id, agent_sid):
         current_time = time.time()
         agent_info = agent_rate_tracking[user_id]
         time_since_adjust = current_time - agent_info['last_adjusted']
+
+        # Periodic load monitoring (every 5 seconds per agent)
+        if time_since_adjust > 5.0:
+            logger.info(f"[LOAD] Server load: {load_ratio*100:.0f}% ({used_slots}/{MAX_CONCURRENT_FILE_TASKS} slots), agent {user_id} rate: {1/agent_info['current_interval']:.1f} files/sec")
 
         # Avoid adjusting too frequently
         if time_since_adjust < RATE_CHECK_INTERVAL:
@@ -641,6 +646,8 @@ def process_cv_file_in_background(original_filename, content, params_for_this_fi
                     live_trend_data['cv_results'][electrode_key] = {}
 
                 live_trend_data['cv_results'][electrode_key][str(parsed_filenum)] = analysis_result
+
+                # NOTE: No sliding window for CV - analysis results needed for export. Keep all data.
                 set_session_data(session_id, 'live_trend_data', live_trend_data)
 
         # Send CV update to ALL web viewers across all sessions
@@ -768,6 +775,7 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
         if analysis_result and analysis_result.get('status') in ['success', 'warning']:
             # Calculate charge in Coulombs: Charge (C) = Peak (A) / Frequency (Hz)
             peak_value = analysis_result.get('peak_value', 0)
+            peak_potential = analysis_result.get('peak_info', {}).get('peak_potential')  # NEW: Get peak voltage
             charge = (peak_value / frequency) if frequency > 0 else 0
 
             # Store results
@@ -791,6 +799,7 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
                     socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
                 return
 
+            # Store complete data including arrays (needed for hold mode and overlay)
             frequency_map_data['results'][electrode_key][freq_str] = {
                 'potentials': analysis_result.get('potentials', []),
                 'raw_currents': analysis_result.get('raw_currents', []),
@@ -798,6 +807,7 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
                 'regression_line': analysis_result.get('regression_line', []),
                 'adjusted_potentials': analysis_result.get('adjusted_potentials', []),
                 'peak_value': peak_value,
+                'peak_potential': peak_potential,  # NEW: Store peak voltage
                 'charge': charge,
                 'frequency': frequency,
                 'filename': original_filename
@@ -947,6 +957,8 @@ def process_file_in_background(original_filename, content, params_for_this_file,
             if match:
                 parsed_frequency, parsed_filenum = int(match.group(1)), int(match.group(2))
                 peak = analysis_result.get('peak_value')
+                peak_potential = analysis_result.get('peak_info', {}).get('peak_potential')  # NEW: Get peak voltage
+
                 # Store data per electrode
                 electrode_key = str(selected_electrode) if selected_electrode is not None else 'averaged'
                 freq_key = str(parsed_frequency)
@@ -962,6 +974,17 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                     live_trend_data['raw_peaks'][electrode_key][freq_key] = {}
 
                 live_trend_data['raw_peaks'][electrode_key][freq_key][file_key] = peak
+
+                # NEW: Store peak potentials (voltages where peak occurs)
+                if 'peak_potentials' not in live_trend_data:
+                    live_trend_data['peak_potentials'] = {}
+                if electrode_key not in live_trend_data['peak_potentials']:
+                    live_trend_data['peak_potentials'][electrode_key] = {}
+                if freq_key not in live_trend_data['peak_potentials'][electrode_key]:
+                    live_trend_data['peak_potentials'][electrode_key][freq_key] = {}
+
+                if peak_potential is not None:
+                    live_trend_data['peak_potentials'][electrode_key][freq_key][file_key] = peak_potential
 
                 # Store filter parameters and QC metrics for each individual file
                 if 'filter_params' not in live_trend_data:
@@ -986,6 +1009,8 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                     live_trend_data['qc_metrics'][electrode_key][freq_key][file_key] = analysis_result['qc_metrics']
 
                 # Save the updated trend data back to session
+                # NOTE: No sliding window here - peak values and analysis results are small
+                # and needed for export. Keep all data.
                 set_session_data(session_id, 'live_trend_data', live_trend_data)
 
                 # Track peak detection warnings
@@ -1008,7 +1033,34 @@ def process_file_in_background(original_filename, content, params_for_this_file,
         live_peak_detection_warnings = get_session_data(session_id, 'live_peak_detection_warnings', {})
         current_electrode = live_analysis_params.get('selected_electrode')
         electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
-        full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key)
+
+        # PERFORMANCE OPTIMIZATION: Incremental updates instead of full data
+        # Only send current file's data point, not entire history
+        # Frontend maintains the trend chart locally
+
+        # Extract current file's peak data for incremental update
+        freq_key = str(parsed_frequency)
+        file_key = str(parsed_filenum)
+        electrode_data = live_trend_data.get('raw_peaks', {}).get(electrode_key, {})
+        current_peak = electrode_data.get(freq_key, {}).get(file_key)
+
+        # Build incremental data (only current file)
+        incremental_data = {
+            "file_number": parsed_filenum,
+            "frequency": parsed_frequency,
+            "peak_value": current_peak,
+            "electrode": electrode_key
+        }
+
+        # Every 10 files, send full trend data for synchronization
+        # This ensures frontend stays in sync even if some updates are lost
+        send_full_data = (parsed_filenum % 10 == 0)
+
+        full_trends = None
+        if send_full_data:
+            full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key)
+            trend_data_size = len(json.dumps(full_trends))
+            logger.info(f"[PERF] Sending FULL trend data for file #{parsed_filenum}, size: {trend_data_size} bytes")
 
         # PRIVACY FIX: Send update ONLY to web viewers with matching user_id
         # First, find the user_id for this session
@@ -1023,12 +1075,17 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                 response_data = {
                     "filename": base_filename,  # Use base filename for frontend processing
                     "individual_analysis": analysis_result,
-                    "trend_data": full_trends,
+                    "incremental_data": incremental_data,  # NEW: Only current file's data
+                    "trend_data": full_trends if send_full_data else None,  # Full data every 10 files
                     "electrode_index": selected_electrode,
                     "peak_detection_warnings": live_peak_detection_warnings.get(electrode_key, [])
                 }
+
+                # Monitor data size
+                response_size = len(json.dumps(response_data))
+                logger.info(f"[PERF] Sent {'FULL' if send_full_data else 'INCREMENTAL'} update to {len(user_web_viewers)} viewers, size: {response_size} bytes")
+
                 socketio.emit('live_analysis_update', response_data, to=user_web_viewers)
-                logger.info(f"Sent analysis update to {len(user_web_viewers)} web viewers for user_id: {user_id}")
             else:
                 logger.info(f"No web viewers registered for user_id: {user_id}")
         else:
@@ -1220,10 +1277,13 @@ def generate_csv_data_all_electrodes(session_id):
             electrode_key
         )
 
-    # Section 1: Peak Current for each frequency
+    # Section 1: Peak Current and Peak Potential for each frequency
     for freq in frequencies:
-        writer.writerow([f'# Peak Current {freq}Hz (A)'])
-        header = ['File_Number'] + [f'E{int(k)+1}_Peak_A' for k in all_electrode_keys] + ['Mean_Peak_A', 'Std_Peak_A']
+        writer.writerow([f'# Peak Current {freq}Hz (A) and Peak Potential (V)'])
+        header = ['File_Number']
+        for k in all_electrode_keys:
+            header.extend([f'E{int(k)+1}_Peak_A', f'E{int(k)+1}_Peak_V'])
+        header.extend(['Mean_Peak_A', 'Std_Peak_A'])
         writer.writerow(header)
 
         for i in range(num_files):
@@ -1233,11 +1293,16 @@ def generate_csv_data_all_electrodes(session_id):
             # Collect peak values from all electrodes
             peak_values = []
             for electrode_key in all_electrode_keys:
+                # Peak current
                 peak_value = all_trends[electrode_key].get('peak_current_trends', {}).get(freq, [None] * num_files)[i]
                 peak_values.append(peak_value if peak_value is not None else 0)
                 row.append(f'{peak_value:.6e}' if peak_value is not None else 'N/A')
 
-            # Calculate mean and std
+                # Peak potential (voltage where peak occurs)
+                peak_potential = live_trend_data.get('peak_potentials', {}).get(electrode_key, {}).get(freq, {}).get(str(file_num))
+                row.append(f'{peak_potential:.4f}' if peak_potential is not None else 'N/A')
+
+            # Calculate mean and std for peak currents
             valid_peaks = [p for p in peak_values if p is not None and p != 0]
             if valid_peaks:
                 mean_peak = np.mean(valid_peaks)
@@ -1706,6 +1771,10 @@ def detect_ongoing_analysis(session_id):
 
 @socketio.on('connect')
 def handle_connect():
+    # WebSocket health monitoring
+    client_info = f"sid={request.sid}, remote={request.remote_addr}"
+    logger.info(f"[WEBSOCKET] New connection: {client_info}")
+
     # Check if this is an agent with a specific session_id in auth data
     auth_header = request.headers.get('Authorization')
     token = auth_header.split(' ')[1] if auth_header and auth_header.startswith('Bearer ') else None
@@ -1824,7 +1893,11 @@ def handle_connect():
 def handle_disconnect():
     session_id = get_session_id()
     disconnected_sid = request.sid
-    logger.info(f"Client disconnected: {disconnected_sid}, Session: {session_id}. Reason: {request.args.get('reason', 'N/A')}")
+
+    # WebSocket health monitoring - log disconnect details
+    disconnect_reason = request.args.get('reason', 'unknown')
+    client_info = f"sid={disconnected_sid}, remote={request.remote_addr}"
+    logger.warning(f"[WEBSOCKET] Client disconnected: {client_info}, session={session_id}, reason={disconnect_reason}")
 
     # NEW: Check if this is an agent disconnection by looking up user_id
     disconnected_user_id = get_user_id_by_agent_sid(disconnected_sid)
@@ -3858,6 +3931,7 @@ def generate_frequency_map_csv_data(session_id, current_electrode=None):
     header = [
         'Frequency_Hz',
         'Peak_Current_A',
+        'Peak_Potential_V',
         'Charge_C',
         'Filename'
     ]
@@ -3873,12 +3947,14 @@ def generate_frequency_map_csv_data(session_id, current_electrode=None):
 
         if result:
             peak_value_A = result.get('peak_value', 0)
+            peak_potential_V = result.get('peak_potential')  # NEW: Peak voltage
             charge_C = result.get('charge', 0)
             filename = result.get('filename', '')
 
             row = [
                 freq,
                 f"{peak_value_A:.6e}",  # Scientific notation in Amperes
+                f"{peak_potential_V:.4f}" if peak_potential_V is not None else 'N/A',  # Peak voltage in Volts
                 f"{charge_C:.6e}",  # Scientific notation in Coulombs
                 filename
             ]
@@ -4033,6 +4109,51 @@ def generate_frequency_map_all_electrodes_csv(session_id):
             row.append(f"{std_peak:.6e}")
         elif valid_peaks:
             row.append('0.000000e+00')
+        else:
+            row.append('N/A')
+
+        writer.writerow(row)
+
+    writer.writerow([])
+
+    # Write Peak Potential data section
+    writer.writerow(['# Peak Potential (V)'])
+    potential_header = ['Frequency (Hz)', 'Averaged'] + [f"Electrode {idx + 1}" for idx in individual_electrodes] + ['Std']
+    writer.writerow(potential_header)
+
+    for freq in frequencies:
+        freq_key = str(freq)
+        row = [freq]
+        potential_values = []
+
+        # Collect individual electrode peak potentials
+        for electrode_idx in individual_electrodes:
+            electrode_key = str(electrode_idx)
+            electrode_data = all_results.get(electrode_key, {})
+            result = electrode_data.get(freq_key)
+            if result and 'peak_potential' in result and result['peak_potential'] is not None:
+                potential_values.append(result['peak_potential'])
+            else:
+                potential_values.append(None)
+
+        # Calculate averaged and std
+        valid_potentials = [v for v in potential_values if v is not None]
+        if valid_potentials:
+            mean_potential = np.mean(valid_potentials)
+            std_potential = np.std(valid_potentials, ddof=1) if len(valid_potentials) > 1 else 0
+            row.append(f"{mean_potential:.4f}")
+        else:
+            row.append('N/A')
+
+        # Add individual values
+        for potential in potential_values:
+            row.append(f"{potential:.4f}" if potential is not None else 'N/A')
+
+        # Add std
+        if valid_potentials and len(valid_potentials) > 1:
+            row.append(f"{std_potential:.4f}")
+        elif valid_potentials:
+            row.append('0.0000')
         else:
             row.append('N/A')
 
