@@ -184,14 +184,26 @@ export class PlotlyPlotter {
                 const freq = parseInt(freqStr);
                 const yData = data[trendKey][freqStr] || [];
                 let initialColor, injectedColor;
-                if (freq === kdmLowFreq) { initialColor = colors.lowFreqBefore; injectedColor = colors.lowFreqAfter; } 
-                else if (freq === kdmHighFreq) { initialColor = colors.highFreqBefore; injectedColor = colors.highFreqAfter; } 
+                if (freq === kdmLowFreq) { initialColor = colors.lowFreqBefore; injectedColor = colors.lowFreqAfter; }
+                else if (freq === kdmHighFreq) { initialColor = colors.highFreqBefore; injectedColor = colors.highFreqAfter; }
                 else { const colorIndex = i % colors.otherFreqBase.length; initialColor = colors.otherFreqBase[colorIndex]; injectedColor = colors.otherFreqAfter[colorIndex]; }
                 traces = traces.concat(getTraceConfig(yData, `${freqStr}Hz`, initialColor, injectedColor, injectFileNumIdx));
             });
         } else if (trendType === "kdm") {
             const yData = data.kdm_trend || [];
             traces = traces.concat(getTraceConfig(yData, 'KDM', colors.kdmBefore, colors.kdmAfter, injectFileNumIdx));
+        } else if (trendType === "peak_potential") {
+            // NEW: Peak potential trend (for drift detection)
+            const trendKey = "peak_potential_trends";
+            freqStrings.forEach((freqStr, i) => {
+                const freq = parseInt(freqStr);
+                const yData = data[trendKey] && data[trendKey][freqStr] ? data[trendKey][freqStr] : [];
+                let initialColor, injectedColor;
+                if (freq === kdmLowFreq) { initialColor = colors.lowFreqBefore; injectedColor = colors.lowFreqAfter; }
+                else if (freq === kdmHighFreq) { initialColor = colors.highFreqBefore; injectedColor = colors.highFreqAfter; }
+                else { const colorIndex = i % colors.otherFreqBase.length; initialColor = colors.otherFreqBase[colorIndex]; injectedColor = colors.otherFreqAfter[colorIndex]; }
+                traces = traces.concat(getTraceConfig(yData, `${freqStr}Hz`, initialColor, injectedColor, injectFileNumIdx));
+            });
         }
 
         // Calculate appropriate x-axis range based on data

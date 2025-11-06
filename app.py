@@ -486,7 +486,19 @@ def remove_session_web_viewer_sid(session_id, sid):
     set_session_data(session_id, 'web_viewer_sids', list(sids))
 
 # --- Helper function calculate_trends (Updated for session support) ---
-def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
+def calculate_trends(raw_peaks, params, selected_electrode_key='averaged', peak_potentials=None):
+    """
+    Calculate trends for SWV continuous monitoring mode.
+
+    Args:
+        raw_peaks: Dict of peak current values {electrode_key: {freq: {file_num: peak}}}
+        params: Analysis parameters
+        selected_electrode_key: Which electrode to analyze
+        peak_potentials: Optional dict of peak potential values {electrode_key: {freq: {file_num: potential}}}
+
+    Returns:
+        Dict with x_axis_values, peak_current_trends, normalized_peak_trends, kdm_trend, and peak_potential_trends
+    """
     num_files = params.get('num_files', 1)
     frequencies = params.get('frequencies', [])
     normalization_point = params.get('normalizationPoint', 1)
@@ -506,16 +518,27 @@ def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
         x_axis_values = list(range(1, num_files + 1))
     peak_current_trends = {str(f): [None] * num_files for f in frequencies}
     normalized_peak_trends = {str(f): [None] * num_files for f in frequencies}
+    peak_potential_trends = {str(f): [None] * num_files for f in frequencies}  # NEW: Peak potential trends
     kdm_trend = [None] * num_files
 
     # Get electrode-specific data
     electrode_data = raw_peaks.get(selected_electrode_key, {})
+
+    # NEW: Get electrode-specific peak potential data
+    potential_electrode_data = {}
+    if peak_potentials:
+        potential_electrode_data = peak_potentials.get(selected_electrode_key, {})
 
     for i in range(num_files):
         file_num = i + 1  # File numbers are 1-based
         for freq_str in peak_current_trends:
             peak = electrode_data.get(freq_str, {}).get(str(file_num))
             if peak is not None: peak_current_trends[freq_str][i] = peak
+
+            # NEW: Extract peak potential for this file/frequency
+            potential = potential_electrode_data.get(freq_str, {}).get(str(file_num))
+            if potential is not None: peak_potential_trends[freq_str][i] = potential
+
     norm_factors = {}
     for freq_str in peak_current_trends:
         norm_idx = normalization_point - 1
@@ -537,8 +560,13 @@ def calculate_trends(raw_peaks, params, selected_electrode_key='averaged'):
         if low_normalized is not None and high_normalized is not None:
             kdm_trend[i] = ((high_normalized - low_normalized) + 1) * 100
 
-    return {"x_axis_values": x_axis_values, "peak_current_trends": peak_current_trends,
-            "normalized_peak_trends": normalized_peak_trends, "kdm_trend": kdm_trend}
+    return {
+        "x_axis_values": x_axis_values,
+        "peak_current_trends": peak_current_trends,
+        "normalized_peak_trends": normalized_peak_trends,
+        "kdm_trend": kdm_trend,
+        "peak_potential_trends": peak_potential_trends  # NEW: Include peak potential trends
+    }
 
 
 # --- Background Task (Updated for session support) ---
@@ -1092,7 +1120,13 @@ def process_file_in_background(original_filename, content, params_for_this_file,
 
         full_trends = None
         if send_full_data:
-            full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key)
+            # NEW: Pass peak_potentials to calculate_trends for drift detection
+            full_trends = calculate_trends(
+                live_trend_data.get('raw_peaks', {}),
+                live_analysis_params,
+                electrode_key,
+                peak_potentials=live_trend_data.get('peak_potentials', {})
+            )
             trend_data_size = len(json.dumps(full_trends))
             logger.info(f"[PERF] Sending FULL trend data for file #{parsed_filenum}, size: {trend_data_size} bytes")
 
@@ -1224,7 +1258,13 @@ def generate_csv_data(session_id, current_electrode=None):
     writer.writerow(header)
 
     # Recalculate full trends to ensure data is consistent
-    full_trends = calculate_trends(live_trend_data.get('raw_peaks', {}), live_analysis_params, electrode_key)
+    # NEW: Pass peak_potentials to calculate_trends for drift detection
+    full_trends = calculate_trends(
+        live_trend_data.get('raw_peaks', {}),
+        live_analysis_params,
+        electrode_key,
+        peak_potentials=live_trend_data.get('peak_potentials', {})
+    )
 
     # Get stored data
     filter_data = live_trend_data.get('filter_params', {}).get(electrode_key, {})

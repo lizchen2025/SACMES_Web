@@ -956,10 +956,17 @@ export class SWVModule {
             }
         }
 
+        // NEW: Get peak potential data if available
+        let rawPotentials = {};
+        if (this.state.rawTrendData && this.state.rawTrendData.peak_potential_trends) {
+            rawPotentials = this.state.rawTrendData.peak_potential_trends;
+        }
+
         const recalculated = {
             x_axis_values: x_axis_values,
             peak_current_trends: rawPeaks,
             normalized_peak_trends: {},
+            peak_potential_trends: rawPotentials,  // NEW: Include peak potential data
             kdm_trend: Array(num_files).fill(null)
         };
 
@@ -1561,9 +1568,15 @@ export class SWVModule {
         const isAUCMode = selectedOptions === "Area Under the Curve";
         const firstPlotYTitle = isAUCMode ? 'AUC (a.u.)' : `Peak Current (${this.dom.settings.currentUnitsInput.value})`;
 
+        // Get voltage units for peak potential plot
+        const voltageUnits = this.dom.settings.voltageUnitsInput.value;
+
         PlotlyPlotter.renderFullTrendPlot('peakCurrentTrendPlot', trendData, freqStrs, xAxisTitle, firstPlotYTitle, this.state.currentNumFiles, '', 'peak', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
         PlotlyPlotter.renderFullTrendPlot('normalizedPeakTrendPlot', trendData, freqStrs, xAxisTitle, 'Normalized Current', this.state.currentNumFiles, '', 'normalized', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
         PlotlyPlotter.renderFullTrendPlot('kdmTrendPlot', trendData, freqStrs, xAxisTitle, 'KDM (%)', this.state.currentNumFiles, '', 'kdm', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
+
+        // NEW: Render peak potential trend plot (for drift detection)
+        PlotlyPlotter.renderFullTrendPlot('peakPotentialTrendPlot', trendData, freqStrs, xAxisTitle, `Peak Potential (${voltageUnits})`, this.state.currentNumFiles, '', 'peak_potential', this.state.currentXAxisOptions, resizeInterval, this.state.currentKdmHighFreq, this.state.currentKdmLowFreq, injectionPoint);
     }
     
     _setupElectrodeControls() {
@@ -1674,8 +1687,9 @@ export class SWVModule {
             const peakPlot = document.getElementById('peakCurrentTrendPlot');
             const normalizedPlot = document.getElementById('normalizedPeakTrendPlot');
             const kdmPlot = document.getElementById('kdmTrendPlot');
+            const peakPotentialPlot = document.getElementById('peakPotentialTrendPlot');
 
-            if (!peakPlot || !normalizedPlot || !kdmPlot) {
+            if (!peakPlot || !normalizedPlot || !kdmPlot || !peakPotentialPlot) {
                 console.log('SWV: Restoring trend plots structure...');
                 trendPlotsContainer.innerHTML = `
                     <!-- Peak Current Trend Plot -->
@@ -1698,6 +1712,14 @@ export class SWVModule {
                     <div class="border rounded-lg p-4 bg-gray-50">
                         <h4 class="text-lg font-semibold text-gray-700 mb-2">KDM Trend</h4>
                         <div id="kdmTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+
+                    <!-- NEW: Peak Potential Trend Plot (for drift detection) -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Peak Potential Trend (Drift Detection)</h4>
+                        <div id="peakPotentialTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
                             Loading...
                         </div>
                     </div>
