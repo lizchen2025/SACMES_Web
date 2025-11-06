@@ -1125,11 +1125,16 @@ def process_file_in_background(original_filename, content, params_for_this_file,
         electrode_data = live_trend_data.get('raw_peaks', {}).get(electrode_key, {})
         current_peak = electrode_data.get(freq_key, {}).get(file_key)
 
+        # NEW: Extract current file's peak potential for incremental update
+        potential_data = live_trend_data.get('peak_potentials', {}).get(electrode_key, {})
+        current_peak_potential = potential_data.get(freq_key, {}).get(file_key)
+
         # Build incremental data (only current file)
         incremental_data = {
             "file_number": parsed_filenum,
             "frequency": parsed_frequency,
             "peak_value": current_peak,
+            "peak_potential": current_peak_potential,  # NEW: Include peak potential for drift detection
             "electrode": electrode_key
         }
 

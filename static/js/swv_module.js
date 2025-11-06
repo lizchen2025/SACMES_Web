@@ -472,6 +472,7 @@ export class SWVModule {
                 if (!this.state.rawTrendData) {
                     this.state.rawTrendData = {
                         peak_current_trends: {},
+                        peak_potential_trends: {},  // NEW: Initialize peak potential trends
                         x_axis_values: []
                     };
                 }
@@ -481,8 +482,21 @@ export class SWVModule {
                     this.state.rawTrendData.peak_current_trends[freqKey] = [];
                 }
 
+                // NEW: Initialize peak potential array if needed
+                if (!this.state.rawTrendData.peak_potential_trends) {
+                    this.state.rawTrendData.peak_potential_trends = {};
+                }
+                if (!this.state.rawTrendData.peak_potential_trends[freqKey]) {
+                    this.state.rawTrendData.peak_potential_trends[freqKey] = [];
+                }
+
                 // Update single data point
                 this.state.rawTrendData.peak_current_trends[freqKey][fileIndex] = inc.peak_value;
+
+                // NEW: Update peak potential data point
+                if (inc.peak_potential !== undefined && inc.peak_potential !== null) {
+                    this.state.rawTrendData.peak_potential_trends[freqKey][fileIndex] = inc.peak_potential;
+                }
 
                 // Ensure x_axis_values array is long enough
                 while (this.state.rawTrendData.x_axis_values.length <= fileIndex) {
@@ -490,17 +504,19 @@ export class SWVModule {
                 }
 
                 shouldRedraw = true;
-                console.log(`[PERF] Incremental update: file #${inc.file_number}, freq ${inc.frequency}Hz`);
+                console.log(`[PERF] Incremental update: file #${inc.file_number}, freq ${inc.frequency}Hz, peak_potential: ${inc.peak_potential}`);
             }
 
             // 2b. Full update: Complete synchronization (every 10 files for reliability)
             if (data.trend_data && data.electrode_index === this.state.currentElectrode) {
                 this.state.rawTrendData = {
                     peak_current_trends: data.trend_data.peak_current_trends,
+                    peak_potential_trends: data.trend_data.peak_potential_trends || {},  // NEW: Include peak potential data
                     x_axis_values: data.trend_data.x_axis_values
                 };
                 shouldRedraw = true;
-                console.log(`[PERF] Full sync update: ${data.trend_data.x_axis_values.length} files`);
+                const potentialCount = data.trend_data.peak_potential_trends ? Object.keys(data.trend_data.peak_potential_trends).length : 0;
+                console.log(`[PERF] Full sync update: ${data.trend_data.x_axis_values.length} files, ${potentialCount} freq with potential data`);
             }
 
             // 4. Redraw plots if data was updated
