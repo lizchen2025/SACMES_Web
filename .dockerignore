@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+
+# Temporary files
+temp_uploads/
+*.tmp
+
+# Agent files (not needed in container)
+agent.py
+agent.json
+agent_build_env/
+
+# OpenShift/Kubernetes configs (don't include in image)
+openshift/
+*.yaml
+
+# Documentation
+*.md
+docs/
+
+# Test files
+tests/
+test_*.py
+*_test.py
+
+# Environment files
+.env
+.env.*
+
+# Secrets (never include)
+secrets-actual.yaml

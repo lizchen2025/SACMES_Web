@@ -274,12 +274,18 @@ file_send_interval = 0.05  # seconds between files
 max_send_rate = 20  # maximum files per second (safety limit)
 
 # --- Socket.IO Client Setup ---
-# Note: transports parameter is specified in connect() method, not in Client() init
+# Enhanced reconnection configuration for OpenShift deployment stability
 sio = socketio.Client(
-    reconnection_attempts=5,
-    reconnection_delay=5,
-    logger=True,
-    engineio_logger=True
+    # CRITICAL: Infinite reconnection for production stability
+    reconnection=True,              # Enable automatic reconnection
+    reconnection_attempts=0,        # 0 = infinite reconnection attempts (never give up)
+    reconnection_delay=1,           # Start with 1 second delay
+    reconnection_delay_max=30,      # Cap at 30 seconds (exponential backoff)
+    randomization_factor=0.5,       # Add randomness to avoid thundering herd
+
+    # Logging configuration (match server settings)
+    logger=True,                    # Enable Socket.IO client logging
+    engineio_logger=False           # Disable engine.io verbose logging (matches server)
 )
 
 
@@ -544,8 +550,14 @@ def monitor_directory_loop(directory):
 # --- Socket.IO Event Handlers ---
 @sio.event
 def connect():
+    """Called when connection is established"""
+    transport = sio.transport()  # Get current transport method
     app.update_status("Connected", "green")
-    app.log(f"Successfully connected to server: {app.server_url.get()}")
+    app.log(f"✓ Successfully connected to server: {app.server_url.get()}")
+    app.log(f"📡 Transport: {transport.upper()}")
+
+    # Note: Socket.IO will automatically attempt to upgrade from polling to websocket
+    # Watch for the transport change in logs if upgrade succeeds
 
 
 @sio.event
@@ -1157,14 +1169,23 @@ class AgentApp:
             self.log(f"Initiating Socket.IO connection with User ID: {user_id}...")
 
             # TRANSPORT CONFIGURATION:
-            # Option 1: WebSocket-first (better performance, but may have issues with large files in some environments)
-            # Option 2: Polling-only (more reliable for large files, slightly higher latency)
+            # Use polling-first strategy for OpenShift/Kubernetes environments
+            # - Polling establishes reliable initial connection through any proxy/ingress
+            # - Socket.IO automatically upgrades to WebSocket after handshake
+            # - This provides both reliability (polling) and performance (websocket)
+            #
+            # Connection flow:
+            #   1. HTTP polling handshake (reliable, works through any proxy)
+            #   2. Automatic upgrade to WebSocket (low latency, high throughput)
+            #   3. Fallback to polling if WebSocket fails
 
-            # Currently using WebSocket-first (recommended for most cases)
-            sio.connect(connection_url, headers=headers, socketio_path='socket.io', transports=['websocket', 'polling'])
-
-            # WORKAROUND: If experiencing disconnections with large files, try polling-only:
-            # sio.connect(connection_url, headers=headers, socketio_path='socket.io', transports=['polling'])
+            sio.connect(
+                connection_url,
+                headers=headers,
+                socketio_path='socket.io',
+                transports=['polling', 'websocket'],  # Polling-first for maximum compatibility
+                wait_timeout=150  # 150 seconds connection timeout (server ping_timeout=120s)
+            )
 
             self.log("Socket.IO connection established!")
             self.log(f"[CONNECTION] Transport: {sio.transport()}")

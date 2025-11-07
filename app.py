@@ -148,9 +148,30 @@ REDIS_PASSWORD = read_secret('redis_password', 'REDIS_PASSWORD')
 AGENT_AUTH_TOKEN = read_secret('agent_auth_token', 'AGENT_AUTH_TOKEN', 'your_super_secret_token_here')
 
 app.config['SECRET_KEY'] = SECRET_KEY
+
+# Redis connection - construct URL securely BEFORE SocketIO initialization
+# This is required for message_queue configuration in multi-pod deployments
+REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
+REDIS_PORT = os.environ.get('REDIS_PORT', '6379')
+REDIS_DB = os.environ.get('REDIS_DB', '0')
+
+if REDIS_PASSWORD:
+    REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+else:
+    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+
+# Allow override via environment variable
+REDIS_URL = os.environ.get('REDIS_URL', REDIS_URL)
+logger.info(f"Redis URL configured: redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
+
 # Enhanced SocketIO configuration for OpenShift deployment
 socketio = SocketIO(
     app,
+
+    # CRITICAL: Redis message queue for multi-pod deployment
+    # Enables communication between multiple Flask app pods in OpenShift
+    message_queue=REDIS_URL,
+
     cors_allowed_origins="*",
     async_mode='eventlet',
     logger=True,
@@ -173,19 +194,7 @@ socketio = SocketIO(
     # Transport optimization for container environments
     transports=['websocket', 'polling']
 )
-
-# Redis connection - construct URL securely with connection pool optimization
-REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
-REDIS_PORT = os.environ.get('REDIS_PORT', '6379')
-REDIS_DB = os.environ.get('REDIS_DB', '0')
-
-if REDIS_PASSWORD:
-    REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
-else:
-    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
-
-# Allow override via environment variable
-REDIS_URL = os.environ.get('REDIS_URL', REDIS_URL)
+logger.info("SocketIO initialized with Redis message queue for multi-pod support")
 
 # Create connection pool with optimized settings for multi-user deployment
 try:
@@ -3476,6 +3485,84 @@ def cleanup_session():
     except Exception as e:
         logger.error(f"Error cleaning up session: {e}")
         return {'status': 'error', 'message': str(e)}, 500
+
+
+# ============================================================================
+# Kubernetes / OpenShift Health Check Endpoints
+# ============================================================================
+
+@app.route('/health')
+def health_check():
+    """
+    Kubernetes liveness probe endpoint.
+    Returns 200 if the application is running and can connect to Redis.
+    """
+    try:
+        # Check Redis connection
+        if redis_client:
+            redis_client.ping()
+            redis_status = 'connected'
+        else:
+            redis_status = 'not_configured'
+
+        return {
+            'status': 'healthy',
+            'redis': redis_status,
+            'version': '1.0',
+            'timestamp': datetime.now().isoformat()
+        }, 200
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }, 503
+
+
+@app.route('/ready')
+def readiness_check():
+    """
+    Kubernetes readiness probe endpoint.
+    Returns 200 if the application is ready to accept traffic.
+    Checks if there are available processing slots.
+    """
+    try:
+        # Check if Redis is accessible
+        if redis_client:
+            redis_client.ping()
+
+        # Check available processing capacity
+        available_slots = file_processing_semaphore.balance
+        total_slots = MAX_CONCURRENT_FILE_TASKS
+        capacity_ratio = available_slots / total_slots
+
+        # Consider ready if at least 10% capacity available
+        if capacity_ratio >= 0.1:
+            return {
+                'status': 'ready',
+                'available_slots': available_slots,
+                'total_slots': total_slots,
+                'capacity': f'{capacity_ratio*100:.0f}%',
+                'timestamp': datetime.now().isoformat()
+            }, 200
+        else:
+            # Temporarily not ready due to high load
+            return {
+                'status': 'not_ready',
+                'reason': 'high_load',
+                'available_slots': available_slots,
+                'total_slots': total_slots,
+                'capacity': f'{capacity_ratio*100:.0f}%',
+                'timestamp': datetime.now().isoformat()
+            }, 503
+    except Exception as e:
+        logger.error(f"Readiness check failed: {e}")
+        return {
+            'status': 'not_ready',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }, 503
 
 
 @app.route('/debug/consent-logs', methods=['GET'])

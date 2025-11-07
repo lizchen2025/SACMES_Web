@@ -36,7 +36,8 @@
       "Bash(D:minicondaenvssacmes_webpython.exe e:SACMES_webwebSACMES_Web-Multiusertemp_replace.py)",
       "Bash(del e:SACMES_webwebSACMES_Web-Multiusertemp_replace.py 2)",
       "Bash(nul)",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(del DEPLOYMENT_GUIDE.md)"
     ],
     "deny": [],
     "ask": []

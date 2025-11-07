@@ -1,8 +1,20 @@
-Flask
-Flask-SocketIO
-eventlet
-numpy
-scipy
-gunicorn
-redis
-uuid
+# SACMES Web Application Dependencies
+# Optimized for Python 3.9+ on UBI9 / OpenShift
+
+# Web Framework
+Flask>=2.3.0,<3.0.0
+gunicorn>=21.0.0
+
+# WebSocket Support with Redis Message Queue
+Flask-SocketIO>=5.3.6
+python-socketio>=5.10.0
+eventlet>=0.33.3
+
+# Redis for session storage and message queue
+redis>=5.0.0
+
+# Scientific Computing
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Note: uuid is built-in to Python 3.x, no need to install

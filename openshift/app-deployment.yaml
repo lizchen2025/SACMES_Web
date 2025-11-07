@@ -1,0 +1,178 @@
+# ============================================================================
+# SACMES Web Application Deployment for OpenShift
+# ============================================================================
+# This deploys the Flask/SocketIO application with:
+# - Multiple replicas for high availability
+# - Redis integration for session sharing
+# - Health checks for Kubernetes orchestration
+# - Resource limits for stability
+# ============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sacmes-web
+  labels:
+    app: sacmes-web
+    component: backend
+spec:
+  # High availability: Run 3 pods
+  replicas: 3
+
+  # Rolling update strategy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      app: sacmes-web
+
+  template:
+    metadata:
+      labels:
+        app: sacmes-web
+        component: backend
+
+    spec:
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      containers:
+      - name: sacmes-web
+        # TODO: Replace with your actual image
+        image: your-registry/sacmes-web:latest
+        imagePullPolicy: Always
+
+        ports:
+        - containerPort: 5000
+          name: http
+          protocol: TCP
+
+        # Environment variables
+        env:
+        - name: REDIS_HOST
+          value: "redis"  # Redis service name
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_DB
+          value: "0"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sacmes-secrets
+              key: redis-password
+              optional: true
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: sacmes-secrets
+              key: secret-key
+        - name: AGENT_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: sacmes-secrets
+              key: agent-auth-token
+        - name: PYTHONUNBUFFERED
+          value: "1"
+
+        # Resource limits
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+
+        # Liveness probe - restart if unhealthy
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # Readiness probe - remove from load balancer if not ready
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 5000
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+
+        # Startup probe - allow extra time for initial startup
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 5000
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 12  # 60 seconds total
+
+        # Temporary file storage
+        volumeMounts:
+        - name: temp-uploads
+          mountPath: /app/temp_uploads
+
+      volumes:
+      - name: temp-uploads
+        emptyDir:
+          sizeLimit: 2Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sacmes-web
+  labels:
+    app: sacmes-web
+spec:
+  type: ClusterIP
+  sessionAffinity: None  # Load balance evenly (Redis handles session sharing)
+  ports:
+  - port: 5000
+    targetPort: 5000
+    protocol: TCP
+    name: http
+  selector:
+    app: sacmes-web
+
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: sacmes-web
+  labels:
+    app: sacmes-web
+  annotations:
+    # WebSocket support
+    haproxy.router.openshift.io/timeout: 300s
+    haproxy.router.openshift.io/balance: roundrobin
+
+    # Enable HTTP/2 for better performance
+    haproxy.router.openshift.io/h2-enable: "true"
+spec:
+  to:
+    kind: Service
+    name: sacmes-web
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
