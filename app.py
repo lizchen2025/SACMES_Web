@@ -272,11 +272,11 @@ fallback_data = {}  # {session_id: {'agent_sid': None, 'web_viewer_sids': set(),
 
 # Concurrency control - limit simultaneous file processing tasks
 # This prevents memory/CPU overload when multiple users upload files simultaneously
-# TUNING: Increase this if you have sufficient server resources and want faster throughput
-# - 30: Conservative (for resource-limited environments)
-# - 50: Balanced (recommended for most deployments)
-# - 100: High throughput (if analysis is fast and resources abundant)
-MAX_CONCURRENT_FILE_TASKS = 50  # CHANGED: Increased from 30 to 50 for better throughput
+# TUNING: Adjusted for eventlet stability with CPU-intensive numpy/scipy analysis
+# - 20: Conservative (2 workers × 10 tasks) - prevents eventlet blocking
+# - 40: Balanced (2 workers × 20 tasks) - good for most deployments
+# - 60: High throughput (2 workers × 30 tasks) - if resources abundant
+MAX_CONCURRENT_FILE_TASKS = 20  # OPTIMIZED: Reduced to prevent eventlet worker blocking
 file_processing_semaphore = Semaphore(MAX_CONCURRENT_FILE_TASKS)
 logger.info(f"File processing concurrency limit set to {MAX_CONCURRENT_FILE_TASKS}")
 
