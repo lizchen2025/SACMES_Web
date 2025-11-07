@@ -1951,9 +1951,35 @@ def handle_connect():
 
         # For agents: create a unique session for this agent connection
         # This prevents data pollution between multiple concurrent agent sessions
+
+        # CRITICAL FIX: Check if this is a reconnection and preserve analysis parameters
+        old_agent_session = get_agent_session_by_user_id(user_id)
+        old_session_id = old_agent_session.get('session_id') if old_agent_session else None
+
         agent_session_id = str(uuid.uuid4())
         session['session_id'] = agent_session_id
         session_id = agent_session_id
+
+        # CRITICAL FIX: If reconnecting, migrate analysis parameters from old session to new session
+        if old_session_id and old_session_id != agent_session_id:
+            logger.info(f"Agent reconnection detected for user {user_id}: old_session={old_session_id}, new_session={agent_session_id}")
+
+            # Migrate critical session data from old to new session
+            data_to_migrate = [
+                'live_analysis_params',
+                'live_trend_data',
+                'live_peak_detection_warnings',
+                'frequency_map_data',
+                'frequency_map_params'
+            ]
+
+            for key in data_to_migrate:
+                old_data = get_session_data(old_session_id, key, None)
+                if old_data is not None:
+                    set_session_data(agent_session_id, key, old_data)
+                    logger.info(f"Migrated '{key}' from old session to new session ({len(str(old_data))} bytes)")
+
+            logger.info(f"✓ Session migration complete for user {user_id}")
 
         # NEW: Register user_id mapping (multi-user support)
         register_agent_user(user_id, session_id, request.sid)
@@ -2576,7 +2602,7 @@ def handle_cv_instrument_data(data):
             'filename': original_filename,
             'error': error_message,
             'message': f"File '{original_filename}' was rejected: {error_message}"
-        }, to=agent_sid)
+        }, to=request.sid)
         return
 
     live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
