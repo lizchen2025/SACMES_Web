@@ -151,18 +151,44 @@ app.config['SECRET_KEY'] = SECRET_KEY
 
 # Redis connection - construct URL securely BEFORE SocketIO initialization
 # This is required for message_queue configuration in multi-pod deployments
-REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
-REDIS_PORT = os.environ.get('REDIS_PORT', '6379')
-REDIS_DB = os.environ.get('REDIS_DB', '0')
 
-if REDIS_PASSWORD:
-    REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
-else:
-    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+# Strategy: Build Redis URL from components (REDIS_HOST, REDIS_PORT, REDIS_DB)
+# Only use REDIS_URL environment variable if it's explicitly a valid redis:// URL
+# This prevents issues with auto-injected Kubernetes service URLs
 
-# Allow override via environment variable
-REDIS_URL = os.environ.get('REDIS_URL', REDIS_URL)
-logger.info(f"Redis URL configured: redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
+def build_redis_url():
+    """Build Redis URL from environment variables with robust error handling"""
+    # Check if REDIS_URL is explicitly set and valid
+    env_redis_url = os.environ.get('REDIS_URL', '').strip()
+
+    # Only use REDIS_URL if it looks like a valid redis:// URL
+    if env_redis_url and env_redis_url.startswith('redis://') and ':tcp:' not in env_redis_url:
+        logger.info(f"Using REDIS_URL from environment: {env_redis_url.split('@')[-1] if '@' in env_redis_url else env_redis_url}")
+        return env_redis_url
+
+    # Build URL from components (preferred method)
+    redis_host = os.environ.get('REDIS_HOST', 'localhost')
+    redis_port = os.environ.get('REDIS_PORT', '6379')
+    redis_db = os.environ.get('REDIS_DB', '0')
+
+    # Validate port is numeric
+    try:
+        int(redis_port)
+    except ValueError:
+        logger.error(f"Invalid REDIS_PORT: {redis_port}, using default 6379")
+        redis_port = '6379'
+
+    # Build URL based on whether password is set
+    if REDIS_PASSWORD:
+        redis_url = f"redis://:{REDIS_PASSWORD}@{redis_host}:{redis_port}/{redis_db}"
+        logger.info(f"Redis URL configured with password: redis://***@{redis_host}:{redis_port}/{redis_db}")
+    else:
+        redis_url = f"redis://{redis_host}:{redis_port}/{redis_db}"
+        logger.info(f"Redis URL configured: redis://{redis_host}:{redis_port}/{redis_db}")
+
+    return redis_url
+
+REDIS_URL = build_redis_url()
 
 # Enhanced SocketIO configuration for OpenShift deployment
 socketio = SocketIO(
