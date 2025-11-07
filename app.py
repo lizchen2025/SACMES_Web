@@ -5,6 +5,32 @@ from eventlet.semaphore import Semaphore
 
 eventlet.monkey_patch()
 
+# CRITICAL FIX: Patch eventlet socket to ignore "Bad file descriptor" errors
+# This prevents server blocking when clients abruptly disconnect
+import errno
+_original_socket_shutdown = None
+
+def patched_socket_shutdown(sock, how):
+    """Wrapper for socket.shutdown() that ignores EBADF (Bad file descriptor) errors"""
+    try:
+        return _original_socket_shutdown(sock, how)
+    except OSError as e:
+        if e.errno == errno.EBADF:  # Bad file descriptor - client already closed
+            pass  # Ignore this benign error
+        else:
+            raise  # Re-raise other errors
+
+# Apply the patch
+try:
+    from eventlet.green import socket as eventlet_socket
+    if hasattr(eventlet_socket.socket, 'shutdown'):
+        _original_socket_shutdown = eventlet_socket.socket.shutdown
+        eventlet_socket.socket.shutdown = lambda self, how: patched_socket_shutdown(self._sock if hasattr(self, '_sock') else self, how)
+except Exception as patch_error:
+    # If patching fails, continue without it (better than crashing)
+    import sys
+    print(f"Warning: Could not patch socket.shutdown: {patch_error}", file=sys.stderr)
+
 import os
 import re
 import logging
@@ -167,7 +193,14 @@ def build_redis_url():
         return env_redis_url
 
     # Build URL from components (preferred method)
-    redis_host = os.environ.get('REDIS_HOST', 'localhost')
+    # Smart default: use 'redis' in Kubernetes/OpenShift, 'localhost' otherwise
+    default_host = 'redis' if os.environ.get('KUBERNETES_SERVICE_HOST') else 'localhost'
+
+    redis_host = os.environ.get('REDIS_HOST', '').strip()
+    if not redis_host:
+        redis_host = default_host
+        logger.warning(f"REDIS_HOST not set, using default: {default_host}")
+
     redis_port = os.environ.get('REDIS_PORT', '6379')
     redis_db = os.environ.get('REDIS_DB', '0')
 
@@ -191,9 +224,12 @@ def build_redis_url():
 REDIS_URL = build_redis_url()
 
 # Extract components for connection pool (needed below)
-REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
+# Use the same smart default as build_redis_url()
+default_host = 'redis' if os.environ.get('KUBERNETES_SERVICE_HOST') else 'localhost'
+REDIS_HOST = os.environ.get('REDIS_HOST', '').strip() or default_host
 REDIS_PORT = os.environ.get('REDIS_PORT', '6379')
 REDIS_DB = os.environ.get('REDIS_DB', '0')
+logger.info(f"Redis connection pool will use: {REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
 
 # Enhanced SocketIO configuration for OpenShift deployment
 socketio = SocketIO(

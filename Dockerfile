@@ -39,9 +39,11 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 CMD ["gunicorn", \
      "--worker-class", "eventlet", \
      "--workers", "2", \
+     "--worker-connections", "1000", \
      "--bind", "0.0.0.0:5000", \
      "--timeout", "120", \
      "--keep-alive", "75", \
+     "--graceful-timeout", "30", \
      "--log-level", "info", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \
