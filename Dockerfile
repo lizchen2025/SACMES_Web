@@ -31,7 +31,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 
 # Use gunicorn for production with gevent
 # MIGRATED from eventlet to gevent for better performance and active maintenance
-# --worker-class gevent: Uses libev-based event loop (faster than eventlet)
+# --worker-class geventwebsocket: Enables WebSocket support with gevent
 # --workers 2: Two gevent workers for better CPU task distribution
 # --worker-connections 1000: Max concurrent connections per worker
 # --timeout 120: Request timeout (matches ping_timeout)
@@ -39,7 +39,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 # --graceful-timeout 30: Graceful shutdown time
 # --log-level info: Logging level
 CMD ["gunicorn", \
-     "--worker-class", "gevent", \
+     "--worker-class", "geventwebsocket.gunicorn.workers.GeventWebSocketWorker", \
      "--workers", "2", \
      "--worker-connections", "1000", \
      "--bind", "0.0.0.0:5000", \

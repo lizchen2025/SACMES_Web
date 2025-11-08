@@ -5,11 +5,12 @@ import gevent
 from gevent.lock import Semaphore
 
 # CRITICAL: Monkey patch must happen before importing other libraries
-# gevent's libev-based event loop is significantly faster than eventlet's pure-Python loop
-gevent.monkey.patch_all(
-    thread=False,  # Don't patch threading to preserve better stack traces
-    sys=False      # Don't patch sys to preserve better debugging
-)
+# Check if already patched by gunicorn gevent worker to avoid duplicate patching warning
+if not gevent.monkey.is_module_patched('socket'):
+    gevent.monkey.patch_all(
+        thread=False,  # Don't patch threading to preserve better stack traces
+        sys=False      # Don't patch sys to preserve better debugging
+    )
 
 # CRITICAL FIX: Patch socket to ignore "Bad file descriptor" errors
 # This prevents server blocking when clients abruptly disconnect
