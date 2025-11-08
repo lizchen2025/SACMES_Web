@@ -8,7 +8,10 @@ gunicorn>=21.0.0
 # WebSocket Support with Redis Message Queue
 Flask-SocketIO>=5.3.6
 python-socketio>=5.10.0
-eventlet>=0.33.3
+# MIGRATED from eventlet to gevent for better performance and active maintenance
+# gevent provides: faster event loop (libev), better CPU task scheduling, active development
+gevent>=24.2.0
+gevent-websocket>=0.10.1  # Enhanced WebSocket performance
 
 # Redis for session storage and message queue
 redis>=5.0.0

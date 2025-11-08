@@ -29,15 +29,17 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD python -c "import requests; requests.get('http://localhost:5000/health', timeout=3)"
 
-# Use gunicorn for production
-# --worker-class eventlet: Required for Socket.IO with eventlet
-# --workers 1: Single worker with eventlet (handles concurrency internally)
-# --threads 4: Number of threads per worker
+# Use gunicorn for production with gevent
+# MIGRATED from eventlet to gevent for better performance and active maintenance
+# --worker-class gevent: Uses libev-based event loop (faster than eventlet)
+# --workers 2: Two gevent workers for better CPU task distribution
+# --worker-connections 1000: Max concurrent connections per worker
 # --timeout 120: Request timeout (matches ping_timeout)
 # --keep-alive 75: Keep-alive timeout
+# --graceful-timeout 30: Graceful shutdown time
 # --log-level info: Logging level
 CMD ["gunicorn", \
-     "--worker-class", "eventlet", \
+     "--worker-class", "gevent", \
      "--workers", "2", \
      "--worker-connections", "1000", \
      "--bind", "0.0.0.0:5000", \

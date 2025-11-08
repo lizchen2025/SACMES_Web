@@ -1,12 +1,19 @@
 # app.py (Version with CSV Export Functionality)
+# MIGRATED TO GEVENT for better performance and active maintenance
 
-import eventlet
-from eventlet.semaphore import Semaphore
+import gevent
+from gevent.lock import Semaphore
 
-eventlet.monkey_patch()
+# CRITICAL: Monkey patch must happen before importing other libraries
+# gevent's libev-based event loop is significantly faster than eventlet's pure-Python loop
+gevent.monkey.patch_all(
+    thread=False,  # Don't patch threading to preserve better stack traces
+    sys=False      # Don't patch sys to preserve better debugging
+)
 
-# CRITICAL FIX: Patch eventlet socket to ignore "Bad file descriptor" errors
+# CRITICAL FIX: Patch socket to ignore "Bad file descriptor" errors
 # This prevents server blocking when clients abruptly disconnect
+# Note: gevent's socket handling is more robust than eventlet, but we keep this as defense-in-depth
 import errno
 _original_socket_shutdown = None
 
@@ -16,16 +23,16 @@ def patched_socket_shutdown(sock, how):
         return _original_socket_shutdown(sock, how)
     except OSError as e:
         if e.errno == errno.EBADF:  # Bad file descriptor - client already closed
-            pass  # Ignore this benign error
+            pass  # Ignore this benign error (less common in gevent than eventlet)
         else:
             raise  # Re-raise other errors
 
 # Apply the patch
 try:
-    from eventlet.green import socket as eventlet_socket
-    if hasattr(eventlet_socket.socket, 'shutdown'):
-        _original_socket_shutdown = eventlet_socket.socket.shutdown
-        eventlet_socket.socket.shutdown = lambda self, how: patched_socket_shutdown(self._sock if hasattr(self, '_sock') else self, how)
+    from gevent import socket as gevent_socket
+    if hasattr(gevent_socket.socket, 'shutdown'):
+        _original_socket_shutdown = gevent_socket.socket.shutdown
+        gevent_socket.socket.shutdown = lambda self, how: patched_socket_shutdown(self._sock if hasattr(self, '_sock') else self, how)
 except Exception as patch_error:
     # If patching fails, continue without it (better than crashing)
     import sys
@@ -240,15 +247,15 @@ socketio = SocketIO(
     message_queue=REDIS_URL,
 
     cors_allowed_origins="*",
-    async_mode='eventlet',
+    async_mode='gevent',  # MIGRATED from eventlet: gevent provides faster libev-based event loop
     logger=True,
     engineio_logger=False,  # Disable verbose engine.io logging to hide benign "Bad file descriptor" errors during socket cleanup
 
     # CRITICAL FIX: Enable async handlers to prevent blocking on large messages
-    async_handlers=True,  # Allow eventlet to handle large messages asynchronously
+    async_handlers=True,  # Allow gevent to handle large messages asynchronously
 
-    # CRITICAL FIX: Disable http compression to prevent issues with eventlet + large messages
-    http_compression=False,  # Compression can cause issues with eventlet websocket frames
+    # CRITICAL FIX: Disable http compression to prevent issues with large messages
+    http_compression=False,  # Compression can cause issues with websocket frames
 
     # OpenShift-optimized settings to prevent disconnections during heavy file transfers
     ping_timeout=120,       # Increased to 120s for bulk file uploads (was 60s)
@@ -308,11 +315,12 @@ fallback_data = {}  # {session_id: {'agent_sid': None, 'web_viewer_sids': set(),
 
 # Concurrency control - limit simultaneous file processing tasks
 # This prevents memory/CPU overload when multiple users upload files simultaneously
-# TUNING: Adjusted for eventlet stability with CPU-intensive numpy/scipy analysis
-# - 20: Conservative (2 workers × 10 tasks) - prevents eventlet blocking
-# - 40: Balanced (2 workers × 20 tasks) - good for most deployments
-# - 60: High throughput (2 workers × 30 tasks) - if resources abundant
-MAX_CONCURRENT_FILE_TASKS = 20  # OPTIMIZED: Reduced to prevent eventlet worker blocking
+# TUNING: Optimized for gevent with CPU-intensive numpy/scipy analysis
+# gevent handles CPU tasks better than eventlet, but we still limit concurrency
+# - 20: Conservative (2 workers × 10 tasks) - prevents worker blocking during heavy analysis
+# - 40: Balanced (2 workers × 20 tasks) - good for most deployments with gevent
+# - 60: High throughput (2 workers × 30 tasks) - if resources abundant and analysis is fast
+MAX_CONCURRENT_FILE_TASKS = 20  # OPTIMIZED: Conservative limit to ensure stable ping/pong
 file_processing_semaphore = Semaphore(MAX_CONCURRENT_FILE_TASKS)
 logger.info(f"File processing concurrency limit set to {MAX_CONCURRENT_FILE_TASKS}")
 
@@ -543,6 +551,45 @@ def get_session_agent_sid(session_id):
 def set_session_agent_sid(session_id, agent_sid):
     """Set agent SID for a session"""
     set_session_data(session_id, 'agent_sid', agent_sid)
+
+def get_current_agent_sid(user_id=None, session_id=None):
+    """
+    CRITICAL FIX: Get current agent SID, resilient to reconnections.
+
+    Background tasks use this to send ACKs. If agent reconnects to a new session
+    during processing, we need to find the NEW SID, not the old session's (now-None) SID.
+
+    Priority:
+    1. If user_id provided: lookup current SID via user_id mapping (survives reconnect)
+    2. Fallback to session_id: lookup SID via session (fails if agent reconnected)
+
+    Args:
+        user_id: User ID from agent registration
+        session_id: Session ID (may be stale if agent reconnected)
+
+    Returns:
+        Agent SID string or None if agent not found
+    """
+    # Priority 1: Use user_id to find CURRENT agent SID (survives reconnection)
+    if user_id:
+        agent_mapping = get_agent_session_by_user_id(user_id)
+        if agent_mapping:
+            agent_sid = agent_mapping.get('agent_sid')
+            if agent_sid:
+                logger.debug(f"get_current_agent_sid: Found via user_id={user_id} → SID={agent_sid}")
+                return agent_sid
+        logger.debug(f"get_current_agent_sid: No agent found for user_id={user_id}")
+
+    # Priority 2: Fallback to session_id (may return None if agent reconnected to new session)
+    if session_id:
+        agent_sid = get_session_agent_sid(session_id)
+        if agent_sid:
+            logger.debug(f"get_current_agent_sid: Found via session_id={session_id} → SID={agent_sid}")
+            return agent_sid
+        logger.debug(f"get_current_agent_sid: No agent_sid in session {session_id} (agent may have reconnected)")
+
+    logger.warning(f"get_current_agent_sid: Could not find agent (user_id={user_id}, session_id={session_id})")
+    return None
 
 def get_session_web_viewer_sids(session_id):
     """Get web viewer SIDs for a session"""
@@ -857,12 +904,13 @@ def get_all_web_viewer_sids():
     return all_sids
 
 
-def process_frequency_map_file(original_filename, content, frequency, params, session_id, total_electrodes=1, electrode_index=0):
+def process_frequency_map_file(original_filename, content, frequency, params, session_id, total_electrodes=1, electrode_index=0, user_id=None):
     """Process a single file for frequency map analysis
 
     Args:
         original_filename: Name of the file being processed
         content: File content
+        user_id: User ID for ACK routing (survives reconnections)
         frequency: Frequency in Hz
         params: Analysis parameters
         session_id: Session ID
@@ -927,13 +975,13 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
             if already_processed:
                 logger.info(f"FREQUENCY_MAP: Frequency {frequency}Hz already processed, skipping duplicate")
                 # Still send ack to agent but don't emit update
-                # FIXED: Use session-based agent_sid instead of global tracker
-                agent_sid = get_session_agent_sid(session_id)
+                # CRITICAL FIX: Use user_id for ACK routing (survives reconnections)
+                agent_sid = get_current_agent_sid(user_id=user_id, session_id=session_id)
                 if agent_sid:
                     socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
                     logger.debug(f"FREQUENCY_MAP: Sent ack for duplicate to agent {agent_sid}")
                 else:
-                    logger.warning(f"FREQUENCY_MAP: No agent_sid found for session {session_id}")
+                    logger.warning(f"FREQUENCY_MAP: No agent found for user_id={user_id}, session={session_id}")
                 return
 
             # Store complete data including arrays (needed for hold mode and overlay)
@@ -987,13 +1035,13 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
 
         # Only send acknowledgment when all electrodes are processed
         if file_progress['completed'] >= file_progress['total']:
-            # FIXED: Use session-based agent_sid instead of global tracker
-            agent_sid = get_session_agent_sid(session_id)
+            # CRITICAL FIX: Use user_id for ACK routing (survives reconnections)
+            agent_sid = get_current_agent_sid(user_id=user_id, session_id=session_id)
             if agent_sid:
                 socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
                 logger.info(f"FREQUENCY_MAP: All electrodes complete ({file_progress['completed']}/{file_progress['total']}) - sent ack for '{original_filename}' to agent {agent_sid}")
             else:
-                logger.warning(f"FREQUENCY_MAP: No agent_sid found for session {session_id}, cannot send ack for '{original_filename}'")
+                logger.warning(f"FREQUENCY_MAP: No agent found for user_id={user_id}, session={session_id}, cannot send ack for '{original_filename}'")
             # Clean up tracking data
             set_session_data(session_id, file_processing_key, None)
         else:
@@ -1017,13 +1065,13 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
 
         # Only send acknowledgment when all electrodes are processed (or failed)
         if file_progress['completed'] >= file_progress['total']:
-            # FIXED: Use session-based agent_sid instead of global tracker
-            agent_sid = get_session_agent_sid(session_id)
+            # CRITICAL FIX: Use user_id for ACK routing (survives reconnections)
+            agent_sid = get_current_agent_sid(user_id=user_id, session_id=session_id)
             if agent_sid:
                 socketio.emit('file_processing_complete', {'filename': original_filename}, to=agent_sid)
                 logger.info(f"FREQUENCY_MAP: All electrodes complete ({file_progress['completed']}/{file_progress['total']}, with errors) - sent ack for '{original_filename}' to agent {agent_sid}")
             else:
-                logger.warning(f"FREQUENCY_MAP: No agent_sid found for session {session_id}, cannot send ack for '{original_filename}' (error case)")
+                logger.warning(f"FREQUENCY_MAP: No agent found for user_id={user_id}, session={session_id}, cannot send ack for '{original_filename}' (error case)")
             # Clean up tracking data
             set_session_data(session_id, file_processing_key, None)
         else:
@@ -1053,8 +1101,8 @@ def start_limited_file_task(target_function, **kwargs):
     socketio.start_background_task(wrapped_task)
 
 
-def process_file_in_background(original_filename, content, params_for_this_file, session_id):
-    logger.info(f"BACKGROUND_TASK: Started processing for '{original_filename}' in session {session_id}")
+def process_file_in_background(original_filename, content, params_for_this_file, session_id, user_id=None):
+    logger.info(f"BACKGROUND_TASK: Started processing for '{original_filename}' in session {session_id}, user_id={user_id}")
     filename = secure_filename(f"{session_id}_{original_filename}")
     temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     try:
@@ -1260,19 +1308,19 @@ def process_file_in_background(original_filename, content, params_for_this_file,
             logger.warning(f"Could not find user_id for session: {session_id} - skipping broadcast for privacy")
 
         # Send processing complete acknowledgment to agent
-        # FIXED: Use session-based agent_sid instead of global tracker
-        agent_sid = get_session_agent_sid(session_id)
+        # CRITICAL FIX: Use user_id for ACK routing (survives reconnections)
+        agent_sid = get_current_agent_sid(user_id=user_id, session_id=session_id)
         if agent_sid:
             socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
             logger.info(f"CONTINUOUS: ✓ Sent ack for '{base_filename}' to agent {agent_sid}")
         else:
-            logger.warning(f"CONTINUOUS: No agent_sid found for session {session_id}, cannot send ack for '{base_filename}'")
+            logger.warning(f"CONTINUOUS: No agent found for user_id={user_id}, session={session_id}, cannot send ack for '{base_filename}'")
 
     except Exception as e:
         logger.error(f"CONTINUOUS: ✗ ERROR processing '{original_filename}': {e}", exc_info=True)
         # Send error acknowledgment to agent even if processing failed
-        # FIXED: Use session-based agent_sid instead of global tracker
-        agent_sid = get_session_agent_sid(session_id)
+        # CRITICAL FIX: Use user_id for ACK routing (survives reconnections)
+        agent_sid = get_current_agent_sid(user_id=user_id, session_id=session_id)
         if agent_sid:
             error_filename = original_filename.replace(f'_electrode_{selected_electrode}', '') if selected_electrode is not None else original_filename
             socketio.emit('file_processing_complete', {'filename': error_filename}, to=agent_sid)
@@ -2121,17 +2169,30 @@ def handle_disconnect():
             disconnected_session = agent_session_tracker.get('current_session')
 
         # Grace period for agent reconnection
-        # Increased to 3 seconds to handle WebSocket reconnections during heavy data transfer
+        # CRITICAL FIX: Increased to 30 seconds for Windows agents over OpenShift router
+        # Analysis shows Windows agents typically need 5-8 seconds to reconnect
         def delayed_agent_cleanup():
             import time
-            time.sleep(3.0)  # 3 second grace period (increased from 0.5s)
+            time.sleep(30.0)  # 30 second grace period (was 3s, too short for OpenShift)
+
+            # CRITICAL: Check if there are still pending file processing tasks before cleanup
+            # Background tasks may still be processing files from the old session
+            agent_mapping = get_agent_session_by_user_id(disconnected_user_id)
+            if agent_mapping:
+                old_session_id = agent_mapping.get('session_id')
+                if old_session_id:
+                    # Check for pending file processing tasks
+                    pending_tasks = get_session_data(old_session_id, 'pending_file_count', 0)
+                    if pending_tasks > 0:
+                        logger.warning(f"[CLEANUP] Session {old_session_id} still has {pending_tasks} pending tasks, delaying cleanup...")
+                        time.sleep(10.0)  # Additional 10 seconds for tasks to complete
 
             # Check if agent reconnected (user_id would have new mapping with different sid)
             current_mapping = get_agent_session_by_user_id(disconnected_user_id)
 
             if current_mapping and current_mapping.get('agent_sid') == disconnected_sid:
                 # Agent did not reconnect, clean up
-                logger.warning(f"Agent (User ID: {disconnected_user_id}) did not reconnect within grace period. Cleaning up...")
+                logger.warning(f"Agent (User ID: {disconnected_user_id}) did not reconnect within 30s grace period. Cleaning up...")
 
                 # Unregister from user_id mapping
                 unregister_agent_user(disconnected_user_id)
@@ -2587,7 +2648,8 @@ def handle_instrument_data(data):
                     params=params_for_this_file,
                     session_id=agent_session_id,
                     total_electrodes=total_electrodes,
-                    electrode_index=idx
+                    electrode_index=idx,
+                    user_id=user_id  # CRITICAL: For ACK routing after reconnection
                 )
         else:
             # Averaged electrode data (single task)
@@ -2606,7 +2668,8 @@ def handle_instrument_data(data):
                 params=params_for_this_file,
                 session_id=agent_session_id,
                 total_electrodes=1,
-                electrode_index=0
+                electrode_index=0,
+                user_id=user_id  # CRITICAL: For ACK routing after reconnection
             )
 
     else:
@@ -2628,7 +2691,8 @@ def handle_instrument_data(data):
                                              original_filename=f"{original_filename}_electrode_{electrode_idx}",
                                              content=file_content,
                                              params_for_this_file=params_for_this_file,
-                                             session_id=agent_session_id)
+                                             session_id=agent_session_id,
+                                             user_id=user_id)  # CRITICAL: For ACK routing after reconnection
         else:
             # Original averaging behavior
             params_for_this_file = live_analysis_params.copy()
@@ -2642,7 +2706,8 @@ def handle_instrument_data(data):
                                          original_filename=original_filename,
                                          content=file_content,
                                          params_for_this_file=params_for_this_file,
-                                         session_id=agent_session_id)
+                                         session_id=agent_session_id,
+                                         user_id=user_id)  # CRITICAL: For ACK routing after reconnection
 
 
 @socketio.on('stream_cv_data')
@@ -2857,7 +2922,7 @@ def process_cv_segments_background(data, client_sid):
             f.write(file_content)
 
         # Yield control to event loop
-        eventlet.sleep(0)
+        gevent.sleep(0)
 
         # Verify file was written correctly
         if not os.path.exists(temp_filepath):
@@ -2877,7 +2942,7 @@ def process_cv_segments_background(data, client_sid):
         }, room=client_sid)
 
         # Yield control before heavy operation
-        eventlet.sleep(0)
+        gevent.sleep(0)
 
         # Get segments with periodic yielding
         logger.info("Calling get_cv_segments function...")
@@ -2923,13 +2988,13 @@ def get_cv_segments_with_yield(file_path, params, selected_electrode, client_sid
             }, room=client_sid)
 
         # Yield control before calling the heavy function
-        eventlet.sleep(0)
+        gevent.sleep(0)
 
         # Call the original function but with yielding
         result = get_cv_segments(file_path, params, selected_electrode)
 
         # Yield control after processing
-        eventlet.sleep(0)
+        gevent.sleep(0)
 
         # Send progress update
         if client_sid:
