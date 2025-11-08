@@ -37,7 +37,8 @@
       "Bash(del e:SACMES_webwebSACMES_Web-Multiusertemp_replace.py 2)",
       "Bash(nul)",
       "Bash(tasklist:*)",
-      "Bash(del DEPLOYMENT_GUIDE.md)"
+      "Bash(del DEPLOYMENT_GUIDE.md)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

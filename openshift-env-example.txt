@@ -1,0 +1,44 @@
+# OpenShift Environment Variables Configuration
+# 在 OpenShift 控制台中设置这些环境变量，或使用 `oc set env` 命令
+
+# =============================================================================
+# Redis Configuration (必需)
+# =============================================================================
+# 选项1: 使用完整的 REDIS_URL (推荐)
+REDIS_URL=redis://redis:6379/0
+
+# 选项2: 或者分别设置各个组件
+# REDIS_HOST=redis
+# REDIS_PORT=6379
+# REDIS_DB=0
+# REDIS_PASSWORD=your_password_here  # 如果Redis有密码
+
+# =============================================================================
+# Application Secrets (推荐使用 OpenShift Secrets)
+# =============================================================================
+# SECRET_KEY=your_secret_key_here
+# AGENT_AUTH_TOKEN=your_agent_token_here
+
+# =============================================================================
+# 如何在 OpenShift 中设置
+# =============================================================================
+# 1. 通过命令行:
+#    oc set env deployment/sacmes-web REDIS_URL=redis://redis:6379/0
+#
+# 2. 通过控制台:
+#    Applications → Deployments → sacmes-web → Environment → Add Variable
+#
+# 3. 使用 Secret (推荐用于密码):
+#    oc create secret generic sacmes-secrets \
+#      --from-literal=redis-password=your_password \
+#      --from-literal=secret-key=your_secret_key
+#
+#    然后在 Deployment 中引用:
+#    oc set env deployment/sacmes-web --from=secret/sacmes-secrets
+
+# =============================================================================
+# Redis 自动检测
+# =============================================================================
+# 如果不设置 REDIS_HOST，应用会自动检测:
+# - 在 Kubernetes/OpenShift 中: 使用 'redis'
+# - 本地开发: 使用 'localhost'
