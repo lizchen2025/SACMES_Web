@@ -240,12 +240,15 @@ REDIS_DB = os.environ.get('REDIS_DB', '0')
 logger.info(f"Redis connection pool will use: {REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
 
 # Enhanced SocketIO configuration for OpenShift deployment
+# DIAGNOSTIC: Temporarily disable message_queue for single-worker testing
+# Redis message queue can cause serialization issues with large payloads
 socketio = SocketIO(
     app,
 
-    # CRITICAL: Redis message queue for multi-pod deployment
+    # DIAGNOSTIC: Disable Redis message queue in single-worker mode
+    # When workers=1, message queue is unnecessary and may cause issues
     # Enables communication between multiple Flask app pods in OpenShift
-    message_queue=REDIS_URL,
+    # message_queue=REDIS_URL,  # TEMPORARILY DISABLED FOR TESTING
 
     cors_allowed_origins="*",
     async_mode='gevent',  # MIGRATED from eventlet: gevent provides faster libev-based event loop
@@ -269,7 +272,7 @@ socketio = SocketIO(
     # Transport optimization for container environments
     transports=['websocket', 'polling']
 )
-logger.info("SocketIO initialized with Redis message queue for multi-pod support")
+logger.info("SocketIO initialized WITHOUT message queue for single-worker diagnostic")
 
 # Create connection pool with optimized settings for multi-user deployment
 try:
