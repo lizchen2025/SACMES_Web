@@ -38,7 +38,8 @@
       "Bash(nul)",
       "Bash(tasklist:*)",
       "Bash(del DEPLOYMENT_GUIDE.md)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(oc get:*)"
     ],
     "deny": [],
     "ask": []
