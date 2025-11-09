@@ -1300,6 +1300,10 @@ def process_file_in_background(original_filename, content, params_for_this_file,
         # This ensures frontend stays in sync even if some updates are lost
         send_full_data = (parsed_filenum % 10 == 0)
 
+        # DIAGNOSTIC: Log incremental data to debug missing points
+        logger.info(f"📊 CONTINUOUS: File #{parsed_filenum} @ {parsed_frequency}Hz")
+        logger.info(f"   peak_value={current_peak}, peak_potential={current_peak_potential}")
+
         full_trends = None
         if send_full_data:
             # NEW: Pass peak_potentials to calculate_trends for drift detection
@@ -1336,8 +1340,11 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                 logger.info(f"[PERF] Sent {'FULL' if send_full_data else 'INCREMENTAL'} update to {len(user_web_viewers)} viewers, size: {response_size} bytes")
 
                 socketio.emit('live_analysis_update', response_data, to=user_web_viewers)
+                logger.info(f"   ✓ Sent to {len(user_web_viewers)} viewers (SIDs: {user_web_viewers[:3]}...)")
             else:
-                logger.info(f"No web viewers registered for user_id: {user_id}")
+                logger.warning(f"   ⚠️ CONTINUOUS: No web viewers for user_id {user_id} - update NOT sent for file #{parsed_filenum}")
+                logger.warning(f"      Data stored but not broadcast - frontend will miss this point!")
+                logger.warning(f"      Frontend should call request_live_trend_history after reconnection")
         else:
             logger.warning(f"Could not find user_id for session: {session_id} - skipping broadcast for privacy")
 
@@ -3495,6 +3502,92 @@ def handle_cv_export_request(data):
     except Exception as e:
         logger.error(f"Failed to generate CV CSV for export: {e}", exc_info=True)
         emit('export_cv_data_response', {'status': 'error', 'message': f'CV export failed: {str(e)}'})
+
+
+@socketio.on('request_live_trend_history')
+def handle_live_trend_history_request(data):
+    """
+    Send all processed continuous trend data to reconnected client.
+    Used when frontend reconnects and needs to fill in missing data points.
+    """
+    logger.info(f"📜 Received 'request_live_trend_history' from {request.sid}")
+
+    try:
+        user_id = data.get('user_id') if data else None
+        if not user_id:
+            logger.error("request_live_trend_history missing user_id")
+            emit('live_trend_history_response', {'status': 'error', 'message': 'User ID required'})
+            return
+
+        # Get agent session
+        agent_mapping = get_agent_session_by_user_id(user_id)
+        if not agent_mapping:
+            logger.warning(f"No agent session found for user_id: {user_id}")
+            emit('live_trend_history_response', {'status': 'error', 'message': 'No active agent session'})
+            return
+
+        session_id = agent_mapping['session_id']
+        live_trend_data = get_session_data(session_id, 'live_trend_data', {})
+        live_analysis_params = get_session_data(session_id, 'live_analysis_params', {})
+
+        if not live_trend_data or 'raw_peaks' not in live_trend_data:
+            logger.info(f"No continuous trend data available for session {session_id}")
+            emit('live_trend_history_response', {'status': 'success', 'data': {}})
+            return
+
+        # Get current electrode
+        current_electrode = live_analysis_params.get('selected_electrode')
+        electrode_key = str(current_electrode) if current_electrode is not None else 'averaged'
+
+        # Calculate full trends
+        full_trends = calculate_trends(
+            live_trend_data.get('raw_peaks', {}),
+            live_analysis_params,
+            electrode_key,
+            peak_potentials=live_trend_data.get('peak_potentials', {})
+        )
+
+        # Count data points
+        total_points = 0
+        none_potential_count = 0
+        none_peak_count = 0
+
+        raw_peaks = live_trend_data.get('raw_peaks', {}).get(electrode_key, {})
+        peak_potentials = live_trend_data.get('peak_potentials', {}).get(electrode_key, {})
+
+        for freq_key, files_dict in raw_peaks.items():
+            total_points += len(files_dict)
+            # Count None values
+            for file_num, peak_val in files_dict.items():
+                if peak_val is None:
+                    none_peak_count += 1
+            # Check potentials
+            if freq_key in peak_potentials:
+                for file_num, pot_val in peak_potentials[freq_key].items():
+                    if pot_val is None:
+                        none_potential_count += 1
+
+        logger.info(f"📊 Sending continuous trend data to {request.sid}")
+        logger.info(f"   Total points: {total_points}")
+        logger.info(f"   ⚠️ {none_peak_count} points have peak_value=None")
+        logger.info(f"   ⚠️ {none_potential_count} points have peak_potential=None")
+
+        emit('live_trend_history_response', {
+            'status': 'success',
+            'trend_data': full_trends,
+            'electrode_index': current_electrode,
+            'total_points': total_points,
+            'diagnostics': {
+                'none_peak_value': none_peak_count,
+                'none_peak_potential': none_potential_count
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Error handling live_trend_history request: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        emit('live_trend_history_response', {'status': 'error', 'message': str(e)})
 
 
 @socketio.on('request_frequency_map_history')
