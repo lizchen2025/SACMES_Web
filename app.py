@@ -253,7 +253,7 @@ socketio = SocketIO(
     cors_allowed_origins="*",
     async_mode='gevent',  # MIGRATED from eventlet: gevent provides faster libev-based event loop
     logger=True,
-    engineio_logger=False,  # Disable verbose engine.io logging to hide benign "Bad file descriptor" errors during socket cleanup
+    engineio_logger=True,  # ENABLE engine.io logging for diagnostics
 
     # CRITICAL FIX: Enable async handlers to prevent blocking on large messages
     async_handlers=True,  # Allow gevent to handle large messages asynchronously
@@ -272,7 +272,14 @@ socketio = SocketIO(
     # Transport optimization for container environments
     transports=['websocket', 'polling']
 )
-logger.info("SocketIO initialized WITHOUT message queue for single-worker diagnostic")
+logger.info("=" * 80)
+logger.info("SOCKETIO INITIALIZATION COMPLETE")
+logger.info(f"  Async mode: gevent")
+logger.info(f"  Message queue: DISABLED (single-worker mode)")
+logger.info(f"  Max buffer size: 10MB")
+logger.info(f"  Transports: websocket, polling")
+logger.info(f"  Worker: Flask-SocketIO native (gevent-websocket REMOVED)")
+logger.info("=" * 80)
 
 # Create connection pool with optimized settings for multi-user deployment
 try:
@@ -2003,6 +2010,19 @@ def detect_ongoing_analysis(session_id):
 
     return result
 
+# ============================================================================
+# DIAGNOSTIC: Global event interceptor to log ALL incoming SocketIO events
+# ============================================================================
+@socketio.on('*')
+def catch_all_events(event, *args):
+    """Log all received SocketIO events for debugging"""
+    try:
+        data_summary = str(args[0])[:200] if args else "no data"
+        logger.info(f"[SOCKETIO RECEIVE] Event: '{event}' from sid={request.sid}")
+        logger.debug(f"[SOCKETIO RECEIVE] Data preview: {data_summary}")
+    except Exception as e:
+        logger.error(f"[SOCKETIO RECEIVE] Error logging event '{event}': {e}")
+
 @socketio.on('connect')
 def handle_connect():
     # WebSocket health monitoring with connection timing
@@ -2158,6 +2178,12 @@ def handle_disconnect():
     # WebSocket health monitoring - log disconnect details
     disconnect_reason = request.args.get('reason', 'unknown')
     client_info = f"sid={disconnected_sid}, remote={request.remote_addr}"
+
+    # DIAGNOSTIC: Enhanced disconnect logging
+    logger.critical(f"🔴 DISCONNECT EVENT")
+    logger.critical(f"🔴 SID: {disconnected_sid}")
+    logger.critical(f"🔴 Reason: {disconnect_reason}")
+    logger.critical(f"🔴 Remote: {request.remote_addr}")
     logger.warning(f"[WEBSOCKET] Client disconnected: {client_info}, session={session_id}, reason={disconnect_reason}")
 
     # NEW: Check if this is an agent disconnection by looking up user_id
@@ -2545,6 +2571,11 @@ def handle_stop_frequency_map_session(data):
 @socketio.on('stream_instrument_data')
 def handle_instrument_data(data):
     try:
+        # DIAGNOSTIC: Confirm handler was called
+        logger.critical(f"🔵 HANDLER CALLED: stream_instrument_data")
+        logger.critical(f"🔵 Request SID: {request.sid}")
+        logger.critical(f"🔵 Data type: {type(data)}, keys: {data.keys() if isinstance(data, dict) else 'N/A'}")
+
         # CONNECTION STABILITY: Log data arrival with detailed socket info
         logger.info(f"[SOCKET] ===== stream_instrument_data START =====")
         logger.info(f"[SOCKET] From sid={request.sid}, remote={request.remote_addr}")
