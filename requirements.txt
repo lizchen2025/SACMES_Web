@@ -10,8 +10,9 @@ Flask-SocketIO>=5.3.6
 python-socketio>=5.10.0
 # MIGRATED from eventlet to gevent for better performance and active maintenance
 # gevent provides: faster event loop (libev), better CPU task scheduling, active development
+# Flask-SocketIO 5.x has built-in gevent WebSocket support - no need for gevent-websocket
 gevent>=24.2.0
-gevent-websocket>=0.10.1  # Enhanced WebSocket performance
+# REMOVED gevent-websocket: unmaintained since 2017, has fragmentation bugs with messages >32KB
 
 # Redis for session storage and message queue
 redis>=5.0.0

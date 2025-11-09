@@ -31,16 +31,17 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 
 # Use gunicorn for production with gevent
 # MIGRATED from eventlet to gevent for better performance and active maintenance
-# --worker-class geventwebsocket: Enables WebSocket support with gevent
-# --workers 2: Two gevent workers for better CPU task distribution
+# Flask-SocketIO 5.x has built-in WebSocket support - no need for gevent-websocket
+# --worker-class gevent: Plain gevent worker (Flask-SocketIO handles WebSocket upgrade)
+# --workers 1: Single worker for diagnostic (will increase after testing)
 # --worker-connections 1000: Max concurrent connections per worker
 # --timeout 120: Request timeout (matches ping_timeout)
 # --keep-alive 75: Keep-alive timeout
 # --graceful-timeout 30: Graceful shutdown time
 # --log-level info: Logging level
 CMD ["gunicorn", \
-     "--worker-class", "geventwebsocket.gunicorn.workers.GeventWebSocketWorker", \
-     "--workers", "2", \
+     "--worker-class", "gevent", \
+     "--workers", "1", \
      "--worker-connections", "1000", \
      "--bind", "0.0.0.0:5000", \
      "--timeout", "120", \
