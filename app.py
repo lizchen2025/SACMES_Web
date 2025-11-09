@@ -1016,10 +1016,25 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
 
             set_session_data(session_id, 'frequency_map_data', frequency_map_data)
 
-            logger.info(f"FREQUENCY_MAP: Stored result for {frequency}Hz, charge={charge:.2f}µC, peak={peak_value:.4e}A")
+            # DIAGNOSTIC: Log all key values to debug missing data points
+            logger.info(f"FREQUENCY_MAP: Stored result for {frequency}Hz")
+            logger.info(f"  📊 peak_value={peak_value:.4e}A, peak_potential={peak_potential}, charge={charge:.2e}µC")
+
+            # DIAGNOSTIC: Warn if any critical value is None or 0
+            if peak_potential is None:
+                logger.warning(f"⚠️  peak_potential is None for {original_filename} @ {frequency}Hz")
+                logger.warning(f"     peak_info structure: {analysis_result.get('peak_info')}")
+            if peak_value == 0:
+                logger.warning(f"⚠️  peak_value is ZERO for {original_filename} @ {frequency}Hz")
+            if charge == 0:
+                logger.warning(f"⚠️  charge is ZERO for {original_filename} @ {frequency}Hz")
 
             # Send update to all web viewers
             all_web_viewer_sids = get_all_web_viewer_sids()
+
+            # DIAGNOSTIC: Count total stored vs sent
+            total_stored = sum(len(freqs) for freqs in frequency_map_data['results'].values())
+
             if all_web_viewer_sids:
                 update_data = {
                     'filename': original_filename,
@@ -1028,9 +1043,12 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
                     'data': frequency_map_data['results'][electrode_key][str(frequency)]
                 }
                 socketio.emit('frequency_map_update', update_data, to=all_web_viewer_sids)
-                logger.info(f"FREQUENCY_MAP: ✓ Sent update to {len(all_web_viewer_sids)} web viewers for {original_filename} @ {frequency}Hz (peak={peak_value:.4e}A)")
+                logger.info(f"FREQUENCY_MAP: ✓ Sent update to {len(all_web_viewer_sids)} web viewers for {original_filename} @ {frequency}Hz")
+                logger.info(f"  📡 Progress: {total_stored} total points stored in session")
             else:
-                logger.warning(f"FREQUENCY_MAP: No web viewers to send update for {original_filename} @ {frequency}Hz")
+                logger.warning(f"FREQUENCY_MAP: ⚠️  No web viewers connected - update NOT sent for {original_filename} @ {frequency}Hz")
+                logger.warning(f"  📊 Data stored but not broadcast - total stored: {total_stored} points")
+                logger.warning(f"  💡 Client should use request_frequency_map_history to recover this data")
         else:
             # Analysis failed or returned unexpected status
             status = analysis_result.get('status') if analysis_result else 'None'
@@ -3485,7 +3503,7 @@ def handle_frequency_map_history_request(data):
     Send all processed frequency map data to reconnected client.
     Used when frontend reconnects and needs to fill in missing data points.
     """
-    logger.info(f"Received 'request_frequency_map_history' from {request.sid}")
+    logger.info(f"📜 Received 'request_frequency_map_history' from {request.sid}")
 
     try:
         user_id = data.get('user_id') if data else None
@@ -3511,8 +3529,17 @@ def handle_frequency_map_history_request(data):
 
         # Build list of all processed results
         history = []
+        none_count = 0
+        zero_count = 0
+
         for electrode_key, freq_results in frequency_map_data['results'].items():
             for freq_str, result_data in freq_results.items():
+                # DIAGNOSTIC: Check for None/zero values
+                if result_data.get('peak_potential') is None:
+                    none_count += 1
+                if result_data.get('peak_value') == 0:
+                    zero_count += 1
+
                 history.append({
                     'frequency': result_data.get('frequency'),
                     'electrode_index': int(electrode_key) if electrode_key != 'averaged' else None,
@@ -3520,11 +3547,19 @@ def handle_frequency_map_history_request(data):
                     'filename': result_data.get('filename')
                 })
 
-        logger.info(f"Sending {len(history)} frequency map data points to {request.sid}")
+        logger.info(f"📊 Sending {len(history)} frequency map data points to {request.sid}")
+        logger.info(f"  ⚠️  {none_count} points have peak_potential=None")
+        logger.info(f"  ⚠️  {zero_count} points have peak_value=0")
+        logger.info(f"  📈 Sample frequencies: {sorted([h['frequency'] for h in history[:10]])}")
+
         emit('frequency_map_history_response', {
             'status': 'success',
             'data': history,
-            'count': len(history)
+            'count': len(history),
+            'diagnostics': {
+                'none_peak_potential': none_count,
+                'zero_peak_value': zero_count
+            }
         })
 
     except Exception as e:
