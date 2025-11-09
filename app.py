@@ -335,6 +335,11 @@ MAX_CONCURRENT_FILE_TASKS = 20  # OPTIMIZED: Conservative limit to ensure stable
 file_processing_semaphore = Semaphore(MAX_CONCURRENT_FILE_TASKS)
 logger.info(f"File processing concurrency limit set to {MAX_CONCURRENT_FILE_TASKS}")
 
+# Helper function for gevent/eventlet Semaphore compatibility
+def get_semaphore_value(sem):
+    """Get available permits from semaphore (gevent uses ._value, eventlet uses .balance)"""
+    return getattr(sem, 'balance', getattr(sem, '_value', 0))
+
 # Flow control - track agent sending rates
 # {user_id: {'current_interval': 0.1, 'last_adjusted': timestamp}}
 agent_rate_tracking = {}
@@ -353,7 +358,7 @@ def check_and_adjust_agent_rate(user_id, agent_sid):
     """
     try:
         # Calculate current load
-        available_slots = file_processing_semaphore.balance
+        available_slots = get_semaphore_value(file_processing_semaphore)
         used_slots = MAX_CONCURRENT_FILE_TASKS - available_slots
         load_ratio = used_slots / MAX_CONCURRENT_FILE_TASKS
 
@@ -1103,11 +1108,11 @@ def start_limited_file_task(target_function, **kwargs):
     """
     def wrapped_task():
         with file_processing_semaphore:
-            logger.debug(f"Acquired semaphore for {target_function.__name__} (available: {file_processing_semaphore.balance})")
+            logger.debug(f"Acquired semaphore for {target_function.__name__} (available: {get_semaphore_value(file_processing_semaphore)})")
             try:
                 target_function(**kwargs)
             finally:
-                logger.debug(f"Released semaphore for {target_function.__name__} (available: {file_processing_semaphore.balance})")
+                logger.debug(f"Released semaphore for {target_function.__name__} (available: {get_semaphore_value(file_processing_semaphore)})")
 
     socketio.start_background_task(wrapped_task)
 
