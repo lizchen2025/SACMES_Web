@@ -3479,6 +3479,61 @@ def handle_cv_export_request(data):
         emit('export_cv_data_response', {'status': 'error', 'message': f'CV export failed: {str(e)}'})
 
 
+@socketio.on('request_frequency_map_history')
+def handle_frequency_map_history_request(data):
+    """
+    Send all processed frequency map data to reconnected client.
+    Used when frontend reconnects and needs to fill in missing data points.
+    """
+    logger.info(f"Received 'request_frequency_map_history' from {request.sid}")
+
+    try:
+        user_id = data.get('user_id') if data else None
+        if not user_id:
+            logger.error("request_frequency_map_history missing user_id")
+            emit('frequency_map_history_response', {'status': 'error', 'message': 'User ID required'})
+            return
+
+        # Get agent session
+        agent_mapping = get_agent_session_by_user_id(user_id)
+        if not agent_mapping:
+            logger.warning(f"No agent session found for user_id: {user_id}")
+            emit('frequency_map_history_response', {'status': 'error', 'message': 'No active agent session'})
+            return
+
+        session_id = agent_mapping['session_id']
+        frequency_map_data = get_session_data(session_id, 'frequency_map_data', {})
+
+        if not frequency_map_data or 'results' not in frequency_map_data:
+            logger.info(f"No frequency map data available for session {session_id}")
+            emit('frequency_map_history_response', {'status': 'success', 'data': []})
+            return
+
+        # Build list of all processed results
+        history = []
+        for electrode_key, freq_results in frequency_map_data['results'].items():
+            for freq_str, result_data in freq_results.items():
+                history.append({
+                    'frequency': result_data.get('frequency'),
+                    'electrode_index': int(electrode_key) if electrode_key != 'averaged' else None,
+                    'data': result_data,
+                    'filename': result_data.get('filename')
+                })
+
+        logger.info(f"Sending {len(history)} frequency map data points to {request.sid}")
+        emit('frequency_map_history_response', {
+            'status': 'success',
+            'data': history,
+            'count': len(history)
+        })
+
+    except Exception as e:
+        logger.error(f"Error handling frequency_map_history request: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        emit('frequency_map_history_response', {'status': 'error', 'message': str(e)})
+
+
 @socketio.on('request_export_frequency_map_data')
 def handle_frequency_map_export_request(data):
     """
