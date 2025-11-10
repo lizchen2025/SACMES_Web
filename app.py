@@ -220,8 +220,10 @@ logger.info(f"Redis connection pool will use: {REDIS_HOST}:{REDIS_PORT}/{REDIS_D
 socketio = SocketIO(
     app,
 
-    # Re-enable message queue for stability
-    message_queue=REDIS_URL,
+    # DIAGNOSTIC: Temporarily disable message queue to test if it's causing the disconnect
+    # Hypothesis: Redis cannot serialize/deserialize large messages (52KB base64)
+    # Since we have --workers 1, disabling message_queue won't affect functionality
+    message_queue=None,  # DISABLED FOR TESTING
 
     cors_allowed_origins="*",
     async_mode='gevent',
@@ -242,7 +244,7 @@ socketio = SocketIO(
 logger.info("=" * 80)
 logger.info("SOCKETIO INITIALIZATION COMPLETE")
 logger.info(f"  Async mode: gevent")
-logger.info(f"  Message queue: ENABLED (Redis)")
+logger.info(f"  Message queue: DISABLED (testing large message handling)")
 logger.info(f"  Max buffer size: 10MB")
 logger.info(f"  Transports: polling, websocket")
 logger.info(f"  Worker: plain gevent (gevent-websocket removed)")
