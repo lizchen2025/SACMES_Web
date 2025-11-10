@@ -2168,11 +2168,17 @@ def handle_connect():
 
 
 @socketio.on('disconnect')
-def handle_disconnect():
+def handle_disconnect(*args, **kwargs):
+    """
+    Handle client disconnection.
+    Note: Flask-SocketIO may pass arguments in some configurations (gevent + Redis),
+    so we accept *args/**kwargs to avoid TypeError but don't use them.
+    """
     session_id = get_session_id()
     disconnected_sid = request.sid
 
     # WebSocket health monitoring - log disconnect details
+    # Note: disconnect reason is extracted from request context, not passed as argument
     disconnect_reason = request.args.get('reason', 'unknown')
     client_info = f"sid={disconnected_sid}, remote={request.remote_addr}"
 
