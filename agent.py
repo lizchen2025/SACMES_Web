@@ -1169,21 +1169,20 @@ class AgentApp:
             self.log(f"Initiating Socket.IO connection with User ID: {user_id}...")
 
             # TRANSPORT CONFIGURATION:
-            # Use polling-first strategy for OpenShift/Kubernetes environments
-            # - Polling establishes reliable initial connection through any proxy/ingress
-            # - Socket.IO automatically upgrades to WebSocket after handshake
-            # - This provides both reliability (polling) and performance (websocket)
+            # DIAGNOSTIC: Force polling-only to test large message handling
+            # Issue: WebSocket transport fails when sending 52KB messages
+            # Python socketio client disconnects immediately after emit with large payloads
+            # Polling uses chunked HTTP requests which handle large messages better
             #
             # Connection flow:
             #   1. HTTP polling handshake (reliable, works through any proxy)
-            #   2. Automatic upgrade to WebSocket (low latency, high throughput)
-            #   3. Fallback to polling if WebSocket fails
+            #   2. Stay on polling (no WebSocket upgrade) for stable large file transfers
 
             sio.connect(
                 connection_url,
                 headers=headers,
                 socketio_path='socket.io',
-                transports=['polling', 'websocket'],  # Polling-first for maximum compatibility
+                transports=['polling'],  # FORCE polling-only for large message stability
                 wait_timeout=150  # 150 seconds connection timeout (server ping_timeout=120s)
             )
 
