@@ -266,11 +266,13 @@ socketio = SocketIO(
     ping_interval=25,       # More frequent heartbeats (default: 25s)
 
     # Prevent disconnections during processing
-    allow_upgrades=True,
+    # DIAGNOSTIC: Disable WebSocket升级 to test if WebSocket is causing message loss
+    allow_upgrades=False,  # TEMPORARILY DISABLE WebSocket upgrade
     max_http_buffer_size=10000000,  # 10MB for large CV data files
 
     # Transport optimization for container environments
-    transports=['websocket', 'polling']
+    # DIAGNOSTIC: Force polling-only mode
+    transports=['polling']  # Only polling, no WebSocket upgrade
 )
 logger.info("=" * 80)
 logger.info("SOCKETIO INITIALIZATION COMPLETE")
