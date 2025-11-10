@@ -530,11 +530,11 @@ def log_consent(user_id, user_ip=None, session_id=None):
                 logger.info("Attempting to write to Redis...")
                 redis_client.lpush('consent_log', json.dumps(consent_record))
                 redis_client.ltrim('consent_log', 0, 9999)  # Keep last 10,000 records
-                logger.info(f"✓ Successfully logged consent to Redis for user {user_id}")
+                logger.info(f"[OK] Successfully logged consent to Redis for user {user_id}")
 
                 # Verify the data was stored
                 list_length = redis_client.llen('consent_log')
-                logger.info(f"✓ Redis consent_log now has {list_length} entries")
+                logger.info(f"[OK] Redis consent_log now has {list_length} entries")
 
                 # Debug: Show the latest entry to verify it was stored correctly
                 if list_length > 0:
@@ -550,7 +550,7 @@ def log_consent(user_id, user_ip=None, session_id=None):
         try:
             with open('consent_log.txt', 'a', encoding='utf-8') as f:
                 f.write(f"{json.dumps(consent_record)}\n")
-            logger.info(f"✓ Consent logged to file for user {user_id}")
+            logger.info(f"[OK] Consent logged to file for user {user_id}")
             return True
         except Exception as e:
             logger.error(f"✗ Failed to log consent to file: {e}")
@@ -1022,12 +1022,12 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
 
             # DIAGNOSTIC: Warn if any critical value is None or 0
             if peak_potential is None:
-                logger.warning(f"⚠️  peak_potential is None for {original_filename} @ {frequency}Hz")
+                logger.warning(f"[WARN]  peak_potential is None for {original_filename} @ {frequency}Hz")
                 logger.warning(f"     peak_info structure: {analysis_result.get('peak_info')}")
             if peak_value == 0:
-                logger.warning(f"⚠️  peak_value is ZERO for {original_filename} @ {frequency}Hz")
+                logger.warning(f"[WARN]  peak_value is ZERO for {original_filename} @ {frequency}Hz")
             if charge == 0:
-                logger.warning(f"⚠️  charge is ZERO for {original_filename} @ {frequency}Hz")
+                logger.warning(f"[WARN]  charge is ZERO for {original_filename} @ {frequency}Hz")
 
             # Send update to all web viewers
             all_web_viewer_sids = get_all_web_viewer_sids()
@@ -1043,10 +1043,10 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
                     'data': frequency_map_data['results'][electrode_key][str(frequency)]
                 }
                 socketio.emit('frequency_map_update', update_data, to=all_web_viewer_sids)
-                logger.info(f"FREQUENCY_MAP: ✓ Sent update to {len(all_web_viewer_sids)} web viewers for {original_filename} @ {frequency}Hz")
+                logger.info(f"FREQUENCY_MAP: [OK] Sent update to {len(all_web_viewer_sids)} web viewers for {original_filename} @ {frequency}Hz")
                 logger.info(f"  📡 Progress: {total_stored} total points stored in session")
             else:
-                logger.warning(f"FREQUENCY_MAP: ⚠️  No web viewers connected - update NOT sent for {original_filename} @ {frequency}Hz")
+                logger.warning(f"FREQUENCY_MAP: [WARN]  No web viewers connected - update NOT sent for {original_filename} @ {frequency}Hz")
                 logger.warning(f"  📊 Data stored but not broadcast - total stored: {total_stored} points")
                 logger.warning(f"  💡 Client should use request_frequency_map_history to recover this data")
         else:
@@ -1340,9 +1340,9 @@ def process_file_in_background(original_filename, content, params_for_this_file,
                 logger.info(f"[PERF] Sent {'FULL' if send_full_data else 'INCREMENTAL'} update to {len(user_web_viewers)} viewers, size: {response_size} bytes")
 
                 socketio.emit('live_analysis_update', response_data, to=user_web_viewers)
-                logger.info(f"   ✓ Sent to {len(user_web_viewers)} viewers (SIDs: {user_web_viewers[:3]}...)")
+                logger.info(f"   [OK] Sent to {len(user_web_viewers)} viewers (SIDs: {user_web_viewers[:3]}...)")
             else:
-                logger.warning(f"   ⚠️ CONTINUOUS: No web viewers for user_id {user_id} - update NOT sent for file #{parsed_filenum}")
+                logger.warning(f"   [WARN] CONTINUOUS: No web viewers for user_id {user_id} - update NOT sent for file #{parsed_filenum}")
                 logger.warning(f"      Data stored but not broadcast - frontend will miss this point!")
                 logger.warning(f"      Frontend should call request_live_trend_history after reconnection")
         else:
@@ -1353,7 +1353,7 @@ def process_file_in_background(original_filename, content, params_for_this_file,
         agent_sid = get_current_agent_sid(user_id=user_id, session_id=session_id)
         if agent_sid:
             socketio.emit('file_processing_complete', {'filename': base_filename}, to=agent_sid)
-            logger.info(f"CONTINUOUS: ✓ Sent ack for '{base_filename}' to agent {agent_sid}")
+            logger.info(f"CONTINUOUS: [OK] Sent ack for '{base_filename}' to agent {agent_sid}")
         else:
             logger.warning(f"CONTINUOUS: No agent found for user_id={user_id}, session={session_id}, cannot send ack for '{base_filename}'")
 
@@ -2157,7 +2157,7 @@ def handle_connect():
                     set_session_data(agent_session_id, key, old_data)
                     logger.info(f"Migrated '{key}' from old session to new session ({len(str(old_data))} bytes)")
 
-            logger.info(f"✓ Session migration complete for user {user_id}")
+            logger.info(f"[OK] Session migration complete for user {user_id}")
 
         # NEW: Register user_id mapping (multi-user support)
         register_agent_user(user_id, session_id, request.sid)
@@ -3569,8 +3569,8 @@ def handle_live_trend_history_request(data):
 
         logger.info(f"📊 Sending continuous trend data to {request.sid}")
         logger.info(f"   Total points: {total_points}")
-        logger.info(f"   ⚠️ {none_peak_count} points have peak_value=None")
-        logger.info(f"   ⚠️ {none_potential_count} points have peak_potential=None")
+        logger.info(f"   [WARN] {none_peak_count} points have peak_value=None")
+        logger.info(f"   [WARN] {none_potential_count} points have peak_potential=None")
 
         emit('live_trend_history_response', {
             'status': 'success',
@@ -3641,8 +3641,8 @@ def handle_frequency_map_history_request(data):
                 })
 
         logger.info(f"📊 Sending {len(history)} frequency map data points to {request.sid}")
-        logger.info(f"  ⚠️  {none_count} points have peak_potential=None")
-        logger.info(f"  ⚠️  {zero_count} points have peak_value=0")
+        logger.info(f"  [WARN]  {none_count} points have peak_potential=None")
+        logger.info(f"  [WARN]  {zero_count} points have peak_value=0")
         logger.info(f"  📈 Sample frequencies: {sorted([h['frequency'] for h in history[:10]])}")
 
         emit('frequency_map_history_response', {
