@@ -245,42 +245,32 @@ logger.info(f"Redis connection pool will use: {REDIS_HOST}:{REDIS_PORT}/{REDIS_D
 socketio = SocketIO(
     app,
 
-    # DIAGNOSTIC: Disable Redis message queue in single-worker mode
-    # When workers=1, message queue is unnecessary and may cause issues
-    # Enables communication between multiple Flask app pods in OpenShift
-    # message_queue=REDIS_URL,  # TEMPORARILY DISABLED FOR TESTING
+    # Re-enable message queue for stability
+    message_queue=REDIS_URL,
 
     cors_allowed_origins="*",
-    async_mode='gevent',  # MIGRATED from eventlet: gevent provides faster libev-based event loop
+    async_mode='gevent',
     logger=True,
-    engineio_logger=True,  # ENABLE engine.io logging for diagnostics
+    engineio_logger=False,  # Disable verbose logging
 
-    # CRITICAL FIX: Enable async handlers to prevent blocking on large messages
-    async_handlers=True,  # Allow gevent to handle large messages asynchronously
+    # Standard settings
+    ping_timeout=60,
+    ping_interval=25,
 
-    # CRITICAL FIX: Disable http compression to prevent issues with large messages
-    http_compression=False,  # Compression can cause issues with websocket frames
+    # Allow upgrades and use standard transports
+    allow_upgrades=True,
+    max_http_buffer_size=10000000,
 
-    # OpenShift-optimized settings to prevent disconnections during heavy file transfers
-    ping_timeout=120,       # Increased to 120s for bulk file uploads (was 60s)
-    ping_interval=25,       # More frequent heartbeats (default: 25s)
-
-    # Prevent disconnections during processing
-    # DIAGNOSTIC: Disable WebSocket升级 to test if WebSocket is causing message loss
-    allow_upgrades=False,  # TEMPORARILY DISABLE WebSocket upgrade
-    max_http_buffer_size=10000000,  # 10MB for large CV data files
-
-    # Transport optimization for container environments
-    # DIAGNOSTIC: Force polling-only mode
-    transports=['polling']  # Only polling, no WebSocket upgrade
+    # Use polling first, then allow websocket upgrade
+    transports=['polling', 'websocket']
 )
 logger.info("=" * 80)
 logger.info("SOCKETIO INITIALIZATION COMPLETE")
 logger.info(f"  Async mode: gevent")
-logger.info(f"  Message queue: DISABLED (single-worker mode)")
+logger.info(f"  Message queue: ENABLED (Redis)")
 logger.info(f"  Max buffer size: 10MB")
-logger.info(f"  Transports: websocket, polling")
-logger.info(f"  Worker: Flask-SocketIO native (gevent-websocket REMOVED)")
+logger.info(f"  Transports: polling, websocket")
+logger.info(f"  Worker: plain gevent (gevent-websocket removed)")
 logger.info("=" * 80)
 
 # Create connection pool with optimized settings for multi-user deployment
