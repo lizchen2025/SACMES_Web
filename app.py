@@ -226,7 +226,7 @@ socketio = SocketIO(
     cors_allowed_origins="*",
     async_mode='gevent',
     logger=True,
-    engineio_logger=False,  # Disable verbose logging
+    engineio_logger=True,  # DIAGNOSTIC: Enable to see transport-level errors
 
     # Standard settings
     ping_timeout=60,
@@ -2177,10 +2177,10 @@ def handle_disconnect():
     client_info = f"sid={disconnected_sid}, remote={request.remote_addr}"
 
     # DIAGNOSTIC: Enhanced disconnect logging
-    logger.critical(f"🔴 DISCONNECT EVENT")
-    logger.critical(f"🔴 SID: {disconnected_sid}")
-    logger.critical(f"🔴 Reason: {disconnect_reason}")
-    logger.critical(f"🔴 Remote: {request.remote_addr}")
+    logger.critical(f"[DISCONNECT] DISCONNECT EVENT")
+    logger.critical(f"[DISCONNECT] SID: {disconnected_sid}")
+    logger.critical(f"[DISCONNECT] Reason: {disconnect_reason}")
+    logger.critical(f"[DISCONNECT] Remote: {request.remote_addr}")
     logger.warning(f"[WEBSOCKET] Client disconnected: {client_info}, session={session_id}, reason={disconnect_reason}")
 
     # NEW: Check if this is an agent disconnection by looking up user_id
@@ -2267,6 +2267,24 @@ def handle_disconnect():
                 logger.info(f"Session {session_id} has no active connections, scheduling cleanup")
                 # Schedule cleanup after a delay to allow for reconnections
                 socketio.start_background_task(cleanup_session_after_delay, session_id, 300)  # 5 minutes
+
+@socketio.on_error()
+def error_handler(e):
+    """Global error handler for SocketIO events"""
+    logger.error(f"[SOCKETIO ERROR] Unhandled exception in event handler")
+    logger.error(f"[SOCKETIO ERROR] Error type: {type(e).__name__}")
+    logger.error(f"[SOCKETIO ERROR] Error message: {str(e)}")
+    import traceback
+    logger.error(f"[SOCKETIO ERROR] Traceback:\n{traceback.format_exc()}")
+
+@socketio.on_error_default
+def default_error_handler(e):
+    """Default error handler for unregistered SocketIO events"""
+    logger.error(f"[SOCKETIO ERROR] Error in event handler")
+    logger.error(f"[SOCKETIO ERROR] Event: {request.event}")
+    logger.error(f"[SOCKETIO ERROR] Error: {str(e)}")
+    import traceback
+    logger.error(f"[SOCKETIO ERROR] Traceback:\n{traceback.format_exc()}")
 
 @socketio.on('request_agent_status')
 def handle_request_agent_status(data):
@@ -2569,9 +2587,9 @@ def handle_stop_frequency_map_session(data):
 def handle_instrument_data(data):
     try:
         # DIAGNOSTIC: Confirm handler was called
-        logger.critical(f"🔵 HANDLER CALLED: stream_instrument_data")
-        logger.critical(f"🔵 Request SID: {request.sid}")
-        logger.critical(f"🔵 Data type: {type(data)}, keys: {data.keys() if isinstance(data, dict) else 'N/A'}")
+        logger.critical(f"[HANDLER] HANDLER CALLED: stream_instrument_data")
+        logger.critical(f"[HANDLER] Request SID: {request.sid}")
+        logger.critical(f"[HANDLER] Data type: {type(data)}, keys: {data.keys() if isinstance(data, dict) else 'N/A'}")
 
         # CONNECTION STABILITY: Log data arrival with detailed socket info
         logger.info(f"[SOCKET] ===== stream_instrument_data START =====")
