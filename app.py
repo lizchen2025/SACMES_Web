@@ -295,12 +295,13 @@ fallback_data = {}  # {session_id: {'agent_sid': None, 'web_viewer_sids': set(),
 
 # Concurrency control - limit simultaneous file processing tasks
 # This prevents memory/CPU overload when multiple users upload files simultaneously
-# TUNING: Optimized for gevent with CPU-intensive numpy/scipy analysis
-# gevent handles CPU tasks better than eventlet, but we still limit concurrency
-# - 20: Conservative (2 workers × 10 tasks) - prevents worker blocking during heavy analysis
-# - 40: Balanced (2 workers × 20 tasks) - good for most deployments with gevent
-# - 60: High throughput (2 workers × 30 tasks) - if resources abundant and analysis is fast
-MAX_CONCURRENT_FILE_TASKS = 20  # OPTIMIZED: Conservative limit to ensure stable ping/pong
+# TUNING: With gevent greenlets, we can safely handle 5x more concurrent tasks than threads
+# gevent's cooperative multitasking + lightweight greenlets make this efficient
+# - 20: Too low - causes blocking when agent sends at 10 files/sec (reaches 100% load)
+# - 50: Minimum for smooth operation with high-speed agents
+# - 100: Optimal for polling mode + gevent (prevents timeout/retry cycles)
+# INCREASED from 20→100 to eliminate blocking with polling transport
+MAX_CONCURRENT_FILE_TASKS = 100  # OPTIMIZED: High limit for polling mode + gevent greenlets
 file_processing_semaphore = Semaphore(MAX_CONCURRENT_FILE_TASKS)
 logger.info(f"File processing concurrency limit set to {MAX_CONCURRENT_FILE_TASKS}")
 
