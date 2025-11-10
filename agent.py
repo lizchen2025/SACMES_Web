@@ -1169,20 +1169,22 @@ class AgentApp:
             self.log(f"Initiating Socket.IO connection with User ID: {user_id}...")
 
             # TRANSPORT CONFIGURATION:
-            # DIAGNOSTIC: Force polling-only to test large message handling
-            # Issue: WebSocket transport fails when sending 52KB messages
-            # Python socketio client disconnects immediately after emit with large payloads
-            # Polling uses chunked HTTP requests which handle large messages better
+            # Force polling-only for large message stability
+            # Issue: Python socketio WebSocket crashes with 52KB messages
+            # Solution: Use polling which handles large payloads via chunked HTTP
+            #
+            # Tradeoff: Polling has higher latency but better stability for large data
+            # This affects both agent→server (file upload) and server→agent (frequency_map_update)
             #
             # Connection flow:
             #   1. HTTP polling handshake (reliable, works through any proxy)
-            #   2. Stay on polling (no WebSocket upgrade) for stable large file transfers
+            #   2. Stay on polling (no WebSocket upgrade) for message stability
 
             sio.connect(
                 connection_url,
                 headers=headers,
                 socketio_path='socket.io',
-                transports=['polling'],  # FORCE polling-only for large message stability
+                transports=['polling'],  # Force polling for stability with large messages
                 wait_timeout=150  # 150 seconds connection timeout (server ping_timeout=120s)
             )
 

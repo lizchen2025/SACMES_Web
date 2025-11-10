@@ -1006,14 +1006,25 @@ def process_frequency_map_file(original_filename, content, frequency, params, se
             total_stored = sum(len(freqs) for freqs in frequency_map_data['results'].values())
 
             if all_web_viewer_sids:
+                # OPTIMIZED for polling mode: Send only key metrics, not full arrays
+                # Full curve data (potentials, currents, etc.) is ~20-30KB per update
+                # This causes blocking in polling mode's HTTP request/response cycle
+                # Frontend can request full data later if needed for overlay/hold modes
+                full_data = frequency_map_data['results'][electrode_key][str(frequency)]
                 update_data = {
                     'filename': original_filename,
                     'frequency': frequency,
                     'electrode_index': selected_electrode,
-                    'data': frequency_map_data['results'][electrode_key][str(frequency)]
+                    'data': {
+                        # Only send key metrics (~500 bytes vs 20KB)
+                        'peak_value': full_data['peak_value'],
+                        'peak_potential': full_data['peak_potential'],
+                        'charge': full_data['charge'],
+                        # Frontend requests full arrays via 'request_frequency_scan' if needed
+                    }
                 }
                 socketio.emit('frequency_map_update', update_data, to=all_web_viewer_sids)
-                logger.info(f"FREQUENCY_MAP: [OK] Sent update to {len(all_web_viewer_sids)} web viewers for {original_filename} @ {frequency}Hz")
+                logger.info(f"FREQUENCY_MAP: [OK] Sent lightweight update to {len(all_web_viewer_sids)} viewers for {original_filename} @ {frequency}Hz")
                 logger.info(f"  📡 Progress: {total_stored} total points stored in session")
             else:
                 logger.warning(f"FREQUENCY_MAP: [WARN]  No web viewers connected - update NOT sent for {original_filename} @ {frequency}Hz")
