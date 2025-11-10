@@ -1169,22 +1169,23 @@ class AgentApp:
             self.log(f"Initiating Socket.IO connection with User ID: {user_id}...")
 
             # TRANSPORT CONFIGURATION:
-            # Force polling-only for large message stability
-            # Issue: Python socketio WebSocket crashes with 52KB messages
-            # Solution: Use polling which handles large payloads via chunked HTTP
-            #
-            # Tradeoff: Polling has higher latency but better stability for large data
-            # This affects both agent→server (file upload) and server→agent (frequency_map_update)
+            # Historical context: eventlet+polling worked, but gevent+polling struggles
+            # Root cause: Gevent's HTTP long-polling has different timeout/buffer behavior
+            # Solution: Use polling-first with WebSocket upgrade (like old system)
             #
             # Connection flow:
             #   1. HTTP polling handshake (reliable, works through any proxy)
-            #   2. Stay on polling (no WebSocket upgrade) for message stability
+            #   2. Automatic upgrade to WebSocket if supported
+            #   3. Server has max_http_buffer_size=10MB to handle large messages
+            #
+            # Note: If WebSocket disconnects with large files, server will log the error
+            # and we can investigate compression or other solutions
 
             sio.connect(
                 connection_url,
                 headers=headers,
                 socketio_path='socket.io',
-                transports=['polling'],  # Force polling for stability with large messages
+                transports=['polling', 'websocket'],  # Allow WebSocket upgrade (like hold branch)
                 wait_timeout=150  # 150 seconds connection timeout (server ping_timeout=120s)
             )
 
