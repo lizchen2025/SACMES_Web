@@ -11,33 +11,8 @@ if not gevent.monkey.is_module_patched('socket'):
         thread=False,  # Don't patch threading to preserve better stack traces
         sys=False      # Don't patch sys to preserve better debugging
     )
-
-# CRITICAL FIX: Patch socket to ignore "Bad file descriptor" errors
-# This prevents server blocking when clients abruptly disconnect
-# Note: gevent's socket handling is more robust than eventlet, but we keep this as defense-in-depth
-import errno
-_original_socket_shutdown = None
-
-def patched_socket_shutdown(sock, how):
-    """Wrapper for socket.shutdown() that ignores EBADF (Bad file descriptor) errors"""
-    try:
-        return _original_socket_shutdown(sock, how)
-    except OSError as e:
-        if e.errno == errno.EBADF:  # Bad file descriptor - client already closed
-            pass  # Ignore this benign error (less common in gevent than eventlet)
-        else:
-            raise  # Re-raise other errors
-
-# Apply the patch
-try:
-    from gevent import socket as gevent_socket
-    if hasattr(gevent_socket.socket, 'shutdown'):
-        _original_socket_shutdown = gevent_socket.socket.shutdown
-        gevent_socket.socket.shutdown = lambda self, how: patched_socket_shutdown(self._sock if hasattr(self, '_sock') else self, how)
-except Exception as patch_error:
-    # If patching fails, continue without it (better than crashing)
-    import sys
-    print(f"Warning: Could not patch socket.shutdown: {patch_error}", file=sys.stderr)
+# NOTE: gevent handles socket errors more gracefully than eventlet
+# No need for manual socket patching
 
 import os
 import re
