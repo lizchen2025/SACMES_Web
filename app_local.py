@@ -353,6 +353,17 @@ file_observer = None
 file_monitor = None
 
 # --- HTTP Routes ---
+
+# Add cache control headers to prevent browser caching during development
+@app.after_request
+def add_cache_control(response):
+    """Add cache control headers to prevent browser caching"""
+    if request.path.endswith(('.js', '.css', '.html')):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
 @app.route('/')
 def index():
     """Serve main application page"""
