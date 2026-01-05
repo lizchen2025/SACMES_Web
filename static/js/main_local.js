@@ -7,6 +7,7 @@ import { SWVModule } from './swv_module.js';
 import { CVModule } from './cv_module.js';
 import { HTModule } from './ht_module.js';
 import { FolderMonitor } from './folder_monitor.js';
+import { DiagnosticsPanel } from './diagnostics_panel.js';
 
 // Initialize application when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
@@ -38,6 +39,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const swvFolderMonitor = new FolderMonitor(socketManager, 'swv');
     const cvFolderMonitor = new FolderMonitor(socketManager, 'cv');
     const htFolderMonitor = new FolderMonitor(socketManager, 'ht');
+
+    // Initialize Diagnostics Panel
+    const diagnosticsPanel = new DiagnosticsPanel(socketManager);
 
     // Setup main navigation buttons
     setupNavigation(uiManager);

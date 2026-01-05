@@ -21,12 +21,18 @@ from watchdog.events import FileSystemEventHandler
 
 # --- Logging Setup ---
 log_handler = logging.StreamHandler(sys.stdout)
-log_handler.setLevel(logging.INFO)
+log_handler.setLevel(logging.DEBUG)  # Enable DEBUG level for troubleshooting
 log_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)  # Enable DEBUG level for troubleshooting
 logger.addHandler(log_handler)
 logger.propagate = False
+
+# Add file handler for persistent logs
+file_handler = logging.FileHandler('sacmes_local_debug.log')
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(file_handler)
 
 # --- Import Data Processing Modules ---
 try:
@@ -238,6 +244,7 @@ class LocalFileMonitor(FileSystemEventHandler):
             return
 
         filename = os.path.basename(event.src_path)
+        logger.debug(f"File created event: {filename}")
 
         # Check if file matches filters
         if not self.file_matches_filters(filename):
@@ -250,34 +257,67 @@ class LocalFileMonitor(FileSystemEventHandler):
 
         try:
             # Small delay to ensure file is fully written
+            logger.debug(f"Waiting for file to be fully written: {filename}")
             time.sleep(0.1)
 
+            # Check if file exists and is accessible
+            if not os.path.exists(event.src_path):
+                logger.warning(f"File disappeared: {filename}")
+                return
+
+            if not os.access(event.src_path, os.R_OK):
+                logger.error(f"File not readable: {filename}")
+                self.socketio.emit('file_monitor_error', {
+                    'filename': filename,
+                    'error': 'File is not readable (permission denied)'
+                })
+                return
+
             # Read file content
-            with open(event.src_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
+            logger.debug(f"Reading file: {filename}")
+            try:
+                with open(event.src_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                logger.debug(f"File read successfully: {filename} ({len(content)} bytes)")
+            except Exception as read_error:
+                logger.error(f"Failed to read file {filename}: {read_error}")
+                self.socketio.emit('file_monitor_error', {
+                    'filename': filename,
+                    'error': f'Read error: {str(read_error)}'
+                })
+                return
 
             # Validate file safety
+            logger.debug(f"Validating file safety: {filename}")
             is_safe, error_msg = validate_file_safety(filename, content)
             if not is_safe:
                 logger.warning(f"File {filename} failed safety check: {error_msg}")
                 self.socketio.emit('file_monitor_error', {
                     'filename': filename,
-                    'error': error_msg
+                    'error': f'Safety check failed: {error_msg}'
                 })
                 return
 
             # Emit file to processing
-            logger.info(f"File detected: {filename}")
+            logger.info(f"File detected and validated: {filename} - sending for processing")
             self.socketio.emit('stream_instrument_data', {
                 'filename': filename,
                 'content': content,
                 'analysisParams': self.filters.get('analysisParams', {})
             })
 
+            # Emit new file notification
+            self.socketio.emit('new_file_detected', {
+                'filename': filename
+            })
+
             self.processed_files.add(filename)
+            logger.debug(f"File added to processed list: {filename}")
 
         except Exception as e:
             logger.error(f"Error processing file {filename}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             self.socketio.emit('file_monitor_error', {
                 'filename': filename,
                 'error': str(e)
@@ -962,6 +1002,225 @@ def handle_frequency_map_export_request(data):
         emit('export_frequency_map_data_response', {
             'status': 'error',
             'message': str(e)
+        })
+
+# --- Diagnostic and Troubleshooting Events ---
+
+@socketio.on('run_diagnostics')
+def run_diagnostics(data):
+    """Run comprehensive system diagnostics"""
+    logger.info("Running system diagnostics...")
+
+    diagnostics = {
+        'timestamp': datetime.now().isoformat(),
+        'system': {},
+        'analyzers': {},
+        'folder_monitoring': {},
+        'file_access': {}
+    }
+
+    # System checks
+    diagnostics['system']['python_version'] = sys.version
+    diagnostics['system']['cwd'] = os.getcwd()
+    diagnostics['system']['platform'] = sys.platform
+
+    # Analyzer checks
+    diagnostics['analyzers']['swv_analyzer_loaded'] = analyze_swv_data is not None
+    diagnostics['analyzers']['cv_analyzer_loaded'] = analyze_cv_data is not None
+
+    # Folder monitoring status
+    diagnostics['folder_monitoring']['observer_active'] = file_observer is not None
+    diagnostics['folder_monitoring']['monitor_active'] = file_monitor is not None
+    if file_monitor:
+        diagnostics['folder_monitoring']['processed_files_count'] = len(file_monitor.processed_files)
+
+    # Test folder path if provided
+    test_path = data.get('folder_path')
+    if test_path:
+        diagnostics['file_access']['test_path'] = test_path
+        diagnostics['file_access']['path_exists'] = os.path.exists(test_path)
+        diagnostics['file_access']['is_directory'] = os.path.isdir(test_path)
+
+        if os.path.isdir(test_path):
+            try:
+                files = os.listdir(test_path)
+                diagnostics['file_access']['can_read_directory'] = True
+                diagnostics['file_access']['file_count'] = len(files)
+
+                # Test reading a file if any exist
+                txt_files = [f for f in files if f.endswith(('.txt', '.dta', '.csv'))]
+                if txt_files:
+                    test_file = os.path.join(test_path, txt_files[0])
+                    try:
+                        with open(test_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read(100)  # Read first 100 chars
+                        diagnostics['file_access']['can_read_files'] = True
+                        diagnostics['file_access']['test_file'] = txt_files[0]
+                        diagnostics['file_access']['test_file_size'] = os.path.getsize(test_file)
+                    except Exception as e:
+                        diagnostics['file_access']['can_read_files'] = False
+                        diagnostics['file_access']['read_error'] = str(e)
+                else:
+                    diagnostics['file_access']['data_files_found'] = False
+            except Exception as e:
+                diagnostics['file_access']['can_read_directory'] = False
+                diagnostics['file_access']['directory_error'] = str(e)
+
+    logger.info(f"Diagnostics complete: {json.dumps(diagnostics, indent=2)}")
+    emit('diagnostics_response', {
+        'status': 'success',
+        'diagnostics': diagnostics
+    })
+
+@socketio.on('test_file_read')
+def test_file_read(data):
+    """Test reading a specific file for troubleshooting"""
+    folder_path = data.get('folder_path')
+    filename = data.get('filename')
+
+    if not folder_path or not filename:
+        emit('file_read_test_response', {
+            'status': 'error',
+            'message': 'folder_path and filename required'
+        })
+        return
+
+    file_path = os.path.join(folder_path, filename)
+
+    logger.info(f"Testing file read: {file_path}")
+
+    result = {
+        'filename': filename,
+        'file_path': file_path,
+        'exists': os.path.exists(file_path),
+        'is_file': os.path.isfile(file_path),
+    }
+
+    if os.path.isfile(file_path):
+        try:
+            result['file_size'] = os.path.getsize(file_path)
+            result['readable'] = os.access(file_path, os.R_OK)
+
+            # Try to read the file
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+
+            result['content_length'] = len(content)
+            result['first_100_chars'] = content[:100]
+            result['line_count'] = len(content.splitlines())
+
+            # Validate file safety
+            is_safe, error_msg = validate_file_safety(filename, content)
+            result['safety_check'] = is_safe
+            if not is_safe:
+                result['safety_error'] = error_msg
+
+            # Check if filename matches expected pattern
+            freq_match = re.search(r'_(\d+)Hz', filename, re.IGNORECASE)
+            result['frequency_detected'] = freq_match.group(1) if freq_match else None
+
+            logger.info(f"File read successful: {filename} ({result['content_length']} bytes)")
+            emit('file_read_test_response', {
+                'status': 'success',
+                'result': result
+            })
+
+        except Exception as e:
+            logger.error(f"Error reading file: {e}")
+            import traceback
+            result['error'] = str(e)
+            result['traceback'] = traceback.format_exc()
+            emit('file_read_test_response', {
+                'status': 'error',
+                'result': result
+            })
+    else:
+        logger.warning(f"File not found or not accessible: {file_path}")
+        emit('file_read_test_response', {
+            'status': 'error',
+            'result': result,
+            'message': 'File not found or not accessible'
+        })
+
+@socketio.on('manual_process_file')
+def manual_process_file(data):
+    """Manually trigger file processing for troubleshooting"""
+    folder_path = data.get('folder_path')
+    filename = data.get('filename')
+    analysis_type = data.get('analysis_type', 'swv')  # swv, cv, or ht
+
+    if not folder_path or not filename:
+        emit('manual_process_response', {
+            'status': 'error',
+            'message': 'folder_path and filename required'
+        })
+        return
+
+    file_path = os.path.join(folder_path, filename)
+
+    logger.info(f"Manual file processing requested: {file_path} (type: {analysis_type})")
+
+    try:
+        # Read file
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+
+        logger.debug(f"File content length: {len(content)} bytes")
+
+        # Validate safety
+        is_safe, error_msg = validate_file_safety(filename, content)
+        if not is_safe:
+            logger.warning(f"Safety check failed: {error_msg}")
+            emit('manual_process_response', {
+                'status': 'error',
+                'message': f'Safety check failed: {error_msg}'
+            })
+            return
+
+        # Get analysis parameters
+        stored_params = memory_store.get_analysis_params()
+        if not stored_params or 'analysisParams' not in stored_params:
+            logger.warning("No analysis parameters found. Please start an analysis session first.")
+            emit('manual_process_response', {
+                'status': 'error',
+                'message': 'No analysis parameters set. Start an analysis session first.'
+            })
+            return
+
+        # Process based on type
+        if analysis_type == 'swv':
+            logger.info(f"Emitting to stream_instrument_data: {filename}")
+            socketio.emit('stream_instrument_data', {
+                'filename': filename,
+                'content': content,
+                'analysisParams': stored_params.get('analysisParams', {})
+            })
+        elif analysis_type == 'cv':
+            logger.info(f"Emitting to stream_cv_data: {filename}")
+            socketio.emit('stream_cv_data', {
+                'filename': filename,
+                'content': content
+            })
+        else:
+            emit('manual_process_response', {
+                'status': 'error',
+                'message': f'Unsupported analysis type: {analysis_type}'
+            })
+            return
+
+        emit('manual_process_response', {
+            'status': 'success',
+            'message': f'File {filename} sent for processing'
+        })
+
+    except Exception as e:
+        logger.error(f"Error in manual file processing: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        emit('manual_process_response', {
+            'status': 'error',
+            'message': str(e),
+            'traceback': traceback.format_exc()
         })
 
 # --- Main Application Entry Point ---
