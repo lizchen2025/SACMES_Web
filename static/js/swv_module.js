@@ -308,24 +308,21 @@ export class SWVModule {
                 const fileHandle = this.dom.params.fileHandleInput.value.trim();
                 console.log('[FREQUENCY SCAN] File handle:', fileHandle);
 
-                if (typeof window.getCurrentUserId !== 'function') {
-                    console.error('[FREQUENCY SCAN] getCurrentUserId function not found');
-                    alert('Please connect to your agent first by entering your User ID on the welcome page.');
-                    return;
-                }
+                // Get folder path from monitoring input
+                const folderPathInput = document.getElementById('swvFolderPathInput');
+                const folderPath = folderPathInput ? folderPathInput.value.trim() : '';
 
-                const userId = window.getCurrentUserId();
-                console.log('[FREQUENCY SCAN] Current user ID:', userId);
-
-                if (!userId) {
-                    console.error('[FREQUENCY SCAN] No user ID available');
-                    alert('Please connect to your agent first by entering your User ID on the welcome page.');
+                if (!folderPath) {
+                    alert('Please enter a folder path first to scan for frequencies.');
                     return;
                 }
 
                 console.log('[FREQUENCY SCAN] Emitting scan_available_frequencies');
+                console.log('[FREQUENCY SCAN] Folder path:', folderPath);
+                console.log('[FREQUENCY SCAN] File handle:', fileHandle);
+
                 this.socketManager.emit('scan_available_frequencies', {
-                    user_id: userId,
+                    folder_path: folderPath,
                     file_handle: fileHandle
                 });
                 console.log('[FREQUENCY SCAN] Event emitted successfully');
