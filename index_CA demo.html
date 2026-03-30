@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chronoamp Console</title>
+  <style>
+    :root {
+      --bg: #f0eadf;
+      --panel: rgba(255, 251, 245, 0.9);
+      --ink: #1b1a17;
+      --muted: #6f6658;
+      --line: rgba(27, 26, 23, 0.12);
+      --accent: #0f766e;
+      --accent-2: #d97706;
+      --danger: #b42318;
+      --grid: rgba(15, 118, 110, 0.14);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(217, 119, 6, 0.14), transparent 34%),
+        radial-gradient(circle at right, rgba(15, 118, 110, 0.16), transparent 28%),
+        linear-gradient(135deg, #f8f4ec 0%, #efe5d4 100%);
+      min-height: 100vh;
+    }
+
+    .shell {
+      width: min(1200px, calc(100vw - 32px));
+      margin: 24px auto;
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 20px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 18px 50px rgba(46, 36, 20, 0.08);
+    }
+
+    .controls {
+      padding: 24px;
+    }
+
+    .title {
+      margin: 0 0 8px;
+      font-size: 34px;
+      line-height: 1;
+      letter-spacing: 0.02em;
+    }
+
+    .subtitle {
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .group {
+      margin-bottom: 18px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    input {
+      width: 100%;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.75);
+      color: var(--ink);
+      font: inherit;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 22px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 18px;
+      font: inherit;
+      cursor: pointer;
+      transition: transform 120ms ease, opacity 120ms ease, box-shadow 120ms ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .primary {
+      background: var(--ink);
+      color: #fff;
+      box-shadow: 0 10px 24px rgba(27, 26, 23, 0.22);
+    }
+
+    .secondary {
+      background: rgba(255, 255, 255, 0.85);
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+
+    .status {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.65);
+      border: 1px solid var(--line);
+      min-height: 52px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .readout {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .metric {
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid var(--line);
+    }
+
+    .metric span {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .metric strong {
+      font-size: 24px;
+      font-weight: normal;
+    }
+
+    .visuals {
+      padding: 18px;
+      display: grid;
+      grid-template-rows: auto 1fr 180px;
+      gap: 18px;
+      min-height: 900px;
+    }
+
+    .plot-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 6px 0;
+    }
+
+    .plot-header h2 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: normal;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .plot-header .tag {
+      color: var(--accent);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .plot-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      min-height: 0;
+    }
+
+    .plot-card {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 10px;
+      min-height: 0;
+    }
+
+    .plot-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 4px;
+    }
+
+    .plot-card-header strong {
+      font-size: 14px;
+      font-weight: normal;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .plot-card-header span {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      border-radius: 18px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 241, 230, 0.94));
+      border: 1px solid var(--line);
+    }
+
+    .log {
+      width: 100%;
+      resize: none;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(27, 26, 23, 0.95);
+      color: #f6efe3;
+      padding: 14px;
+      font: 12px/1.5 Consolas, "Courier New", monospace;
+    }
+
+    @media (max-width: 900px) {
+      .shell {
+        grid-template-columns: 1fr;
+      }
+
+      .visuals {
+        min-height: 820px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="panel controls">
+      <h1 class="title">Chronoamp Console</h1>
+      <p class="subtitle">PC communicates with Arduino at 115200. Arduino forwards complete commands to the sensor at 230400 and streams data back for plotting.</p>
+
+      <div class="group">
+        <label for="bias">Bias Voltage (mV)</label>
+        <input id="bias" type="number" step="1" value="-500">
+      </div>
+
+      <div class="group">
+        <label for="odr">Sampling Frequency (Hz)</label>
+        <input id="odr" type="number" step="0.01" value="0.1">
+      </div>
+
+      <div class="group">
+        <label for="num">Total Samples</label>
+        <input id="num" type="number" step="1" value="100">
+      </div>
+
+      <div class="button-row">
+        <button id="connectBtn" class="primary">Connect Serial</button>
+        <button id="startBtn" class="secondary" disabled>Send Command</button>
+        <button id="clearBtn" class="secondary">Clear Plot</button>
+      </div>
+
+      <div id="status" class="status">Browser must support Web Serial. Open this page in Chrome or Edge on `https://` or `http://localhost`.</div>
+
+      <div class="readout">
+        <div class="metric">
+          <span>Port</span>
+          <strong id="portLabel">Not connected</strong>
+        </div>
+        <div class="metric">
+          <span>Last Current</span>
+          <strong id="lastValue">-</strong>
+        </div>
+        <div class="metric">
+          <span>Samples</span>
+          <strong id="sampleCount">0</strong>
+        </div>
+        <div class="metric">
+          <span>Trace</span>
+          <strong id="traceLabel">Idle</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel visuals">
+      <div class="plot-header">
+        <h2>Realtime Signal</h2>
+        <div class="tag" id="commandPreview">CA BIAS=-500 ODR=0.1 NUM=100</div>
+      </div>
+      <div class="plot-grid">
+        <div class="plot-card">
+          <div class="plot-card-header">
+            <strong>Autoscale</strong>
+            <span>Dynamic min/max</span>
+          </div>
+          <canvas id="plotAuto"></canvas>
+        </div>
+        <div class="plot-card">
+          <div class="plot-card-header">
+            <strong>Zero Baseline</strong>
+            <span>Y min fixed at 0</span>
+          </div>
+          <canvas id="plotZero"></canvas>
+        </div>
+      </div>
+      <textarea id="log" class="log" readonly></textarea>
+    </section>
+  </main>
+
+  <script>
+    const connectBtn = document.getElementById("connectBtn");
+    const startBtn = document.getElementById("startBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const biasInput = document.getElementById("bias");
+    const odrInput = document.getElementById("odr");
+    const numInput = document.getElementById("num");
+    const statusEl = document.getElementById("status");
+    const portLabel = document.getElementById("portLabel");
+    const lastValueEl = document.getElementById("lastValue");
+    const sampleCountEl = document.getElementById("sampleCount");
+    const traceLabel = document.getElementById("traceLabel");
+    const commandPreview = document.getElementById("commandPreview");
+    const logEl = document.getElementById("log");
+    const canvasAuto = document.getElementById("plotAuto");
+    const canvasZero = document.getElementById("plotZero");
+    const ctxAuto = canvasAuto.getContext("2d");
+    const ctxZero = canvasZero.getContext("2d");
+
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let readBuffer = "";
+    let samples = [];
+    let currentTrace = "Idle";
+    let zeroPlotMin = null;
+    let zeroPlotMax = null;
+
+    function setStatus(message, isError = false) {
+      statusEl.textContent = message;
+      statusEl.style.color = isError ? "var(--danger)" : "var(--muted)";
+    }
+
+    function appendLog(line) {
+      const time = new Date().toLocaleTimeString();
+      logEl.value += `[${time}] ${line}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function buildCommand() {
+      const bias = biasInput.value.trim();
+      const odr = odrInput.value.trim();
+      const num = numInput.value.trim();
+      return `CA BIAS=${bias} ODR=${odr} NUM=${num}`;
+    }
+
+    function updateCommandPreview() {
+      commandPreview.textContent = buildCommand();
+    }
+
+    function resizeCanvasElement(canvas, ctx) {
+      const ratio = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.max(320, Math.floor(rect.width * ratio));
+      canvas.height = Math.max(280, Math.floor(rect.height * ratio));
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    }
+
+    function resizeCanvas() {
+      resizeCanvasElement(canvasAuto, ctxAuto);
+      resizeCanvasElement(canvasZero, ctxZero);
+      drawPlots();
+    }
+
+    function drawPlot(ctx, canvas, mode) {
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#f8f1e6";
+      ctx.fillRect(0, 0, width, height);
+
+      const left = 56;
+      const right = 18;
+      const top = 18;
+      const bottom = 34;
+      const plotWidth = width - left - right;
+      const plotHeight = height - top - bottom;
+
+      ctx.strokeStyle = "rgba(15, 118, 110, 0.14)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 5; i += 1) {
+        const y = top + (plotHeight / 5) * i;
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(left + plotWidth, y);
+        ctx.stroke();
+      }
+
+      ctx.strokeStyle = "rgba(27, 26, 23, 0.25)";
+      ctx.beginPath();
+      ctx.moveTo(left, top);
+      ctx.lineTo(left, top + plotHeight);
+      ctx.lineTo(left + plotWidth, top + plotHeight);
+      ctx.stroke();
+
+      if (samples.length === 0) {
+        ctx.fillStyle = "#6f6658";
+        ctx.font = "16px Georgia";
+        ctx.fillText("No samples yet", left + 12, top + 24);
+        return;
+      }
+
+      let minY = samples[0].value;
+      let maxY = samples[0].value;
+      let maxX = samples[samples.length - 1].index;
+      for (const sample of samples) {
+        if (sample.value < minY) minY = sample.value;
+        if (sample.value > maxY) maxY = sample.value;
+      }
+
+      if (mode === "zero") {
+        minY = zeroPlotMin !== null ? zeroPlotMin : 0;
+        maxY = zeroPlotMax !== null ? zeroPlotMax : 100;
+      }
+
+      if (Math.abs(maxY - minY) < 1e-9) {
+        maxY += 1;
+      }
+      if (maxX <= 0) {
+        maxX = samples.length - 1 || 1;
+      }
+
+      ctx.strokeStyle = "#0f766e";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      samples.forEach((sample, i) => {
+        const x = left + (sample.index / maxX) * plotWidth;
+        const y = top + ((maxY - sample.value) / (maxY - minY)) * plotHeight;
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+
+      ctx.fillStyle = "#6f6658";
+      ctx.font = "12px Georgia";
+      ctx.fillText(`${maxY.toFixed(3)} uA`, 8, top + 8);
+      ctx.fillText(`${minY.toFixed(3)} uA`, 8, top + plotHeight);
+      ctx.fillText("0", left - 4, top + plotHeight + 20);
+      ctx.fillText(`${maxX}`, left + plotWidth - 24, top + plotHeight + 20);
+    }
+
+    function drawPlots() {
+      drawPlot(ctxAuto, canvasAuto, "auto");
+      drawPlot(ctxZero, canvasZero, "zero");
+    }
+
+    function clearPlot() {
+      samples = [];
+      zeroPlotMin = null;
+      zeroPlotMax = null;
+      currentTrace = "Idle";
+      traceLabel.textContent = currentTrace;
+      lastValueEl.textContent = "-";
+      sampleCountEl.textContent = "0";
+      drawPlots();
+    }
+
+    function parseLine(line) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      appendLog(trimmed);
+
+      if (trimmed === "I" || trimmed === "VSE0" || trimmed === "VRE0") {
+        currentTrace = trimmed;
+        traceLabel.textContent = trimmed;
+        if (trimmed === "I") {
+          samples = [];
+          drawPlots();
+        }
+        return;
+      }
+
+      const match = trimmed.match(/^index:(-?\d+),\s*(-?\d+(?:\.\d+)?)/i);
+      if (!match) {
+        return;
+      }
+
+      const index = Number(match[1]);
+      const value = Number(match[2]);
+      if (!Number.isFinite(index) || !Number.isFinite(value)) {
+        return;
+      }
+
+      samples.push({ index, value });
+      if (zeroPlotMin === null || zeroPlotMax === null) {
+        if (value >= 0) {
+          zeroPlotMin = 0;
+          zeroPlotMax = value + 100;
+        } else {
+          zeroPlotMin = value - 100;
+          zeroPlotMax = 0;
+        }
+      }
+      if (samples.length > 4000) {
+        samples.shift();
+      }
+
+      lastValueEl.textContent = `${value.toFixed(3)} uA`;
+      sampleCountEl.textContent = String(samples.length);
+      drawPlots();
+    }
+
+    async function readLoop() {
+      const decoder = new TextDecoder();
+      try {
+        while (port && port.readable) {
+          reader = port.readable.getReader();
+          try {
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) {
+                break;
+              }
+              readBuffer += decoder.decode(value, { stream: true });
+              let newlineIndex = readBuffer.search(/\r|\n/);
+              while (newlineIndex !== -1) {
+                const line = readBuffer.slice(0, newlineIndex);
+                readBuffer = readBuffer.slice(newlineIndex + 1);
+                parseLine(line);
+                readBuffer = readBuffer.replace(/^[\r\n]+/, "");
+                newlineIndex = readBuffer.search(/\r|\n/);
+              }
+            }
+          } finally {
+            reader.releaseLock();
+            reader = null;
+          }
+        }
+      } catch (error) {
+        setStatus(`Serial read error: ${error.message}`, true);
+        appendLog(`Serial read error: ${error.message}`);
+      }
+    }
+
+    async function connectSerial() {
+      if (!("serial" in navigator)) {
+        setStatus("Web Serial is not available in this browser.", true);
+        return;
+      }
+
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        writer = port.writable.getWriter();
+        portLabel.textContent = "115200 open";
+        startBtn.disabled = false;
+        connectBtn.textContent = "Reconnect";
+        setStatus("Serial connected. Ready to send CA command.");
+        appendLog("Serial port connected at 115200 baud.");
+        readLoop();
+      } catch (error) {
+        setStatus(`Connection failed: ${error.message}`, true);
+      }
+    }
+
+    async function sendCommand() {
+      if (!writer) {
+        setStatus("Serial port is not connected.", true);
+        return;
+      }
+
+      const command = buildCommand();
+      try {
+        await writer.write(new TextEncoder().encode(`${command}\r\n`));
+        clearPlot();
+        currentTrace = "I";
+        traceLabel.textContent = currentTrace;
+        updateCommandPreview();
+        setStatus(`Sent: ${command}`);
+        appendLog(`TX ${command}`);
+      } catch (error) {
+        setStatus(`Send failed: ${error.message}`, true);
+      }
+    }
+
+    connectBtn.addEventListener("click", connectSerial);
+    startBtn.addEventListener("click", sendCommand);
+    clearBtn.addEventListener("click", clearPlot);
+    biasInput.addEventListener("input", updateCommandPreview);
+    odrInput.addEventListener("input", updateCommandPreview);
+    numInput.addEventListener("input", updateCommandPreview);
+    window.addEventListener("resize", resizeCanvas);
+
+    updateCommandPreview();
+    resizeCanvas();
+    clearPlot();
+  </script>
+</body>
+</html>

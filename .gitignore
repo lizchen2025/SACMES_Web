@@ -1,0 +1,15 @@
+python_embedded/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+logs/
+uploads/
+*.log
+sacmes_local_debug.log
+.sacmes_port
+
+.claude/
+
+*.zip

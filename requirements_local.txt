@@ -1,0 +1,19 @@
+# SACMES Local Version - Dependencies
+# Minimal dependencies for standalone desktop application
+
+# Web framework
+Flask>=2.3.0,<3.0.0
+Flask-SocketIO>=5.3.6
+python-socketio>=5.10.0
+
+# Scientific computing (required by analyzers)
+numpy>=1.24.0,<2.0.0
+scipy>=1.10.0,<2.0.0
+
+# File monitoring
+watchdog>=3.0.0
+
+# Note: This version does NOT require:
+# - redis (using in-memory storage instead)
+# - gevent (using threading mode instead)
+# - gunicorn (using built-in Flask server for local use)

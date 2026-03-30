@@ -1,0 +1,1365 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SACMES Local Application</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            padding: 1rem;
+            box-sizing: border-box;
+            background-color: #f3f4f6; /* Light gray background */
+        }
+        .main-content-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            width: 100%;
+            max-width: 1400px;
+            margin-top: 1rem;
+            margin-bottom: 1rem;
+        }
+        .screen-card {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #welcomeScreen {
+            max-width: 600px;
+        }
+
+        .hover-highlight:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transform: translateY(-2px);
+        }
+        .file-list-container {
+            flex-grow: 1;
+            max-height: calc(100vh - 300px);
+            min-height: 250px;
+        }
+        .file-list-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .file-list-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .file-list-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        .file-list-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        .input-highlight {
+            background-color: #fffbe6;
+            transition: background-color 0.3s ease;
+        }
+        .input-highlight.filled {
+            background-color: white;
+        }
+
+        .select-highlight {
+            background-color: #f3f4f6;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%236B7280%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13.2-6.4H18.6c-5%200-9.3%201.8-13.2%206.4-3.9%204.6-5.8%2010.1-5.8%2016.3s1.9%2011.7%205.8%2016.3L132.8%20224.2c3.9%204.6%209.1%206.9%2014.2%206.9s10.3-2.3%2014.2-6.9l118-122.2c3.9-4.6%205.8-10.1%205.8-16.3s-1.9-11.7-5.8-16.3z%22%2F%3E%3C%2Fsvg%3E');
+            background-repeat: no-repeat;
+            background-position: right 0.7em top 50%, 0 0;
+            background-size: 0.65em auto, 100%;
+            padding-right: 2.5em;
+        }
+        .plotly-plot-container {
+            height: 500px;  /* Large size like SWV */
+            min-height: 400px;
+            width: 100%;
+        }
+        .plotly-plot-container-sm {
+            height: 280px;
+            min-height: 200px;
+            width: 100%;
+        }
+        .plotly-plot-container-xs {
+            height: 200px;
+            min-height: 150px;
+            width: 100%;
+        }
+        .plotly-trend-plot-container {
+            height: 250px;
+            min-height: 150px;
+            width: 100%;
+        }
+        #cvPreviewPlot {
+            height: 500px !important; /* Large size like SWV */
+            width: 100% !important;
+            position: relative !important;
+        }
+        #cvPreviewPlot .js-plotly-plot {
+            height: 100% !important;
+            width: 100% !important;
+        }
+        /* Move Plotly modebar to bottom-right so it doesn't overlap legends */
+        .modebar-container {
+            top: auto !important;
+            bottom: 2px !important;
+            right: 2px !important;
+        }
+        #connectionStatus {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+            z-index: 1000;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        #connectionStatus.connected {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        #connectionStatus.disconnected {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        #connectionStatus.reconnecting {
+            background-color: #fffbeb;
+            color: #92400e;
+        }
+
+        /* Styles for the Warning Modal */
+        .modal {
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            max-width: 500px;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            text-align: center;
+        }
+        .close-button {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .close-button:hover,
+        .close-button:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        
+    </style>
+    <!-- Plotly.js CDN -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <!-- Socket.IO Client CDN -->
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+</head>
+<body class="bg-gray-100">
+
+
+    <!-- Connection Status Indicator -->
+    <div id="connectionStatus" class="disconnected">
+        Disconnected
+    </div>
+
+
+    <!-- Main Content Container -->
+    <div class="main-content-container">
+
+        <!-- Welcome Screen -->
+        <div id="welcomeScreen" class="screen-card text-center mb-6">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">Welcome to SACMES</h1>
+            <p class="text-md text-gray-600 mb-8"> </p>
+
+            <div class="mb-8 flex flex-col items-center">
+                <img src="sacmes_welcome.png" alt="SACMES Welcome Image" class="rounded-lg shadow-md mb-4 max-w-full h-auto">
+                <p class="text-md text-gray-600 mb-8"> </p>
+                <div class="text-left text-lg text-gray-700">
+                    <p class="mb-2">"This is a new and continuously updated implementation of the Software for the Analysis and Continuous Monitoring of Electrochemical Systems (SACMES)"</p>
+                    <p class="mb-2">Original Creator: <strong>Samuel Curtis</strong> (Johns Hopkins Ph.D., 2025)</p>
+                    <p>Current Developer: <strong>Lizhe Chen</strong> (UNC BME Graduate Student)</p>
+                </div>
+                <p class="text-md text-gray-600 mb-8"> </p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <button id="swvBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75">
+                    SWV
+                </button>
+                <button id="cvBtn" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-4 px-6 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75">
+                    CV
+                </button>
+                <button id="caBtn" disabled class="bg-gray-400 text-white font-semibold py-4 px-6 rounded-lg shadow-md cursor-not-allowed transition duration-300 ease-in-out hover-highlight opacity-60">
+                    HT CA Test
+                </button>
+                <button disabled class="bg-gray-400 text-white font-semibold py-4 px-6 rounded-lg shadow-md cursor-not-allowed transition duration-300 ease-in-out hover-highlight">
+                    Filter (Coming Soon)
+                </button>
+            </div>
+
+        </div>
+
+        <!-- SWV Analysis Screen -->
+        <div id="swvAnalysisScreen" class="hidden screen-card mb-6" data-screen="swv">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">SWV Analysis</h2>
+                <button id="backToWelcomeFromSWV" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg shadow-sm transition duration-300">
+                    &larr; Back to Welcome
+                </button>
+            </div>
+
+            <!-- SWV: Folder Monitoring -->
+            <div class="mb-6 p-4 border-l-4 border-blue-500 bg-blue-50 rounded-r-lg">
+                <h4 class="text-md font-bold text-blue-800 mb-3">Data Folder Path</h4>
+                <div class="flex gap-2 mb-3">
+                    <input type="text" id="swvFolderPathInput" placeholder="Enter folder path or click Browse"
+                           class="flex-1 px-3 py-2 border border-blue-300 rounded text-sm focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-200"/>
+                    <button id="swvBrowseBtn" data-browse-target="swvFolderPathInput"
+                            class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-2 rounded text-sm font-semibold transition duration-200 shadow-sm">
+                        Browse
+                    </button>
+                    <button id="swvStartMonitorBtn" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded text-sm font-semibold transition duration-200 shadow-sm">
+                        Start Monitoring
+                    </button>
+                    <button id="swvStopMonitorBtn" class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded text-sm font-semibold transition duration-200 shadow-sm" disabled>
+                        Stop
+                    </button>
+                </div>
+                <p id="swvMonitorStatus" class="text-sm text-gray-600 mb-2"></p>
+                <div id="swvMonitorFilesList" class="mt-3 hidden">
+                    <p class="text-xs font-semibold text-gray-700 mb-2">Files in Folder:</p>
+                    <div id="swvMonitorFilesContainer" class="max-h-48 overflow-y-auto bg-white border border-blue-200 rounded p-2 shadow-inner">
+                        <!-- Files will be listed here -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
+                <!-- SWV: Analysis Parameters -->
+                <div class="lg:col-span-2 space-y-4 text-left">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-3">Analysis Parameters:</h3>
+
+                    <div class="mb-4 p-4 bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-300 rounded-lg">
+                        <label class="block text-gray-800 text-md font-bold mb-3">Analysis Mode:</label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <label class="flex items-center p-3 bg-white border-2 border-blue-400 rounded-lg cursor-pointer hover:shadow-md transition">
+                                <input type="radio" name="analysisMode" value="continuous" checked class="mr-3 w-5 h-5">
+                                <div>
+                                    <span class="text-sm font-semibold text-gray-800">Continuous Monitor</span>
+                                    <p class="text-xs text-gray-600">Real-time trend analysis</p>
+                                </div>
+                            </label>
+                            <label class="flex items-center p-3 bg-white border-2 border-purple-400 rounded-lg cursor-pointer hover:shadow-md transition">
+                                <input type="radio" name="analysisMode" value="frequency_map" class="mr-3 w-5 h-5">
+                                <div>
+                                    <span class="text-sm font-semibold text-gray-800">Frequency Map</span>
+                                    <p class="text-xs text-gray-600">Frequency vs Charge plot</p>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="fileHandleInput" class="block text-gray-700 text-sm font-bold mb-1">File Handle (e.g., SWV_):</label>
+                        <input type="text" id="fileHandleInput" value="" placeholder="Enter file prefix (e.g., SWV_)"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="frequencyInput" class="block text-gray-700 text-sm font-bold mb-1">
+                            <span id="frequencyInputLabel">Frequency (Hz, comma-separated):</span>
+                        </label>
+                        <input type="text" id="frequencyInput" value="" placeholder="Enter frequencies or use Scan Folder button (Only in Frequency map)"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        <p id="frequencyInputHint" class="text-xs text-gray-500 mt-1 hidden">For Frequency Map: Use "Scan Folder" button to auto-detect frequencies, or manually enter (e.g., 10,20,50,100,200,500,1000)</p>
+
+                        <div id="frequencySelectorContainer" class="hidden mt-3 p-3 bg-gray-50 border rounded">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-sm font-semibold text-gray-700">Auto-detected Frequencies:</span>
+                                <button id="scanFrequenciesBtn" class="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded">
+                                    Scan Folder
+                                </button>
+                            </div>
+                            <div id="frequencyCheckboxContainer" class="grid grid-cols-4 gap-2 mb-2 max-h-40 overflow-y-auto">
+                                <!-- Checkboxes will be dynamically added here -->
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button id="selectAllFreqBtn" class="text-xs bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Select All</button>
+                                <button id="deselectAllFreqBtn" class="text-xs bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Deselect All</button>
+                                <button id="applyFreqSelectionBtn" class="text-xs bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded ml-auto">Apply Selection</button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">Or manually edit the frequency input above</p>
+                        </div>
+                    </div>
+
+                    <div id="numFilesContainer">
+                        <label for="numFilesInput" class="block text-gray-700 text-sm font-bold mb-1">Number of Files (e.g., 100):</label>
+                        <input type="number" id="numFilesInput" value="100" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        <p class="text-xs text-gray-500 mt-1">For Continuous Monitor mode: Total files per frequency</p>
+                    </div>
+                    <div id="numFilesFrequencyMapHint" class="hidden p-3 bg-purple-50 border-l-4 border-purple-400 rounded-r">
+                        <p class="text-sm text-purple-700">
+                            <strong>Frequency Map Mode:</strong> Each frequency requires only ONE file named as {handle}_{frequency}Hz.txt
+                        </p>
+                    </div>
+
+                    <div>
+                        <label for="selectedElectrodesInput" class="block text-gray-700 text-sm font-bold mb-1">Selected Electrodes (comma-separated, e.g., "1,2,3"):</label>
+                        <input type="text" id="selectedElectrodesInput" placeholder="e.g., 1,2,3 or leave empty"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div class="border-t pt-4 mt-4">
+                        <h4 class="text-md font-semibold text-gray-700 mb-2">Signal Processing Filters:</h4>
+
+                        <div class="mb-4 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded-r">
+                            <p class="text-sm text-yellow-700">
+                                <strong>Performance Note:</strong> Enabling Hampel filter and auto parameter selection may increase processing time significantly.
+                            </p>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Hampel Filter:</label>
+                            <div class="grid grid-cols-3 gap-4">
+                                <label class="flex items-center">
+                                    <input type="radio" name="hampelMode" value="disabled" checked class="mr-2">
+                                    <span class="text-sm">Disabled</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="hampelMode" value="auto" class="mr-2">
+                                    <span class="text-sm">Auto</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="hampelMode" value="manual" class="mr-2">
+                                    <span class="text-sm">Manual</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Savitzky-Golay Filter:</label>
+                            <div class="grid grid-cols-3 gap-4">
+                                <label class="flex items-center">
+                                    <input type="radio" name="sgMode" value="disabled" class="mr-2">
+                                    <span class="text-sm">Disabled</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="sgMode" value="auto" checked class="mr-2">
+                                    <span class="text-sm">Auto</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="sgMode" value="manual" class="mr-2">
+                                    <span class="text-sm">Manual</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div id="autoModeDescription" class="mb-4 p-3 bg-blue-50 border-l-4 border-blue-500 rounded-r">
+                            <p class="text-sm text-blue-700">
+                                <strong>Auto Mode:</strong> Hampel window = 1/10 FWHM, threshold = 3x MAD; SG window = 1/3 FWHM, degree = 2
+                            </p>
+                        </div>
+
+                        <div id="hampelManualParams" class="hidden">
+                            <h5 class="text-sm font-semibold text-gray-600 mb-2">Hampel Filter Parameters:</h5>
+                            <div class="grid grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label for="hampelWindowInput" class="block text-gray-700 text-sm font-bold mb-1">Hampel Window:</label>
+                                    <input type="number" id="hampelWindowInput" value="5" min="3" step="2"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                                <div>
+                                    <label for="hampelThresholdInput" class="block text-gray-700 text-sm font-bold mb-1">Hampel Threshold (x MAD):</label>
+                                    <input type="number" id="hampelThresholdInput" value="3.0" min="1.0" step="0.1"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="sgManualParams" class="hidden">
+                            <h5 class="text-sm font-semibold text-gray-600 mb-2">Savitzky-Golay Filter Parameters:</h5>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label for="sgWindowInput" class="block text-gray-700 text-sm font-bold mb-1">SG Window:</label>
+                                    <input type="number" id="sgWindowInput" value="15" min="3" step="2"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                                <div>
+                                    <label for="sgDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">SG Degree:</label>
+                                    <input type="number" id="sgDegreeInput" value="2" min="0"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4">
+                            <label for="polyfitDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">Polyfit Degree:</label>
+                            <input type="number" id="polyfitDegreeInput" value="15" min="1"
+                                   class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        </div>
+                        <div class="mt-4">
+                            <label for="cutoffFrequencyInput" class="block text-gray-700 text-sm font-bold mb-1">Cutoff Frequency (Hz):</label>
+                            <input type="number" id="cutoffFrequencyInput" value="50" min="0"
+                                   class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        </div>
+                        <div class="mt-4 p-3 border rounded-lg bg-gray-50">
+                            <p class="text-xs text-gray-500 mb-2">Voltage windows for polynomial regression (xstart &gt; xend, leave blank for full range):</p>
+                            <p class="text-sm font-semibold text-gray-700 mb-1">Low Freq (&le; cutoff): xstart / xend (V)</p>
+                            <div class="grid grid-cols-2 gap-2 mb-2">
+                                <input type="number" id="lowXstartInput" step="0.01" placeholder="e.g. 0.1"
+                                       class="shadow appearance-none border rounded w-full py-1 px-2 text-gray-700 text-sm leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                <input type="number" id="lowXendInput" step="0.01" placeholder="e.g. -0.5"
+                                       class="shadow appearance-none border rounded w-full py-1 px-2 text-gray-700 text-sm leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <p class="text-sm font-semibold text-gray-700 mb-1">High Freq (&gt; cutoff): xstart / xend (V)</p>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input type="number" id="highXstartInput" step="0.01" placeholder="e.g. 0.1"
+                                       class="shadow appearance-none border rounded w-full py-1 px-2 text-gray-700 text-sm leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                <input type="number" id="highXendInput" step="0.01" placeholder="e.g. -0.5"
+                                       class="shadow appearance-none border rounded w-full py-1 px-2 text-gray-700 text-sm leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SWV: Data Import Settings -->
+                <div class="lg:col-span-1 space-y-4 text-left">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-3">Settings:</h3>
+
+                    <div class="border-b pb-4">
+                        <h4 class="text-md font-semibold text-gray-700 mb-2">Data Column Settings:</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="voltageColumnInput" class="block text-gray-700 text-sm font-bold mb-1">Potential Column (1-based):</label>
+                                <input type="number" id="voltageColumnInput" value="1" min="1"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div>
+                                <label for="currentColumnInput" class="block text-gray-700 text-sm font-bold mb-1">First Current Column (1-based):</label>
+                                <input type="number" id="currentColumnInput" value="2" min="1"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div class="col-span-2">
+                                <label for="spacingIndexInput" class="block text-gray-700 text-sm font-bold mb-1">Space Between Current Columns:</label>
+                                <input type="number" id="spacingIndexInput" value="3" min="0"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <label for="delimiterInput" class="block text-gray-700 text-sm font-bold mb-1">Delimiter:</label>
+                            <select id="delimiterInput"
+                                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                <option value="1">Space</option>
+                                <option value="2">Tab</option>
+                                <option value="3">Comma</option>
+                            </select>
+                        </div>
+                        <div class="mt-4">
+                            <label for="fileExtensionInput" class="block text-gray-700 text-sm font-bold mb-1">File Extension:</label>
+                            <select id="fileExtensionInput"
+                                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                <option value=".txt">.txt</option>
+                                <option value=".csv">.csv</option>
+                                <option value=".dta">.dta</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="sampleRateInput" class="block text-gray-700 text-sm font-bold mb-1">Sampling Rate (s/file):</label>
+                        <input type="number" id="sampleRateInput" value="20" min="0.1" step="0.1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="selectedOptionsInput" class="block text-gray-700 text-sm font-bold mb-1">Calculation Method:</label>
+                        <select id="selectedOptionsInput"
+                                class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                            <option value="Peak Height Extraction">Peak Height Extraction</option>
+                            <option value="Area Under the Curve">Area Under the Curve</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="xAxisOptionsInput" class="block text-gray-700 text-sm font-bold mb-1">X-axis Units:</label>
+                        <select id="xAxisOptionsInput"
+                                class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                            <option value="File Number">File Number</option>
+                            <option value="Experiment Time">Experiment Time</option>
+                        </select>
+                    </div>
+                </div>
+
+                <p id="folderStatus" class="hidden lg:col-span-3"></p>
+
+                <div class="lg:col-span-3 flex justify-end pt-6">
+                    <button id="startAnalysisBtn"
+                            class="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75">
+                        Start Analysis & Sync
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- CV Analysis Screen -->
+        <div id="cvAnalysisScreen" class="hidden screen-card mb-6" data-screen="cv-settings">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">CV Analysis</h2>
+                <button id="backToWelcomeFromCV" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg shadow-sm transition duration-300">
+                    &larr; Back to Welcome
+                </button>
+            </div>
+
+            <!-- CV: Folder Monitoring -->
+            <div class="mb-6 p-4 border-l-4 border-blue-500 bg-blue-50 rounded-r-lg">
+                <h4 class="text-md font-bold text-blue-800 mb-3">Data Folder Path</h4>
+                <div class="flex gap-2 mb-3">
+                    <input type="text" id="cvFolderPathInput" placeholder="Enter folder path or click Browse"
+                           class="flex-1 px-3 py-2 border border-blue-300 rounded text-sm focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-200"/>
+                    <button id="cvBrowseBtn" data-browse-target="cvFolderPathInput"
+                            class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-2 rounded text-sm font-semibold transition duration-200 shadow-sm">
+                        Browse
+                    </button>
+                    <button id="cvStartMonitorBtn" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded text-sm font-semibold transition duration-200 shadow-sm">
+                        Start Monitoring
+                    </button>
+                    <button id="cvStopMonitorBtn" class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded text-sm font-semibold transition duration-200 shadow-sm" disabled>
+                        Stop
+                    </button>
+                </div>
+                <p id="cvMonitorStatus" class="text-sm text-gray-600 mb-2"></p>
+                <div id="cvMonitorFilesList" class="mt-3 hidden">
+                    <p class="text-xs font-semibold text-gray-700 mb-2">Files in Folder:</p>
+                    <div id="cvMonitorFilesContainer" class="max-h-48 overflow-y-auto bg-white border border-blue-200 rounded p-2 shadow-inner">
+                        <!-- Files will be listed here -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
+                <!-- CV: Analysis Parameters -->
+                <div class="lg:col-span-2 space-y-4 text-left">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-3">Analysis Parameters:</h3>
+
+                    <div>
+                        <label for="cvFileHandleInput" class="block text-gray-700 text-sm font-bold mb-1">File Handle (e.g., CV_):</label>
+                        <input type="text" id="cvFileHandleInput" value="CV_"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div>
+                        <label for="cvNumFilesInput" class="block text-gray-700 text-sm font-bold mb-1">Number of Files (e.g., 50):</label>
+                        <input type="number" id="cvNumFilesInput" value="50" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+
+                    <div>
+                        <label for="cvSelectedElectrodesInput" class="block text-gray-700 text-sm font-bold mb-1">Selected Electrodes (comma-separated, e.g., "1,2,3"):</label>
+                        <input type="text" id="cvSelectedElectrodesInput" placeholder="e.g., 1,2,3 or leave empty"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                    <div class="border-t pt-4 mt-4">
+                        <h4 class="text-md font-semibold text-gray-700 mb-2">CV Parameters:</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="cvScanRateInput" class="block text-gray-700 text-sm font-bold mb-1">Scan Rate (V/s):</label>
+                                <input type="number" id="cvScanRateInput" value="0.1" step="0.01" min="0.001"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div>
+                                <label for="cvMassTransportInput" class="block text-gray-700 text-sm font-bold mb-1">Mass Transport:</label>
+                                <select id="cvMassTransportInput" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                    <option value="surface">Surface-bound</option>
+                                    <option value="solution">Solution-phase</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            <div>
+                                <label for="cvLowVoltageInput" class="block text-gray-700 text-sm font-bold mb-1">Low Voltage (V):</label>
+                                <input type="number" id="cvLowVoltageInput" value="-0.5" step="0.01"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div>
+                                <label for="cvHighVoltageInput" class="block text-gray-700 text-sm font-bold mb-1">High Voltage (V):</label>
+                                <input type="number" id="cvHighVoltageInput" value="0.5" step="0.01"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                        </div>
+
+                        <div class="mt-4">
+                            <label for="cvAnalysisOptionsInput" class="block text-gray-700 text-sm font-bold mb-1">Analysis Type:</label>
+                            <select id="cvAnalysisOptionsInput" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                <option value="Peak Height Extraction">Peak Height Extraction</option>
+                                <option value="Area Under the Curve">Area Under the Curve</option>
+                            </select>
+                        </div>
+
+                        <!-- CV SG Filter Options -->
+                        <div class="mt-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Savitzky-Golay Filter:</label>
+                            <div class="grid grid-cols-3 gap-4">
+                                <label class="flex items-center">
+                                    <input type="radio" name="cvSgMode" value="disabled" class="mr-2">
+                                    <span class="text-sm">Disabled</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="cvSgMode" value="auto" checked class="mr-2">
+                                    <span class="text-sm">Auto</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="cvSgMode" value="manual" class="mr-2">
+                                    <span class="text-sm">Manual</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- CV Auto Mode Description -->
+                        <div class="mt-4 p-3 bg-blue-50 border-l-4 border-blue-500 rounded-r">
+                            <p class="text-sm text-blue-700">
+                                <strong>Auto Mode:</strong> SG window = 20% of data length, degree = 2. Use Manual mode for fine-tuning performance.
+                            </p>
+                        </div>
+
+                        <!-- CV SG Manual Parameters -->
+                        <div id="cvSgManualParams" class="hidden mt-4">
+                            <h5 class="text-sm font-semibold text-gray-600 mb-2">Savitzky-Golay Filter Parameters:</h5>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label for="cvSgWindowInput" class="block text-gray-700 text-sm font-bold mb-1">SG Window:</label>
+                                    <input type="number" id="cvSgWindowInput" value="15" min="3" step="2"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                                <div>
+                                    <label for="cvSgDegreeInput" class="block text-gray-700 text-sm font-bold mb-1">SG Degree:</label>
+                                    <input type="number" id="cvSgDegreeInput" value="2" min="0"
+                                           class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end pt-4">
+                        <button id="cvNextToVisualizationBtn"
+                                class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75">
+                            Next: Select Segments
+                        </button>
+                    </div>
+                </div>
+
+                <!-- CV: Data Import Settings -->
+                <div class="lg:col-span-1 space-y-4 text-left">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-3">Settings:</h3>
+
+                    <div class="border-b pb-4">
+                        <h4 class="text-md font-semibold text-gray-700 mb-2">Data Column Settings:</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="cvVoltageColumnInput" class="block text-gray-700 text-sm font-bold mb-1">Potential Column (1-based):</label>
+                                <input type="number" id="cvVoltageColumnInput" value="1" min="1"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div>
+                                <label for="cvCurrentColumnInput" class="block text-gray-700 text-sm font-bold mb-1">Current Column (1-based):</label>
+                                <input type="number" id="cvCurrentColumnInput" value="2" min="1"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                            <div class="col-span-2">
+                                <label for="cvSpacingIndexInput" class="block text-gray-700 text-sm font-bold mb-1">Space Between Current Columns:</label>
+                                <input type="number" id="cvSpacingIndexInput" value="1" min="0"
+                                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <label for="cvDelimiterInput" class="block text-gray-700 text-sm font-bold mb-1">Delimiter:</label>
+                            <select id="cvDelimiterInput"
+                                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                <option value="1">Space</option>
+                                <option value="2">Tab</option>
+                                <option value="3">Comma</option>
+                            </select>
+                        </div>
+                        <div class="mt-4">
+                            <label for="cvFileExtensionInput" class="block text-gray-700 text-sm font-bold mb-1">File Extension:</label>
+                            <select id="cvFileExtensionInput"
+                                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                                <option value=".txt">.txt</option>
+                                <option value=".csv">.csv</option>
+                                <option value=".dta">.dta</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="cvSampleRateInput" class="block text-gray-700 text-sm font-bold mb-1">Sampling Rate (s/file):</label>
+                        <input type="number" id="cvSampleRateInput" value="20" min="0.1" step="0.1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- CV Visualization Screen for Segment Selection -->
+        <div id="cvVisualizationScreen" class="hidden screen-card mb-6" data-screen="cv-visualization">
+            <!-- Data Warning Banner -->
+            <div class="w-full bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4" role="alert">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm font-medium">
+                            <strong>Important:</strong> We do not save your data or settings. Please export your analysis results before closing this page. All data will be lost when you leave.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">CV Segment Selection</h2>
+                <button id="backToCVSettingsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg shadow-sm transition duration-300">
+                    &larr; Back to Settings
+                </button>
+            </div>
+
+            <!-- CV Preview Plot -->
+            <div class="mb-6">
+                <div class="border rounded-lg p-4 bg-gray-50">
+                    <h4 class="text-lg font-semibold text-gray-700 mb-2">CV Preview</h4>
+                    <div id="cvPreviewPlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200">
+                        <div class="flex items-center justify-center h-full text-gray-400">
+                            Loading CV preview...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Segment Selection -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                <div>
+                    <label for="cvForwardSegmentInput" class="block text-gray-700 text-sm font-bold mb-1">Forward Segment:</label>
+                    <select id="cvForwardSegmentInput" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                        <option value="">Auto-detect</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="cvReverseSegmentInput" class="block text-gray-700 text-sm font-bold mb-1">Reverse Segment:</label>
+                    <select id="cvReverseSegmentInput" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline select-highlight">
+                        <option value="">Auto-detect</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- CV Peak Detection Range -->
+            <div class="border-t pt-4 mt-4 mb-6">
+                <h4 class="text-md font-semibold text-gray-700 mb-2">Peak Detection Range:</h4>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="cvPeakMinVoltageInput" class="block text-gray-700 text-sm font-bold mb-1">Min Voltage (V):</label>
+                        <input type="number" id="cvPeakMinVoltageInput" step="0.01" placeholder="e.g., -0.8"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                    <div>
+                        <label for="cvPeakMaxVoltageInput" class="block text-gray-700 text-sm font-bold mb-1">Max Voltage (V):</label>
+                        <input type="number" id="cvPeakMaxVoltageInput" step="0.01" placeholder="e.g., 0.8"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Optional: Limit peak detection to specific voltage range to exclude noise peaks</p>
+            </div>
+
+            <!-- CV Voltage Probe -->
+            <div class="border-t pt-4 mt-4 mb-6">
+                <h4 class="text-md font-semibold text-gray-700 mb-2">Voltage Probe:</h4>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="cvProbeVoltage1Input" class="block text-gray-700 text-sm font-bold mb-1">Probe Voltage 1 (V):</label>
+                        <input type="number" id="cvProbeVoltage1Input" step="0.01" placeholder="e.g., 0.2"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                    <div>
+                        <label for="cvProbeVoltage2Input" class="block text-gray-700 text-sm font-bold mb-1">Probe Voltage 2 (V):</label>
+                        <input type="number" id="cvProbeVoltage2Input" step="0.01" placeholder="e.g., -0.2"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Optional: Monitor current at specific voltages. Vertical lines will show on preview plot.</p>
+                <div class="mt-3">
+                    <button id="updateProbeBtn" class="bg-teal-500 hover:bg-teal-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out">
+                        Update Probe Lines
+                    </button>
+                </div>
+            </div>
+
+            <!-- CV: Analysis Status -->
+            <div class="mb-4 p-4 border-l-4 border-blue-500 bg-blue-50 rounded-r-lg">
+                <h4 class="text-md font-bold text-blue-800">CV Analysis Status</h4>
+                <p id="cvStatus" class="text-sm text-gray-700 mt-1">Ready to start CV analysis</p>
+                <p id="cvFolderStatus" class="text-sm text-gray-600 mt-2"></p>
+            </div>
+
+            <div class="text-center">
+                <p id="cvSegmentStatus" class="text-sm text-gray-600 mb-4">Select forward and reverse segments, then start analysis</p>
+                <div class="flex justify-center gap-4">
+                    <button id="detectCVSegmentsBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition duration-300">
+                        Detect Segments
+                    </button>
+                    <button id="startCVAnalysisBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition duration-300 ease-in-out hover-highlight text-lg">
+                        Start CV Analysis & Sync
+                    </button>
+                </div>
+            </div>
+        </div>
+
+
+
+        <!-- CV Results Screen -->
+        <div id="cvResultsScreen" class="hidden screen-card mb-6" data-screen="cv-results">
+            <div class="w-full bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4" role="alert">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm font-medium">
+                            <strong>Important:</strong> We do not save your data or settings. Please export your analysis results before closing this page. All data will be lost when you leave.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-between items-center mb-6">
+                <h2 id="cvResultsTitle" class="text-3xl font-bold text-gray-800">CV Data Visualization</h2>
+                <button id="backToCVResultsSettingsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg shadow-sm transition duration-300">
+                    &larr; Back to CV Settings
+                </button>
+            </div>
+
+            <div id="cvElectrodeControls" class="hidden mb-6 flex flex-wrap justify-center gap-2">
+                <span class="text-sm font-medium text-gray-700 self-center mr-2">View Electrode:</span>
+            </div>
+
+            <div id="cvResultsRoot" class="space-y-4">
+                <!-- CV result plots will be dynamically added here -->
+            </div>
+
+            <div class="flex justify-center gap-4 mt-6">
+                <button id="exportCVDataBtn"
+                        class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 hidden">
+                    Export All Electrodes (XLSX)
+                </button>
+            </div>
+            <p id="cvExportStatus" class="text-sm text-gray-500 mt-2 text-left"></p>
+        </div>
+
+        <!-- Data Visualization Area (Initially hidden, will be shown after analysis) -->
+        <div id="visualizationArea" class="hidden screen-card text-center mt-6">
+            <!-- Data Warning Banner -->
+            <div class="w-full bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4" role="alert">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm font-medium">
+                            <strong>Important:</strong> We do not save your data or settings. Please export your analysis results before closing this page. All data will be lost when you leave.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">Data Visualization</h2>
+
+            <!-- Electrode Selection Controls -->
+            <div id="electrodeControls" class="mb-6 flex flex-wrap justify-center gap-2">
+                <span class="text-sm font-medium text-gray-700 self-center mr-2">View Electrode:</span>
+                <!-- Electrode buttons will be dynamically added here -->
+            </div>
+
+            <!-- Frequency Map Visualization Container (Hidden by default) -->
+            <div id="frequencyMapContainer" class="hidden">
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- Hold Mode: Side-by-Side Voltammogram Layout -->
+                    <div id="holdModeVoltammogramContainer" class="hidden">
+                        <!-- Top Row: Side-by-Side Voltammograms -->
+                        <div class="grid grid-cols-2 gap-4 mb-4">
+                            <!-- Left: Held Session Voltammogram -->
+                            <div class="border rounded-lg p-4 bg-gradient-to-r from-blue-50 to-purple-50">
+                                <h4 class="text-lg font-semibold text-gray-700 mb-2">
+                                    <span id="heldSessionVoltammogramTitle">Session 1</span> - Voltammogram Overlay
+                                </h4>
+                                <div id="heldSessionVoltammogramPlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                                    <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
+                                </div>
+                            </div>
+
+                            <!-- Right: Current Session Voltammogram -->
+                            <div class="border rounded-lg p-4 bg-gradient-to-r from-green-50 to-teal-50">
+                                <h4 class="text-lg font-semibold text-gray-700 mb-2">
+                                    <span id="currentSessionVoltammogramTitle">Session 2</span> - Current Voltammogram
+                                </h4>
+                                <div id="frequencyMapVoltammogramPlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                                    <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
+                                </div>
+                                <p id="currentFrequencyLabel" class="text-sm text-gray-600 mt-2 text-center">No frequency selected</p>
+                            </div>
+                        </div>
+
+                        <!-- Bottom Row: Overlaid Charge vs Frequency Plot -->
+                        <div class="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-pink-50">
+                            <h4 class="text-lg font-semibold text-gray-700 mb-2">Charge vs Frequency (Both Sessions)</h4>
+                            <div id="frequencyMapChargePlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                                <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2 text-center">Logarithmic frequency scale - Both sessions overlaid with legend</p>
+                        </div>
+                    </div>
+
+                    <!-- Non-Hold Mode: Single Session Layout -->
+                    <div id="nonHoldModeContainer">
+                        <!-- Voltammogram Plot (Top) -->
+                        <div class="border rounded-lg p-4 bg-gradient-to-r from-blue-50 to-purple-50">
+                            <h4 class="text-lg font-semibold text-gray-700 mb-2">Current Voltammogram</h4>
+                            <div id="nonHoldVoltammogramPlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                                <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
+                            </div>
+                            <p id="nonHoldFrequencyLabel" class="text-sm text-gray-600 mt-2 text-center">No frequency selected</p>
+                        </div>
+
+                        <!-- Frequency vs Charge Plot (Bottom) -->
+                        <div class="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-pink-50">
+                            <h4 class="text-lg font-semibold text-gray-700 mb-2">Frequency Map: Charge vs Frequency</h4>
+                            <div id="nonHoldChargePlot" class="w-full plotly-plot-container bg-white rounded-lg border border-gray-200" style="height: 400px;">
+                                <div class="flex items-center justify-center h-full text-gray-400">Waiting for data...</div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2 text-center">Logarithmic frequency scale</p>
+                        </div>
+                    </div>
+
+                    <!-- Frequency Map Statistics -->
+                    <div class="border rounded-lg p-4 bg-blue-50">
+                        <h4 class="text-md font-semibold text-gray-700 mb-2">Analysis Progress</h4>
+                        <div id="frequencyMapStats" class="text-sm text-gray-600">
+                            <p>Frequencies analyzed: <span id="analyzedFrequenciesCount" class="font-bold">0</span></p>
+                            <p>Latest frequency: <span id="latestFrequency" class="font-bold">-</span> Hz</p>
+                            <p>Latest charge: <span id="latestCharge" class="font-bold">-</span> C</p>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="border rounded-lg p-4 bg-gradient-to-r from-green-50 to-blue-50">
+                        <div class="grid grid-cols-2 gap-4">
+                            <button id="holdFrequencyMapDataBtn"
+                                    class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75">
+                                Hold Current Data
+                            </button>
+                            <button id="exportFrequencyMapDataBtn"
+                                    class="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75">
+                                Export Data (XLSX)
+                            </button>
+                        </div>
+                        <p id="exportFrequencyMapStatus" class="text-xs text-gray-600 mt-2 text-center"></p>
+                        <p id="holdFrequencyMapStatus" class="text-xs text-blue-600 mt-1 text-center font-semibold"></p>
+                    </div>
+
+                    <!-- Frequency Map Post Correction Panel -->
+                    <div id="fmPostCorrectionPanel" class="mt-6 border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden">
+                        <div id="fmPostCorrectionHeader" class="flex justify-between items-center px-4 py-3 bg-gray-50 border-b border-gray-200">
+                            <h4 class="text-base font-semibold text-gray-700">Frequency Map Post Correction</h4>
+                        </div>
+                        <div id="fmPostCorrectionBody" class="p-4">
+                            <p class="text-xs text-gray-500 mb-4">Manually correct a misidentified baseline or peak for any frequency/electrode combination. Select a frequency and electrode, load the voltammogram, set new baseline anchor voltages and peak voltage, then apply to update all frequency map plots.</p>
+
+                            <!-- Session selector (only shown in hold mode) -->
+                            <div id="fmCorrSessionSelectContainer" class="hidden mb-3">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Session</label>
+                                <select id="fmCorrSessionSelect" class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 min-w-[140px]">
+                                    <option value="session1">Session 1 (Held)</option>
+                                    <option value="session2">Session 2 (Current)</option>
+                                </select>
+                            </div>
+
+                            <!-- Selector row -->
+                            <div class="flex flex-wrap gap-3 mb-4 items-end">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Electrode</label>
+                                    <select id="fmCorrElectrodeSelect" class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 min-w-[110px]"></select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Frequency</label>
+                                    <select id="fmCorrFreqSelect" class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 min-w-[100px]"></select>
+                                </div>
+                                <button id="fmCorrLoadBtn" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-medium transition duration-200">
+                                    Load
+                                </button>
+                            </div>
+
+                            <!-- Voltammogram display -->
+                            <div id="fmCorrVoltammogramPlaceholder" class="border border-gray-200 rounded bg-gray-50 mb-4 flex items-center justify-center" style="height:380px;">
+                                <span class="text-gray-400 text-sm">Select electrode / frequency and click Load</span>
+                            </div>
+                            <div id="fmCorrVoltammogramDiv" class="border border-gray-200 rounded bg-gray-50 mb-4 hidden" style="height:380px;"></div>
+
+                            <!-- Correction inputs -->
+                            <div class="flex flex-wrap gap-3 mb-3 items-end">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Baseline V1 (V)</label>
+                                    <input id="fmCorrBaselineV1" type="number" step="0.001"
+                                           class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 w-28"/>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Baseline V2 (V)</label>
+                                    <input id="fmCorrBaselineV2" type="number" step="0.001"
+                                           class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 w-28"/>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Peak Voltage (V)</label>
+                                    <input id="fmCorrPeakV" type="number" step="0.001"
+                                           class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 w-28"/>
+                                </div>
+                            </div>
+
+                            <!-- Current vs new values display -->
+                            <div class="flex flex-wrap gap-6 text-sm mb-3">
+                                <span class="text-gray-600">Current value: <strong id="fmCorrCurrentValue" class="text-gray-800">--</strong></span>
+                                <span class="text-gray-600">New value: <strong id="fmCorrNewValue" class="text-blue-700">--</strong></span>
+                                <span class="text-gray-600">New charge: <strong id="fmCorrNewCharge" class="text-blue-700">--</strong></span>
+                                <span id="fmCorrStatus" class="text-gray-400 text-xs self-center italic"></span>
+                            </div>
+
+                            <!-- Action buttons -->
+                            <div class="flex gap-3">
+                                <button id="fmCorrApplyBtn" disabled
+                                        class="px-5 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm rounded font-semibold transition duration-200">
+                                    Apply Correction
+                                </button>
+                                <button id="fmCorrResetBtn"
+                                        class="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm rounded font-medium transition duration-200 border border-gray-300">
+                                    Reset to Original
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session Naming Modal (Hidden by default) -->
+            <div id="sessionNamingModal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+                <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                    <div class="mt-3">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Name Your Sessions</h3>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Current Session Name:</label>
+                            <input type="text" id="currentSessionNameInput"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                   placeholder="e.g., Pre-treatment">
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Next Session Name:</label>
+                            <input type="text" id="nextSessionNameInput"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                   placeholder="e.g., Post-treatment">
+                        </div>
+                        <div class="flex justify-end gap-3 mt-4">
+                            <button id="cancelSessionNamingBtn"
+                                    class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition">
+                                Cancel
+                            </button>
+                            <button id="confirmSessionNamingBtn"
+                                    class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition">
+                                Confirm & Continue
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Continuous Monitor Visualization Container (Default) -->
+            <div id="continuousMonitorContainer" class="flex flex-col gap-6">
+                <!-- Top: Individual Frequency Plots in 2-column grid -->
+                <div id="individualPlotsContainer" class="grid grid-cols-2 gap-4">
+                    <!-- Individual plots for each frequency will be dynamically added here -->
+                </div>
+
+                <!-- Below: Trend Plots (full width) -->
+                <div id="trendPlotsContainer" class="flex flex-col gap-6">
+                    <!-- Peak Current Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Peak Current Trend</h4>
+                        <div id="peakCurrentTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+
+                    <!-- Normalized Peak Current Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Normalized Peak Current Trend</h4>
+                        <div id="normalizedPeakTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+
+                    <!-- Peak Potential Drift Trend Plot -->
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Peak Potential Drift Trend</h4>
+                        <div id="peakPotentialTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+
+                    <!-- KDM Trend Plot -->
+                    <div id="kdmSection" class="border rounded-lg p-4 bg-gray-50">
+                        <div class="flex flex-wrap items-center justify-between mb-2">
+                            <h4 class="text-lg font-semibold text-gray-700">KDM Trend</h4>
+                            <div class="flex items-center gap-2 text-sm">
+                                <label class="text-gray-600 font-medium">High Freq:</label>
+                                <select id="kdmHighFreqSelect" class="border rounded px-2 py-1 text-gray-700 bg-white shadow-sm text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"></select>
+                                <label class="text-gray-600 font-medium">Low Freq:</label>
+                                <select id="kdmLowFreqSelect" class="border rounded px-2 py-1 text-gray-700 bg-white shadow-sm text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"></select>
+                            </div>
+                        </div>
+                        <div id="kdmTrendPlot" class="w-full plotly-trend-plot-container bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400">
+                            Loading...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trend Adjustment Controls -->
+            <div id="adjustmentControls" class="screen-card text-center mt-6 hidden">
+                <h3 class="text-xl font-bold text-gray-800 mb-4">Trend Adjustments</h3>
+                <div class="flex flex-wrap items-end justify-center gap-4">
+                    <!-- Re-normalize -->
+                    <div>
+                        <label for="postProcessNormalizationPointInput" class="block text-gray-700 text-sm font-bold mb-1">Re-normalize to File #:</label>
+                        <input type="number" id="postProcessNormalizationPointInput" value="1" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                    <!-- Offset -->
+                    <div>
+                        <label for="postProcessLowFrequencyOffsetInput" class="block text-gray-700 text-sm font-bold mb-1">Low Freq. Offset:</label>
+                        <input type="number" id="postProcessLowFrequencyOffsetInput" value="0" step="any"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                    <!-- Slope -->
+                    <div>
+                        <label for="postProcessLowFrequencySlopeInput" class="block text-gray-700 text-sm font-bold mb-1">Low Freq. Slope:</label>
+                        <input type="number" id="postProcessLowFrequencySlopeInput" value="0" step="any"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                    <!-- Injection Point -->
+                    <div>
+                        <label for="postProcessInjectionPointInput" class="block text-gray-700 text-sm font-bold mb-1">Injection Point (File #):</label>
+                        <input type="number" id="postProcessInjectionPointInput" placeholder="e.g., 50" min="1"
+                               class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                    </div>
+                    <!-- Apply Adjustments Button -->
+                    <button id="applyPostProcessNormalizationBtn"
+                            class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight w-full">
+                        Apply Adjustments
+                    </button>
+                    <!-- Replication (Separate Section) -->
+                    <div class="flex items-end gap-2">
+                        <div class="flex-grow">
+                            <label for="replicationInput" class="block text-gray-700 text-sm font-bold mb-1">Replication (n):</label>
+                            <input type="number" id="replicationInput" value="1" min="1"
+                                   class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline input-highlight"/>
+                        </div>
+                        <button id="applyReplicationBtn" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-3 rounded-lg shadow-md transition duration-300 ease-in-out h-10">Apply Grouping</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-center gap-4 mt-6">
+                <button id="exportDataBtn"
+                        class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-75 hidden">
+                    Export All Electrodes (XLSX)
+                </button>
+                <button id="backToSWVBtn"
+                        class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out hover-highlight">
+                    Back to SWV Settings
+                </button>
+            </div>
+            <p id="exportStatus" class="text-sm text-gray-500 mt-2 text-left"></p>
+
+            <!-- Analysis Warnings (peak detection issues, missing files, etc.) -->
+            <div id="peakDetectionWarnings" class="hidden mt-6 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r-lg">
+                <h4 class="text-lg font-semibold text-yellow-800 mb-2">Analysis Warnings</h4>
+                <div id="warningsList" class="text-sm text-yellow-700">
+                    <!-- Warning messages will be dynamically added here -->
+                </div>
+            </div>
+
+            <!-- Post Correction Panel -->
+            <div id="postCorrectionPanel" class="mt-6 border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden">
+                <div id="postCorrectionHeader" class="flex justify-between items-center px-4 py-3 bg-gray-50 border-b border-gray-200 cursor-pointer select-none">
+                    <h4 class="text-base font-semibold text-gray-700">Post Correction</h4>
+                    <span id="postCorrectionToggle" class="text-gray-400 text-sm">&#9662;</span>
+                </div>
+                <div id="postCorrectionBody" class="p-4">
+                    <p class="text-xs text-gray-500 mb-4">Manually correct a misidentified baseline or peak for any data point. Loads the raw voltammogram from disk, lets you set new baseline anchor voltages and peak voltage, then updates all trend plots and the Excel export.</p>
+
+                    <!-- Selector row -->
+                    <div class="flex flex-wrap gap-3 mb-4 items-end">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Frequency</label>
+                            <select id="corrFreqSelect" class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 min-w-[100px]">
+                                <option value="">Select</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">File Number</label>
+                            <input type="number" id="corrFileNumInput" min="1" value="1"
+                                   class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 w-24"/>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Electrode</label>
+                            <select id="corrElectrodeSelect" class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 min-w-[110px]">
+                                <option value="averaged">Averaged</option>
+                            </select>
+                        </div>
+                        <button id="corrLoadBtn" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-medium transition duration-200">
+                            Load
+                        </button>
+                    </div>
+
+                    <!-- Voltammogram display -->
+                    <div id="corrVoltammogramPlaceholder" class="border border-gray-200 rounded bg-gray-50 mb-4 flex items-center justify-center" style="height:380px;">
+                        <span class="text-gray-400 text-sm">Select frequency / file / electrode and click Load</span>
+                    </div>
+                    <div id="corrVoltammogramDiv" class="border border-gray-200 rounded bg-gray-50 mb-4 hidden" style="height:380px;"></div>
+
+                    <!-- Correction inputs -->
+                    <div class="flex flex-wrap gap-3 mb-3 items-end">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Baseline V1 (V)</label>
+                            <input type="number" id="corrBaselineV1" step="0.001"
+                                   class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 w-28"/>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Baseline V2 (V)</label>
+                            <input type="number" id="corrBaselineV2" step="0.001"
+                                   class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 w-28"/>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Peak Voltage (V)</label>
+                            <input type="number" id="corrPeakV" step="0.001"
+                                   class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500 w-28"/>
+                        </div>
+                    </div>
+
+                    <!-- Current vs new values display -->
+                    <div class="flex flex-wrap gap-6 text-sm mb-3">
+                        <span class="text-gray-600">Current value: <strong id="corrCurrentValueSpan" class="text-gray-800">--</strong></span>
+                        <span class="text-gray-600">New value: <strong id="corrNewValueSpan" class="text-blue-700">--</strong></span>
+                        <span id="corrStatusSpan" class="text-gray-400 text-xs self-center italic"></span>
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div class="flex gap-3">
+                        <button id="corrApplyBtn" disabled
+                                class="px-5 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm rounded font-semibold transition duration-200">
+                            Apply Correction
+                        </button>
+                        <button id="corrResetBtn"
+                                class="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm rounded font-medium transition duration-200 border border-gray-300">
+                            Reset to Original
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Annotation Modal -->
+    <div id="annotationModal" class="modal hidden">
+        <div class="modal-content">
+            <span id="closeAnnotationModal" class="close-button">&times;</span>
+            <h3 class="text-xl font-bold text-gray-800 mb-4">Add/Edit Annotation for <span id="annotationWellPosition"></span></h3>
+            <textarea id="annotationInput" class="w-full p-2 border border-gray-300 rounded-md" rows="4" placeholder="Enter your annotation..."></textarea>
+            <div class="flex justify-end gap-4 mt-4">
+                <button id="cancelAnnotationBtn" class="bg-gray-400 hover:bg-gray-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300">
+                    Cancel
+                </button>
+                <button id="saveAnnotationBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-300">
+                    Save
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New: Citation Section -->
+    <div class="w-full max-w-4xl mx-auto mt-12 mb-8 p-6 bg-white rounded-lg shadow-lg text-center">
+        <p class="text-gray-700 text-lg mb-4">
+            Everybody is welcome to use SACMES. In exchange, we kindly request all users to cite the original paper:
+        </p>
+        <div class="relative mb-4">
+            <textarea id="citationText" readonly
+                      class="w-full p-4 border border-gray-300 rounded-lg bg-gray-50 text-gray-800 text-sm leading-relaxed resize-none overflow-auto"
+                      rows="4"
+                      title="Click to Copy">Curtis, S. D.; Ploense, K. L.; Kurnik, M.; Ortega, G.; Parolo, C.; Kippin, T. E.; Plaxco, K. W.; Arroyo-Curras, N. Open source software for the Real-Time control, processing, and visualization of High-Volume Electrochemical data. Analytical Chemistry 2019, 91 (19), 12321-12328. https://doi.org/10.1021/acs.analchem.9b02553.</textarea>
+            <button id="copyCitationBtn"
+                    class="absolute top-2 right-2 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold py-1 px-2 rounded-md transition duration-300">
+                Copy
+            </button>
+        </div>
+        <p class="text-gray-700 text-md mb-2">Original Paper Link:</p>
+        <a href="https://pubs.acs.org/doi/10.1021/acs.analchem.9b02553" target="_blank"
+           class="text-blue-600 hover:text-blue-800 underline text-md font-medium transition duration-300">
+            https://pubs.acs.org/doi/10.1021/acs.analchem.9b02553
+        </a>
+        <p class="text-gray-700 text-md mt-4">If you have any questions, please contact <a href="mailto:narroyo@unc.edu" class="text-blue-600 hover:text-blue-800 underline">Professor Netz Arroyo</a></p>
+    </div>
+    
+
+    <script type="module" src="js/main_local.js"></script>
+    <script type="module" src="js/page_bootstrap_local.js"></script>
+</body>
+</html>
+
